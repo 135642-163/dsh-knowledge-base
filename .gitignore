@@ -1,0 +1,20 @@
+# 依赖（克隆后 npm install 生成）
+node_modules/
+
+# OCR 语言模型（体积大，按 README「中文 OCR 模型数据」脚本按需下载）
+data/tessdata/
+data/tessdata-fast/
+
+# Python 缓存
+__pycache__/
+*.pyc
+
+# 系统杂项
+.DS_Store
+Thumbs.db
+
+# macOS AppleDouble Ԫ����
+._*
+
+# 开发调试脚本（含本地个人路径，不随仓库发布）
+dev/
