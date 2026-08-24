@@ -8,7 +8,7 @@
 
 | 工具 | 作用 |
 | --- | --- |
-| `kb_import` | 导入文件或目录（.docx / .doc 自动转换 / .pptx / .pdf / .md / .txt / .epub / .mobi / .azw3，扫描版 PDF 自动逐页 OCR 中文；.txt 自动识别 UTF-8/UTF-16/GBK；MOBI/AZW3 自动经 Calibre 转 EPUB）。旧版 .doc/.ppt 与 MOBI/AZW3 一律在后台任务中转换；正在导入中的同名文档自动跳过 |
+| `kb_import` | 导入文件或目录（.docx / .doc 自动转换 / .pptx / .pdf / .md / .txt / .epub / .mobi / .azw3，扫描版 PDF 自动逐页 OCR 中文；.txt 自动识别 UTF-8/UTF-16/GBK；MOBI/AZW3 自动经 Calibre 转 EPUB）。旧版 .doc/.ppt 与 MOBI/AZW3 一律在后台任务中转换；正在导入中的同名文档自动跳过。**导入前自动查重**：同库重合跳过、跨库重合默认跳过并报告（见下文） |
 | `kb_list` | 列出知识库 / 知识库内文档与状态 |
 | `kb_query` | 全文检索（ripgrep 正则，中文短语直接搜） |
 | `kb_read` | 按分块精读、读大纲、读整篇 |
@@ -40,6 +40,26 @@ exports/                   导出产物
   `kb_add_note` 追加新知识。
 - **导出**：md 适合直接上传对话类产品；jsonl 适合 RAG 管道；zip 是完整可迁移包
   （含 README 说明与全部 markdown，`includeSources=true` 时含原始文件）。
+
+## 导入前查重（kb_import 内置）
+
+`kb_import` 在解析/OCR 之前，先用**文件名/标题**与当前知识库及全部知识库比对，
+命中重合的文件直接筛掉，不做重复解析：
+
+- **同库重合** → 跳过（始终）。同名文件（同路径）不在此列：按原位更新处理，版本号 +1。
+- **跨库重合** → 默认跳过，并在结果中列出重合条目；确认需要时加 `allowCrossDuplicates: true`
+  重新执行即照常导入。
+
+比对口径（`lib/dedup.js`）：
+
+- 标准号归一：`GB/T = GBT`、`DL/T = DLT`、`Q/GDW = Q_GDW`，连字符/破折号（`- — – ~ ～`）
+  等同，部分号小数点保留（`10650.2 ≠ 10650`）；
+- 年份：双方都有年份时必须相同；一方无年份（如无年份的报批稿）不判重合——可能是新修订；
+- 版本桶：发布稿/无标记、报批稿、征求意见稿、编制说明、送审稿、草案等互不判重合；
+- 无标准号的文件（通知、办法、公司文件）按核心短语比对：相等（≥6 字）或最长公共前缀
+  ≥ 9 字（≥9 字），版本桶须一致。
+
+回归测试：`node dev/dedup-test.mjs`（本地开发脚本，依赖本机知识库内容，不随仓库发布）。
 
 ## 配置（cordis.patch.yml 中该插件的 config）
 
