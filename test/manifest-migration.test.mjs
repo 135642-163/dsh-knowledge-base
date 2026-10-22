@@ -67,6 +67,7 @@ test("readManifest migrates v1 in memory", async () => {
     assert.equal(manifest.docs[0].edited, false);
     assert.equal(manifest.docs[1].contentSource, "note");
     assert.equal(docSize(dir, manifest.docs[0]).stale, true, "legacy docs must be marked stale");
+    assert.equal(docSize(dir, manifest.docs[1]).stale, false, "notes cannot be re-parsed and must not be stale");
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

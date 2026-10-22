@@ -10,8 +10,8 @@
 | --- | --- |
 | `kb_import` | 导入文件或目录（.docx / .doc 自动转换 / .pptx / .pdf / .md / .txt / .epub / .mobi / .azw3，扫描版 PDF 自动逐页 OCR 中文；.txt 自动识别 UTF-8/UTF-16/GBK；MOBI/AZW3 自动经 Calibre 转 EPUB）。旧版 .doc/.ppt 与 MOBI/AZW3 一律在后台任务中转换；正在导入中的同名文档自动跳过。**导入前自动查重**：同库重合跳过、跨库重合默认跳过并报告（见下文） |
 | `kb_reparse` | 从库内 `sources/` 重新解析文档（无需重新上传），用于 OCR/解析器升级后刷新旧管线产物；`doc` 单个、`all=true` 批量，支持 `forceOcr`、后台任务 |
-| `kb_list` | 列出知识库 / 知识库内文档与状态（旧管线/已修订会标注） |
-| `kb_query` | 全文检索（ripgrep 正则，中文短语直接搜）；命中项带 part 与页码范围 |
+| `kb_list` | 列出知识库 / 知识库内文档与状态（旧管线/已修订会标注）；默认最多 50 条，支持 `limit/offset/query/status` 分页过滤 |
+| `kb_query` | 全文检索（ripgrep 正则，中文短语直接搜）；按标题/标题行/命中密度/更新时间排序，每文档默认 5 条；`kb="*"` 跨库检索；命中项带 part 与页码范围 |
 | `kb_read` | 按分块精读、读大纲、读整篇；大纲条目带页码/部分，读取时返回页码范围 |
 | `kb_view` | 查看原始页面图片（PDF 按页渲染；Word/PPT/EPUB/MOBI 提取内嵌图）——公式、原理图、电路图专用 |
 | `kb_edit` | 精确替换修订（持续修改完善） |
@@ -52,6 +52,17 @@ exports/                   导出产物
   （含 README 说明与全部 markdown，`includeSources=true` 时含原始文件）。
   zip 用 `generateNodeStream` **流式写盘**，不会把整包（含原始文件）先读进内存；
   导出清单剥离本机 `sourcePath`，失败条目整条略过。
+
+## 检索体验（0.4.1）
+
+- `kb_list` 默认只返回前 50 个文档，并返回 `total`（筛选后）、`totalAll`（全部）、
+  `offset`、`limit`、`hasMore`；用 `offset` 翻页，或用 `query`（标题子串）、
+  `status`（ready/importing/failed）过滤。948 文档的库不再一次刷满上下文。
+- `kb_query` 排序：标题命中 > 标题行（`#`/`##`）命中 > 同文档命中数 > 更新时间；
+  同一文档默认最多保留 5 条，避免单个文档刷屏（在 `doc` 指定的单文档检索中放宽）。
+- `kb_query` 传 `kb="*"` 检索全部知识库，结果带 `kb` 字段，并在跨库范围内重新排序；
+  没有 `markdown` 目录的空库会被跳过，不会让整次检索失败。
+- 旧笔记不再显示 `[旧管线]`（笔记没有原始文件，无法也不需要 `kb_reparse`）。
 
 ## 数据模型与引用锚点（0.4.0）
 
@@ -147,7 +158,8 @@ done
 ```bash
 npm test          # node:test；覆盖查重精度、同名文件保护、后台失败统计、检索截断/单文档上限、
                   # 相似导入提示、OCR 模型检查、流式 zip、心跳与锁回收、
-                  # 清单 v1→v2 迁移、内容哈希跳过、kb_reparse、分块索引/页码锚点
+                  # 清单 v1→v2 迁移、内容哈希跳过、kb_reparse、分块索引/页码锚点、
+                  # kb_list 分页/过滤、检索排序、跨库检索
                   # （全部使用临时目录，不依赖本机知识库）
 ```
 

@@ -1,14 +1,16 @@
 /**
  * 检索输出上限：高频词不能因为超过 16MB 缓冲就整体失败。
  */
-import test from "node:test";
+import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { annotateMatches, buildRgArgs, parseRgOutput, searchKb } from "../lib/query.js";
 
-const KB_DIR = "/tmp/kb-query-test";
+const KB_DIR = await mkdtemp(join(tmpdir(), "kb-query-test-"));
+await mkdir(join(KB_DIR, "markdown", "doc1"), { recursive: true });
+after(() => rm(KB_DIR, { recursive: true, force: true }));
 const MANIFEST = { docs: [{ id: "doc1", title: "文档一" }] };
 
 function matchLine(path, lineNumber, text) {
@@ -133,4 +135,25 @@ test("annotateMatches maps a line to its part and page range", async () => {
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+
+test("searchKb ranks title hits before file order", async () => {
+  const text = [
+    matchLine(`${KB_DIR}/markdown/b/b.md`, 1, "这里提到电压偏差"),
+    matchLine(`${KB_DIR}/markdown/a/a.md`, 2, "正文"),
+  ].join("\n");
+  const { ctx } = fakeContext({ text });
+  const manifest = {
+    docs: [
+      { id: "a", title: "电压偏差分析", updatedAt: new Date().toISOString() },
+      { id: "b", title: "无关文档", updatedAt: new Date().toISOString() },
+    ],
+  };
+  const r = await searchKb(ctx, exec, KB_DIR, manifest, {
+    pattern: "电压偏差",
+    maxMatches: 10,
+    lineBytes: 400,
+  });
+  assert.equal(r.matches[0].docId, "a");
 });
