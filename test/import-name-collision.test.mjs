@@ -44,7 +44,18 @@ test("same basename from different directories does not overwrite", async () => 
     assert.match(mergedA, /A 目录的通知内容/);
     assert.match(mergedB, /B 目录的通知内容/);
 
-    // 同一路径重复导入仍然是原位更新，不新增文档
+    // 同一路径、内容未变：跳过而不是重复解析；不新增文档
+    const unchanged = await importFileInto(kbDir, {
+      sourcePath: fileA,
+      relKey: "通知.txt",
+      title: "通知A",
+      config: { partMaxChars: 4000 },
+    });
+    assert.equal(unchanged.docId, first.docId);
+    assert.equal(unchanged.skippedUnchanged, true);
+
+    // 同一路径、内容变化：原位更新，版本 +1，不新增文档
+    await writeFile(fileA, "这是 A 目录的通知内容（修订版）。\n", "utf8");
     const again = await importFileInto(kbDir, {
       sourcePath: fileA,
       relKey: "通知.txt",
@@ -55,6 +66,8 @@ test("same basename from different directories does not overwrite", async () => 
     const after = await readManifest(kbDir);
     assert.equal(after.docs.length, 2);
     assert.equal(after.docs.find((d) => d.id === first.docId)?.version, 2);
+    const mergedA2 = await readFile(join(kbDir, "markdown", first.docId, `${first.docId}.md`), "utf8");
+    assert.match(mergedA2, /修订版/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -27,3 +27,8 @@ test("missing report falls back without inventing counts", () => {
   assert.match(r.detail, /未取得逐文件统计/);
   assert.equal(r.counts, null);
 });
+
+test("verb labels reparse jobs", () => {
+  const r = summarizeImportReport({ ok: 1, fail: 0, skip: 0 }, { kb: "标准", verb: "重解析" });
+  assert.match(r.detail, /重解析完成/);
+});

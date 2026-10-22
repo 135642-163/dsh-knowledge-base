@@ -9,9 +9,10 @@
 | 工具 | 作用 |
 | --- | --- |
 | `kb_import` | 导入文件或目录（.docx / .doc 自动转换 / .pptx / .pdf / .md / .txt / .epub / .mobi / .azw3，扫描版 PDF 自动逐页 OCR 中文；.txt 自动识别 UTF-8/UTF-16/GBK；MOBI/AZW3 自动经 Calibre 转 EPUB）。旧版 .doc/.ppt 与 MOBI/AZW3 一律在后台任务中转换；正在导入中的同名文档自动跳过。**导入前自动查重**：同库重合跳过、跨库重合默认跳过并报告（见下文） |
-| `kb_list` | 列出知识库 / 知识库内文档与状态 |
-| `kb_query` | 全文检索（ripgrep 正则，中文短语直接搜） |
-| `kb_read` | 按分块精读、读大纲、读整篇 |
+| `kb_reparse` | 从库内 `sources/` 重新解析文档（无需重新上传），用于 OCR/解析器升级后刷新旧管线产物；`doc` 单个、`all=true` 批量，支持 `forceOcr`、后台任务 |
+| `kb_list` | 列出知识库 / 知识库内文档与状态（旧管线/已修订会标注） |
+| `kb_query` | 全文检索（ripgrep 正则，中文短语直接搜）；命中项带 part 与页码范围 |
+| `kb_read` | 按分块精读、读大纲、读整篇；大纲条目带页码/部分，读取时返回页码范围 |
 | `kb_view` | 查看原始页面图片（PDF 按页渲染；Word/PPT/EPUB/MOBI 提取内嵌图）——公式、原理图、电路图专用 |
 | `kb_edit` | 精确替换修订（持续修改完善） |
 | `kb_add_note` | 沉淀笔记 / 分析结论（单篇上限 2MB） |
@@ -31,16 +32,19 @@ macOS 用自带 `textutil`；Linux 可用 LibreOffice。未装任何转换工具
 ## 知识库存储结构（默认 `~/.dsh/knowledge/<知识库名>/`）
 
 ```
-kb.json                    清单：文档列表（id/标题/类型/页数/大纲/版本/状态）
+kb.json                    清单：文档列表（id/标题/类型/页数/大纲/版本/状态/
+                           sha256/解析管线版本/contentSource/OCR 元数据）
 sources/<docId><ext>       原始文件（逐字节保留）
 markdown/<docId>/<docId>.md   合并版（整篇通读）
 markdown/<docId>/parts/NNNN.md 分块版（检索、精读、RAG）
+markdown/<docId>/parts/index.json 分块索引（合并版行号 → part/页码）
 exports/                   导出产物
 ```
 
 - **知识库名称**：`kb_import` 的 `kb` 参数决定（可含中文），不存在即创建。
-- **持续修改**：同名文件重复导入 = 原位更新（版本号 +1）；`kb_edit` 精确替换；
-  `kb_add_note` 追加新知识。清单会记录每个文档的 `sourcePath`：**同一路径**重复导入是原位更新，
+- **持续修改**：同名文件且内容未变 = **跳过不重跑**（返回 `skippedUnchanged`）；内容变化
+  或 `forceReparse`/`kb_reparse` 时原位更新（版本号 +1）。`kb_edit` 精确替换并标记
+  `edited=true`；`kb_add_note` 追加新知识。清单会记录每个文档的 `sourcePath`：**同一路径**重复导入是原位更新，
   不同目录下的同名文件（如 `A/通知.pdf` 与 `B/通知.pdf`）会另建文档，不会互相覆盖。
   旧版本清单没有 `sourcePath` 的条目无法追溯来源，首次重导仍按原位更新，并在导入结果的
   warnings 里提示一次；担心覆盖时请先备份或导入到新库，重导一次后就会记录来源路径。
@@ -48,6 +52,21 @@ exports/                   导出产物
   （含 README 说明与全部 markdown，`includeSources=true` 时含原始文件）。
   zip 用 `generateNodeStream` **流式写盘**，不会把整包（含原始文件）先读进内存；
   导出清单剥离本机 `sourcePath`，失败条目整条略过。
+
+## 数据模型与引用锚点（0.4.0）
+
+- 每个文档记录 `sourceHash`（sha256）、`parserVersion`、`contentSource`
+  （`text-layer` / `ocr` / `mixed` / `converted` / `text` / `note`）以及
+  `ocrEngine/ocrDpi/ocrLang/ocrPages/ocrModel`。
+- **未变化不重跑**：同一文件、同一标题、同一管线版本再次 `kb_import` 时直接跳过，
+  不重新 OCR；内容变化、标题变化或 OCR 模型变化时重新解析。强制重跑用
+  `kb_reparse`（或 `kb_import` 的 `forceOcr`）。
+- **清单 v1 → v2 惰性迁移**：读时兼容旧清单，首次写入时升级，并在知识库目录留下
+  `kb.json.v1.bak`；旧文档会按 type 推断 `contentSource`，`kb_list` 显示 `[旧管线]`。
+- **分块索引**：`parts/index.json` 记录每个 part 在合并版中的起止行与页码范围；
+  `kb_query` 命中项返回 `part/pageStart/pageEnd`，`kb_read outline` 返回
+  `{title, level, page, part}`，`kb_read` 读取某部分时返回页码范围。
+  可直接用 `docId#p页码` 作为对外引用锚点。
 
 ## 导入前查重（kb_import 内置）
 
@@ -127,7 +146,8 @@ done
 
 ```bash
 npm test          # node:test；覆盖查重精度、同名文件保护、后台失败统计、检索截断/单文档上限、
-                  # 相似导入提示、OCR 模型检查、流式 zip、心跳与锁回收
+                  # 相似导入提示、OCR 模型检查、流式 zip、心跳与锁回收、
+                  # 清单 v1→v2 迁移、内容哈希跳过、kb_reparse、分块索引/页码锚点
                   # （全部使用临时目录，不依赖本机知识库）
 ```
 

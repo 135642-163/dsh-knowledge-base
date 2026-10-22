@@ -3,7 +3,10 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildRgArgs, parseRgOutput, searchKb } from "../lib/query.js";
+import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { annotateMatches, buildRgArgs, parseRgOutput, searchKb } from "../lib/query.js";
 
 const KB_DIR = "/tmp/kb-query-test";
 const MANIFEST = { docs: [{ id: "doc1", title: "文档一" }] };
@@ -66,6 +69,7 @@ test("parseRgOutput reports total and truncation", () => {
     matchLine(`${KB_DIR}/markdown/doc1/doc1.md`, 10, "电压偏差"),
     matchLine(`${KB_DIR}/markdown/doc1/doc1.md`, 20, "电压波动"),
     matchLine(`${KB_DIR}/markdown/doc1/doc1.md`, 30, "电压闪变"),
+    matchLine(`${KB_DIR}/markdown/doc1/doc1.md`, 2, "<!-- doc: 书 | 部分 1/2 -->"),
   ].join("\n");
   const r = parseRgOutput(text, {
     manifest: MANIFEST,
@@ -73,7 +77,7 @@ test("parseRgOutput reports total and truncation", () => {
     maxMatches: 2,
     lineBytes: 400,
   });
-  assert.equal(r.total, 3);
+  assert.equal(r.total, 3, "part header comments must not count as content matches");
   assert.equal(r.matches.length, 2);
   assert.equal(r.truncated, true);
   assert.equal(r.matches[0].docId, "doc1");
@@ -105,4 +109,28 @@ test("searchKb still rejects a ripgrep regex error", async () => {
       }),
     /正则表达式被 ripgrep 拒绝/
   );
+});
+
+
+test("annotateMatches maps a line to its part and page range", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "kb-annotate-"));
+  try {
+    const partsDir = join(dir, "markdown", "d1", "parts");
+    await mkdir(partsDir, { recursive: true });
+    await writeFile(
+      join(partsDir, "index.json"),
+      JSON.stringify([
+        { part: 1, startLine: 1, endLine: 10, pageStart: 1, pageEnd: 3 },
+        { part: 2, startLine: 12, endLine: 20, pageStart: 4, pageEnd: 5 },
+      ]),
+      "utf8"
+    );
+    const matches = [{ docId: "d1", lineNumber: 15 }];
+    await annotateMatches(matches, dir);
+    assert.equal(matches[0].part, 2);
+    assert.equal(matches[0].pageStart, 4);
+    assert.equal(matches[0].pageEnd, 5);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });

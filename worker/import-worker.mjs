@@ -56,6 +56,9 @@ for (let i = 0; i < files.length; i++) {
       relKey: f.relKey,
       title: f.title,
       ...(f.docId ? { docId: f.docId } : {}),
+      ...(f.sourceFile !== undefined ? { sourceFile: f.sourceFile } : {}),
+      ...(f.storedSourcePath !== undefined ? { storedSourcePath: f.storedSourcePath } : {}),
+      ...(f.forceReparse ? { forceReparse: true } : {}),
       config: jobConfig,
       onProgress: (msg) => process.stdout.write(`KB:PROGRESS [${label}] ${msg}\n`),
     });
