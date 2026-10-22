@@ -22,6 +22,8 @@
 大文件（如整本扫描书）导入自动转为**后台任务**，与内置 `job_list` / `job_output` 联动查看进度；
 取消后台任务会在 `job_output` 中显示为 cancelled。后台任务会写逐文件统计：
 **只要有文件失败，任务状态就是 `failed`（详情写明“部分失败：成功 X，失败 Y”）**，不再把部分失败显示成完成。
+长任务每 60 秒刷新一次 `heartbeatAt`（不改文档 `updatedAt`）；进程崩溃后，残留的 `.lock`
+带 owner PID，下一个操作可在 PID 消失且锁超过 60 秒时快速回收，不必等满 30 分钟。
 
 **旧版 .doc 自动转换**：Windows 用本机 Microsoft Word（COM 自动化，无对话框、禁宏）；
 macOS 用自带 `textutil`；Linux 可用 LibreOffice。未装任何转换工具时会给出明确提示。
@@ -44,6 +46,8 @@ exports/                   导出产物
   warnings 里提示一次；担心覆盖时请先备份或导入到新库，重导一次后就会记录来源路径。
 - **导出**：md 适合直接上传对话类产品；jsonl 适合 RAG 管道；zip 是完整可迁移包
   （含 README 说明与全部 markdown，`includeSources=true` 时含原始文件）。
+  zip 用 `generateNodeStream` **流式写盘**，不会把整包（含原始文件）先读进内存；
+  导出清单剥离本机 `sourcePath`，失败条目整条略过。
 
 ## 导入前查重（kb_import 内置）
 
@@ -123,7 +127,8 @@ done
 
 ```bash
 npm test          # node:test；覆盖查重精度、同名文件保护、后台失败统计、检索截断/单文档上限、
-                  # 相似导入提示、OCR 模型检查（全部使用临时目录，不依赖本机知识库）
+                  # 相似导入提示、OCR 模型检查、流式 zip、心跳与锁回收
+                  # （全部使用临时目录，不依赖本机知识库）
 ```
 
 ## 使用示例（对 harness 直接说）
