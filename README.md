@@ -17,7 +17,7 @@
 | `kb_edit` | 精确替换修订（持续修改完善） |
 | `kb_add_note` | 沉淀笔记 / 分析结论（单篇上限 2MB） |
 | `kb_remove` | 删除文档或整个知识库（删整库需 `removeKb=true` 且 `confirm` 逐字等于知识库名称） |
-| `kb_export` | 导出 md（单文件）/ jsonl（分块，RAG 用）/ zip（完整包，内置 JSZip 打包，不依赖系统命令） |
+| `kb_export` | 导出 md（单文件）/ jsonl（分块，RAG 用；`chunkSize`/`chunkOverlap` 可切 RAG 小块）/ zip（完整包，内置 JSZip 打包，不依赖系统命令） |
 | `kb_rename` | 重命名知识库 |
 
 大文件（如整本扫描书）导入自动转为**后台任务**，与内置 `job_list` / `job_output` 联动查看进度；
@@ -80,6 +80,29 @@ exports/                   导出产物
 - `kb_query` 传 `kb="*"` 检索全部知识库，结果带 `kb` 字段，并在跨库范围内重新排序；
   没有 `markdown` 目录的空库会被跳过，不会让整次检索失败。
 - 旧笔记不再显示 `[旧管线]`（笔记没有原始文件，无法也不需要 `kb_reparse`）。
+
+## RAG 小块导出（0.7.0）
+
+`kb_export(format="jsonl")` 默认仍按 part 导出（兼容旧行为）；传
+`chunkSize` 后按段落/句子切成适合 embedding 的小块：
+
+```js
+kb_export({
+  kb: "标准",
+  format: "jsonl",
+  out: "/tmp/standard-chunks.jsonl",
+  chunkSize: 800,      // 100–4000；建议 600–800
+  chunkOverlap: 80,    // 0–300；建议 50–120
+})
+```
+
+- 优先段落边界，其次中文/英文句末标点，超长句才硬切；每行 `text` 长度不超过 `chunkSize`。
+- 每行字段：`kb`、`docId`、`title`、`type`、`part`、`parts`、`chunk`、`chunks`、
+  `pageStart`/`pageEnd`（PDF 等有分块索引时）、`contentSource`（text-layer/ocr/note）、
+  `chars`、`text`。
+- 分块导出会去掉开头的 `<!-- doc: ... -->` 注释；分块/页码来自 `parts/index.json`，
+  页码是 part 级范围（不是逐行精确页码）。
+- md / zip 不受影响。
 
 ## 数据模型与引用锚点（0.4.0）
 
@@ -179,7 +202,8 @@ npm test          # node:test；覆盖查重精度、同名文件保护、后台
                   # 相似导入提示、OCR 模型检查、流式 zip、心跳与锁回收、
                   # 清单 v1→v2 迁移、内容哈希跳过、kb_reparse、分块索引/页码锚点、
                   # kb_list 分页/过滤、检索排序、跨库检索、文字层质量启发式、
-                  # 逐页 OCR 决策、OCR 帧置信度、质量告警、模型自动下载
+                  # 逐页 OCR 决策、OCR 帧置信度、质量告警、模型自动下载、
+                  # RAG 小块切分与 jsonl 分块导出
                   # （全部使用临时目录，不依赖本机知识库）
 ```
 
