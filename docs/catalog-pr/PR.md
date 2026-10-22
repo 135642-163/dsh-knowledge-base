@@ -4,7 +4,7 @@
 
 A local-first knowledge base for DeepSeek Harness:
 
-- imports Word/PPT/Excel/PDF (text or scanned), EPUB, MOBI/AZW3;
+- imports Word/PPT/Excel/PDF (text or scanned), EPUB, MOBI/AZW3, with OCR quality tracking and column-aware PDF reading order;
 - builds Markdown parts with page anchors and OCR quality/confidence metadata;
 - ranked regex search, cross-knowledge-base query, precise reading/editing;
 - md / jsonl / zip export;
@@ -34,7 +34,7 @@ and excludes the 35 MB OCR model directory (models are downloaded on first use).
 
 ## Verification
 
-- `npm test`: 96/96 passing.
+- `npm test`: 99/99 passing.
 - Bundle composition verified in an isolated profile:
 
   ```bash
