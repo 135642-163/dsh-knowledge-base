@@ -17,7 +17,8 @@
 | `kb_edit` | 精确替换修订（持续修改完善） |
 | `kb_add_note` | 沉淀笔记 / 分析结论（单篇上限 2MB） |
 | `kb_remove` | 删除文档（默认软删除，可用 `kb_restore` 恢复；`soft=false` 永久删除）或整个知识库（删整库需 `removeKb=true` 且 `confirm` 逐字等于知识库名称） |
-| `kb_restore` | 恢复通过 `kb_remove` 软删除的文档（保留原 markdown/sources） |
+| `kb_restore` | 恢复软删除文档（不带 `version`）或恢复历史版本（`version=N`，来自 `kb_history`） |
+| `kb_history` | 列出文档保存过的历史版本（覆盖导入/重解析/编辑前的快照，最多 10 个） |
 | `kb_export` | 导出 md（单文件）/ jsonl（分块，RAG 用；`chunkSize`/`chunkOverlap` 可切 RAG 小块）/ zip（完整包，内置 JSZip 打包，不依赖系统命令） |
 | `kb_rename` | 重命名知识库 |
 
@@ -77,6 +78,18 @@ exports/                   导出产物
   `kb_export` 的 md/jsonl/zip 也不包含；`kb_restore` 恢复后重新可读可搜。
 - 重新导入同一文档（同 docId）会把软删除文档恢复为 ready 并更新内容。
 - 注意：这是“软删除保护”，不是完整版本历史；覆盖导入/编辑的旧内容仍不保留。
+
+## 版本历史（0.11.0）
+
+- 在**覆盖导入/重解析**和**`kb_edit` 修订**前，自动把当前 `markdown/<docId>/`
+  快照到 `history/<docId>/v<version>/`，并记录标题/字数/部分/大纲等元数据；
+  每个文档最多保留最近 10 个版本。
+- `kb_history` 查看版本列表（版本号/时间/原因/字数/部分）；`kb_restore(version=N)`
+  恢复某个历史版本，恢复前会先把当前版本再存一份，因此恢复操作本身可反悔。
+- 恢复后的当前版本号继续递增（例如 v2 恢复 v1 → 当前 v3），历史里保留 v1/v2；
+  `kb_list` 会标 `[历史 N]`。
+- 历史只快照 Markdown 内容，不复制原始 sources；`kb_view` 查看旧版本页面图时
+  仍会打开当前源文件，需注意版本对应关系。
 
 ## Excel 导入（0.8.0）
 
@@ -238,7 +251,7 @@ npm test          # node:test；覆盖查重精度、同名文件保护、后台
                   # kb_list 分页/过滤、检索排序、跨库检索、文字层质量启发式、
                   # 逐页 OCR 决策、OCR 帧置信度、质量告警、模型自动下载、
                   # RAG 小块切分与 jsonl 分块导出、xlsx 表格解析、
-                  # Word OMML 公式转 LaTeX、软删除/恢复与导出排除
+                  # Word OMML 公式转 LaTeX、软删除/恢复、版本历史快照/恢复
                   # （全部使用临时目录，不依赖本机知识库）
 ```
 
