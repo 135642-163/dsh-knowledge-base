@@ -32,7 +32,7 @@ test("missingTessdataError names the files and the download command", async () =
   const message = error.message;
   assert.match(message, /chi_sim\.traineddata\.gz/);
   assert.match(message, /eng\.traineddata\.gz/);
-  assert.match(message, /tessdata\.projectnaptha\.com/);
+  assert.match(message, /cdn\.jsdelivr\.net/);
   assert.ok(message.includes(dir));
 });
 
@@ -46,6 +46,7 @@ test("wasm OCR fails early with the model download instructions", async () => {
           workers: 1,
           langPath: join(root, "does-not-exist"),
           engine: "wasm",
+          autoDownloadModels: false,
         }),
       /OCR 语言模型缺失/
     );

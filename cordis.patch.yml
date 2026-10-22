@@ -1,0 +1,14 @@
+# dsh-knowledge-base bundle patch.
+#
+# Installed as a profile bundle (market / `dsh plugin add github:...`), this
+# file mounts the plugin. Users can override any config key in their profile's
+# cordis.patch.yml, but must NOT add a second `insert` with id `knowledge-base`
+# (duplicate loader ids fail the boot). If you migrate from the old
+# install-to-machine.sh setup, remove its insert row first.
+- insert:
+    - id: knowledge-base
+      name: dsh-knowledge-base
+      config:
+        kbRoot: ~/.dsh/knowledge
+        defaultKb: default
+        autoDownloadModels: true

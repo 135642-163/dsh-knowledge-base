@@ -132,6 +132,7 @@ exports/                   导出产物
 | `ocrWorkers` | `0`（自动） | OCR 并行 worker 数；0 = 按本机 CPU/内存自适应：`min(核数一半, 内存/1.5GB)`，下限 2、上限 16（24 线程/32GB 机器 ≈ 12） |
 | `ocrDpi` | `0`（自动） | 扫描页渲染分辨率；0 = 300 DPI（tesseract best 模型的设计分辨率；低清扫描源可显式调低，上限 400） |
 | `ocrEngine` | `auto` | OCR 引擎：auto（rapidocr > tesserocr > 原生 tesseract > wasm 兜底）/ rapidocr / tesseract / wasm |
+| `autoDownloadModels` | `true` | tesseract 家族模型缺失时自动下载到 `~/.dsh/tools/tessdata`；rapidocr 自带模型不触发 |
 | `ocrNativeBin` | `""` | 原生 tesseract / tesserocr 环境的显式二进制或 python 路径（留空自动探测） |
 | `ocrPythonBin` | `""` | rapidocr 环境的显式 python 路径（留空自动探测 `~/.dsh/tools/rapidocr-env` 与 PATH） |
 | `ebookConvertBin` | `""` | Calibre ebook-convert 的显式路径（MOBI/AZW3 转换用；留空自动探测 PATH、`~/.dsh/tools/calibre`、macOS 默认安装位置） |
@@ -161,14 +162,15 @@ exports/                   导出产物
 mkdir -p data/tessdata
 cd data/tessdata
 for l in chi_sim chi_sim_vert eng; do
-  curl -fL "https://tessdata.projectnaptha.com/4.0.0_best_int/$l.traineddata.gz" -o "$l.traineddata.gz"
+  curl -fL "https://cdn.jsdelivr.net/npm/@tesseract.js-data/$l/4.0.0_best_int/$l.traineddata.gz" -o "$l.traineddata.gz"
 done
 ```
 
-> **新机器/打包安装请先确认模型存在**。插件的 `.gitignore` 不提交 `data/tessdata/`（约 35 MB），
-> 所以从 Git 克隆或 npm 包安装后，第一次 OCR 会直接报“OCR 语言模型缺失”，并给出上述下载命令
-> （不再抛 tesseract 的底层异常）。知识库根目录下的 `.plugin-load.log` 也会记录
-> `tessdata=ok` 或 `tessdata=missing:chi_sim+eng`。`chi_sim+eng` 会检查两个模型，缺一即报错。
+> **市场/GitHub 安装默认会自动补模型**：`.gitignore` 不提交 `data/tessdata/`（约 35 MB），
+> 因此首次走 tesseract 家族 OCR 时，`autoDownloadModels=true` 会优先复用已有模型，
+> 把缺失模型下载到 `~/.dsh/tools/tessdata`；rapidocr 自带模型，不会触发下载。
+> 关闭自动下载后，第一次 OCR 会报“OCR 语言模型缺失”并给出上述手动下载命令。
+> 知识库根目录下的 `.plugin-load.log` 也会记录 `tessdata=ok` / `tessdata=missing:...`。
 
 ## 测试
 
@@ -177,7 +179,7 @@ npm test          # node:test；覆盖查重精度、同名文件保护、后台
                   # 相似导入提示、OCR 模型检查、流式 zip、心跳与锁回收、
                   # 清单 v1→v2 迁移、内容哈希跳过、kb_reparse、分块索引/页码锚点、
                   # kb_list 分页/过滤、检索排序、跨库检索、文字层质量启发式、
-                  # 逐页 OCR 决策、OCR 帧置信度、质量告警
+                  # 逐页 OCR 决策、OCR 帧置信度、质量告警、模型自动下载
                   # （全部使用临时目录，不依赖本机知识库）
 ```
 
@@ -209,6 +211,21 @@ npm test          # node:test；覆盖查重精度、同名文件保护、后台
 - 每个文档 `type` 自动判定：`pdf-text` / `pdf-scanned` / `pdf-mixed`。
 
 ## 接入方式
+
+### 从 GitHub / 市场安装（推荐）
+
+插件已声明 `dsh.bundle.patch`，安装后由包内 `cordis.patch.yml` 自动挂载，
+**不需要**手工编辑 profile 的 `cordis.patch.yml`：
+
+```bash
+dsh plugin --profile web add github:135642-163/dsh-knowledge-base
+```
+
+市场（dsh-market）上架后也可一键安装。更新只需 `git push origin main`：
+市场对 GitHub 安装比较已安装 commit 与远端 HEAD，不需要 tag/Release。
+
+> 当前 npm 上的 `dsh-knowledge-base` 是另一位作者的包，因此暂不发布 npm；
+> 分发策略、旧脚本安装迁移与 catalog 提交见 [docs/distribution.md](docs/distribution.md)。
 
 ### 从源码安装（Git 仓库，通用）
 
