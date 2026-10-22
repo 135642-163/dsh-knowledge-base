@@ -14,6 +14,7 @@ if ! gh auth status >/dev/null 2>&1; then
   exit 1
 fi
 OWNER="$(gh api user --jq .login)"
+USER_ID="$(gh api user --jq .id)"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/catalog-pr.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -22,6 +23,9 @@ echo "==> fork/clone $UPSTREAM"
 gh repo fork "$UPSTREAM" --clone
 
 cd awesome-dsh-plugin
+# 新克隆没有继承本仓库的 local identity；用 GitHub 账号的 noreply 身份提交
+git config user.name "$OWNER"
+git config user.email "${USER_ID}+${OWNER}@users.noreply.github.com"
 git remote add upstream "https://github.com/$UPSTREAM.git" 2>/dev/null || true
 git fetch upstream main
 git checkout -B "$BRANCH" upstream/main
