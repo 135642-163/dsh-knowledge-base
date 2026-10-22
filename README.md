@@ -18,11 +18,13 @@
 | `kb_describe` | 给文档写一行摘要与标签（编目）：摘要会显示在 `kb_list` 与 `index.md`，重解析/重导入不会覆盖模型写的摘要 |
 | `kb_retitle` | 修正标题：单篇传 `doc`（默认按 `cleanTitle` 去掉站点域名、`GB_T`、序号、span 残留等噪声），批量传 `all=true`（默认 `dryRun=true` 只预览，确认后 `dryRun=false` 应用）；会重建合并版首行标题、保留历史、版本+1 |
 | `kb_lint` | 机械体检：导入失败、旧管线、文字层损坏/OCR 低置信、内容重复、同标准号同期同阶段重复、同号多版本、未编目、笔记无来源、续/修订版提示、无入链笔记、缺 schema；输出分组问题与建议动作（`kb_reparse`/`kb_describe`/`kb_remove`/`kb_edit`） |
+| `kb_edit_batch` | 批量精确修订（事务语义）：一次提交 1–50 条 `{doc, old_string, new_string, replaceAll?}`，**先全部校验再写入**；任一条失败整批不改并回滚已写分块；`dryRun=true` 只校验。适合“一次改 10–15 页”的跨文档维护；同一文档一批只允许一条编辑 |
+| `kb_snapshot` | 库级快照：把 `kb.json`、`schema/index/log`、派生 `markdown/`（可选 `sources/`）打包到知识库 `snapshots/`，用于批量编辑/重解析前留档；`list=true` 列出已有快照 |
 | `kb_add_note` | 写入编译页/笔记（单篇上限 2MB）：`kind=summary/entity/concept/topic/note`、`tags`、`sources`（docId#页码 或 [[标题]]）；**同一标题再次调用=更新同一篇**（版本+1、保留历史），不要用「续」「修订版」另起新页 |
 | `kb_remove` | 删除文档（默认软删除，可用 `kb_restore` 恢复；`soft=false` 永久删除）或整个知识库（删整库需 `removeKb=true` 且 `confirm` 逐字等于知识库名称） |
 | `kb_restore` | 恢复软删除文档（不带 `version`）或恢复历史版本（`version=N`，来自 `kb_history`） |
 | `kb_history` | 列出文档保存过的历史版本（覆盖导入/重解析/编辑前的快照，最多 10 个） |
-| `kb_export` | 导出 md（单文件）/ jsonl（分块，RAG 用；`chunkSize`/`chunkOverlap` 可切 RAG 小块）/ zip（完整包，内置 JSZip 打包，不依赖系统命令） |
+| `kb_export` | 导出 md（单文件）/ jsonl（分块，RAG 用；`chunkSize`/`chunkOverlap` 可切 RAG 小块）/ zip（完整包，内置 JSZip 打包，不依赖系统命令）/ **vault**（Obsidian Vault：`index.md` + `wiki/` 笔记与资料页 + `[[双链]]`，`includeSources=true` 时带 `raw/`） |
 | `kb_rename` | 重命名知识库 |
 
 大文件（如整本扫描书）导入自动转为**后台任务**，与内置 `job_list` / `job_output` 联动查看进度；
@@ -110,6 +112,24 @@ exports/                   导出产物
   `GBT 11032`、`GB∕T 11032`、`GB_T 11032` 都能命中 `GB/T 11032-2020`；
   年份分隔符 `- — – ~ ～` 等价；`GB 11032` 不会误命中 `GB/T 11032`。
   显式正则（含 `\d`、括号等元字符）原样执行，输出里会标 `expandedPattern` 说明已扩展。
+
+## 互操作与维护：Vault / 批量事务 / 快照（0.15.0）
+
+- **Obsidian Vault 导出**：`kb_export(format="vault")` 生成 zip，解压即可作为 Vault 打开：
+  - `index.md`（双链，编译页在前）、`schema.md`、`log.md`；
+  - `wiki/topics|entities|concepts|summaries|notes/<标题>.md`：笔记带 YAML frontmatter、
+    “依据来源”与“被引用”双链；
+  - `wiki/sources/<标题>.md`：每份资料的摘要页（doc_id、页数、字数、原始文件链接、被引用笔记）；
+  - `raw/`：`includeSources=true` 时包含原始文件（默认不含，避免几 GB 的扫描件）。
+  - 文件名做文件系统安全化并全局去重，双链按文件名解析。
+- **批量事务编辑**：`kb_edit_batch` 一次提交多条编辑，**先全量校验再写入**；
+  任一条找不到 `old_string`/多处命中未 `replaceAll`/文档非 ready，整批不改；
+  写入阶段失败会回滚已写分块，清单只在全部成功后一次性更新（版本号+1）。
+  `dryRun=true` 只返回将替换的处数。同一文档一批只允许一条编辑。
+- **库级快照**：`kb_snapshot` 把清单、`schema/index/log`、派生 `markdown/`
+  （可选 `sources/`）打包到 `<知识库>/snapshots/<时间>-<标签>.zip`，
+  并在同目录留 `.zip.json` 元数据；`list=true` 查看历史快照。
+  默认不含 `sources/` 与 `history/`，用于批量编辑/重解析前留档；恢复见包内 `meta.json`。
 
 ## PDF 双栏重排（0.12.0）
 
@@ -312,7 +332,7 @@ done
 ## 测试
 
 ```bash
-npm test          # node:test（123 个用例）；覆盖查重精度、同名文件保护、后台失败统计、检索截断/单文档上限、
+npm test          # node:test（131 个用例）；覆盖查重精度、同名文件保护、后台失败统计、检索截断/单文档上限、
                   # 相似导入提示、OCR 模型检查、流式 zip、心跳与锁回收、
                   # 清单 v1→v2→v3 迁移与备份、内容哈希跳过、kb_reparse、分块索引/页码锚点、
                   # kb_list 分页/过滤/kind、检索排序、跨库检索、文字层质量启发式、
@@ -322,7 +342,8 @@ npm test          # node:test（123 个用例）；覆盖查重精度、同名�
                   # 软删除/恢复、版本历史快照/恢复、
                   # schema/index/log 虚拟文档、kb_describe 编目与重解析保护、
                   # 笔记 kind/tags/sources/同标题 upsert、反链、导出 frontmatter 与索引、
-                  # kb_lint 分组与假阳性防护、kb_retitle 清洗/批量预览、标准号检索归一变体
+                  # kb_lint 分组与假阳性防护、kb_retitle 清洗/批量预览、标准号检索归一变体、
+                  # Vault 导出结构/双链、批量事务编辑的回滚与 dryRun、库级快照创建/列表
                   # （全部使用临时目录，不依赖本机知识库）
 ```
 
