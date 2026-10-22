@@ -15,7 +15,7 @@
 | `kb_read` | 按分块精读、读大纲、读整篇；大纲条目带页码/部分，读取时返回页码范围；支持虚拟页 `doc="schema"`（维护规范）、`doc="index"`（内容索引）、`doc="log"`（操作日志），按 part 分页读取 |
 | `kb_view` | 查看原始页面图片（PDF 按页渲染；Word/PPT/EPUB/MOBI 提取内嵌图）——公式、原理图、电路图专用 |
 | `kb_edit` | 精确替换修订（持续修改完善）；`doc="schema"` 可修订该库维护规范（index/log 自动维护，不能编辑） |
-| `kb_describe` | 给文档写一行摘要与标签（编目）：摘要会显示在 `kb_list` 与 `index.md`，重解析/重导入不会覆盖模型写的摘要 |
+| `kb_describe` | 给文档写一行摘要与标签（编目）：摘要会显示在 `kb_list` 与 `index.md`，重解析/重导入不会覆盖模型写的摘要；存量文档可 `all=true` + `auto=true` 批量回填缺失摘要（抽取式，不递增版本号，`limit` 分批） |
 | `kb_retitle` | 修正标题：单篇传 `doc`（默认按 `cleanTitle` 去掉站点域名、`GB_T`、序号、span 残留等噪声），批量传 `all=true`（默认 `dryRun=true` 只预览，确认后 `dryRun=false` 应用）；会重建合并版首行标题、保留历史、版本+1 |
 | `kb_lint` | 机械体检：导入失败、旧管线、文字层损坏/OCR 低置信、内容重复、同标准号同期同阶段重复、同号多版本、未编目、笔记无来源、续/修订版提示、无入链笔记、缺 schema；输出分组问题与建议动作（`kb_reparse`/`kb_describe`/`kb_remove`/`kb_edit`） |
 | `kb_edit_batch` | 批量精确修订（事务语义）：一次提交 1–50 条 `{doc, old_string, new_string, replaceAll?}`，**先全部校验再写入**；任一条失败整批不改并回滚已写分块；`dryRun=true` 只校验。适合“一次改 10–15 页”的跨文档维护；同一文档一批只允许一条编辑 |
@@ -130,6 +130,9 @@ exports/                   导出产物
   （可选 `sources/`）打包到 `<知识库>/snapshots/<时间>-<标签>.zip`，
   并在同目录留 `.zip.json` 元数据；`list=true` 查看历史快照。
   默认不含 `sources/` 与 `history/`，用于批量编辑/重解析前留档；恢复见包内 `meta.json`。
+- **存量摘要回填（0.15.1）**：`kb_describe(all=true, auto=true, limit=…)` 从合并版正文抽第一段
+  回填缺失摘要；纯表格资料退化为「表格「工作表」：首行内容」，无可靠文字层的扫描件标注
+  「扫描/影印资料…建议 kb_view」，已有模型摘要不覆盖，不递增内容版本号。
 
 ## PDF 双栏重排（0.12.0）
 
@@ -332,7 +335,7 @@ done
 ## 测试
 
 ```bash
-npm test          # node:test（131 个用例）；覆盖查重精度、同名文件保护、后台失败统计、检索截断/单文档上限、
+npm test          # node:test（134 个用例）；覆盖查重精度、同名文件保护、后台失败统计、检索截断/单文档上限、
                   # 相似导入提示、OCR 模型检查、流式 zip、心跳与锁回收、
                   # 清单 v1→v2→v3 迁移与备份、内容哈希跳过、kb_reparse、分块索引/页码锚点、
                   # kb_list 分页/过滤/kind、检索排序、跨库检索、文字层质量启发式、
@@ -343,7 +346,8 @@ npm test          # node:test（131 个用例）；覆盖查重精度、同名�
                   # schema/index/log 虚拟文档、kb_describe 编目与重解析保护、
                   # 笔记 kind/tags/sources/同标题 upsert、反链、导出 frontmatter 与索引、
                   # kb_lint 分组与假阳性防护、kb_retitle 清洗/批量预览、标准号检索归一变体、
-                  # Vault 导出结构/双链、批量事务编辑的回滚与 dryRun、库级快照创建/列表
+                  # Vault 导出结构/双链、批量事务编辑的回滚与 dryRun、库级快照创建/列表、
+                  # 存量摘要回填（模型摘要保护/limit/remaining/表格兜底）
                   # （全部使用临时目录，不依赖本机知识库）
 ```
 

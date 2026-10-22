@@ -1,6 +1,6 @@
 {
   "name": "dsh-knowledge-base",
-  "version": "0.15.0",
+  "version": "0.15.1",
   "description": "DeepSeek Harness 插件：把 Word/PPT/PDF（文字版与扫描版）资料整理为适合大模型阅读的知识库，支持检索、精读、修订、导出",
   "type": "module",
   "main": "lib/index.js",
@@ -28,7 +28,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "node --test test/chunks.test.mjs test/dedup.test.mjs test/docx-omml.test.mjs test/edit-index.test.mjs test/export-chunks.test.mjs test/export-redaction.test.mjs test/history.test.mjs test/import-hash.test.mjs test/import-heartbeat.test.mjs test/import-name-collision.test.mjs test/kb-import-background.test.mjs test/kb-import-similar.test.mjs test/kb-list-pagination.test.mjs test/kb-query-cross-kb.test.mjs test/kb-read-outline.test.mjs test/lock-recovery.test.mjs test/manifest-migration.test.mjs test/ocr-frame.test.mjs test/ocr-models.test.mjs test/omml.test.mjs test/ocr-tessdata.test.mjs test/parts-index.test.mjs test/pdf-columns.test.mjs test/query-ranking.test.mjs test/query.test.mjs test/query-deleted.test.mjs test/report.test.mjs test/reparse.test.mjs test/soft-delete.test.mjs test/text-layer-quality.test.mjs test/worker-reparse.test.mjs test/worker-report.test.mjs test/xlsx.test.mjs test/zip-stream.test.mjs test/manifest-v3.test.mjs test/note-wiki.test.mjs test/wiki-layer.test.mjs test/lint.test.mjs test/query-normalize.test.mjs test/titles-retitle.test.mjs test/edit-batch.test.mjs test/snapshot.test.mjs test/vault-export.test.mjs"
+    "test": "node --test test/chunks.test.mjs test/dedup.test.mjs test/docx-omml.test.mjs test/edit-index.test.mjs test/export-chunks.test.mjs test/export-redaction.test.mjs test/history.test.mjs test/import-hash.test.mjs test/import-heartbeat.test.mjs test/import-name-collision.test.mjs test/kb-import-background.test.mjs test/kb-import-similar.test.mjs test/kb-list-pagination.test.mjs test/kb-query-cross-kb.test.mjs test/kb-read-outline.test.mjs test/lock-recovery.test.mjs test/manifest-migration.test.mjs test/ocr-frame.test.mjs test/ocr-models.test.mjs test/omml.test.mjs test/ocr-tessdata.test.mjs test/parts-index.test.mjs test/pdf-columns.test.mjs test/query-ranking.test.mjs test/query.test.mjs test/query-deleted.test.mjs test/report.test.mjs test/reparse.test.mjs test/soft-delete.test.mjs test/text-layer-quality.test.mjs test/worker-reparse.test.mjs test/worker-report.test.mjs test/xlsx.test.mjs test/zip-stream.test.mjs test/manifest-v3.test.mjs test/note-wiki.test.mjs test/wiki-layer.test.mjs test/lint.test.mjs test/query-normalize.test.mjs test/titles-retitle.test.mjs test/edit-batch.test.mjs test/snapshot.test.mjs test/vault-export.test.mjs test/describe-auto.test.mjs"
   },
   "files": [
     "lib",
