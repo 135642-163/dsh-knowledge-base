@@ -8,7 +8,7 @@
 
 | 工具 | 作用 |
 | --- | --- |
-| `kb_import` | 导入文件或目录（.docx / .doc 自动转换 / .pptx / .xlsx / .xlsm / .pdf / .md / .txt / .epub / .mobi / .azw3，扫描版 PDF 自动逐页 OCR 中文，自动识别文字层损坏页并只对问题页 OCR；Excel 按工作表转 Markdown 表格；.txt 自动识别 UTF-8/UTF-16/GBK；MOBI/AZW3 自动经 Calibre 转 EPUB）。旧版 .doc/.ppt 与 MOBI/AZW3 一律在后台任务中转换；正在导入中的同名文档自动跳过。**导入前自动查重**：同库重合跳过、跨库重合默认跳过并报告（见下文） |
+| `kb_import` | 导入文件或目录（.docx / .doc 自动转换 / .pptx / .xlsx / .xlsm / .pdf / .md / .txt / .epub / .mobi / .azw3，扫描版 PDF 自动逐页 OCR 中文，自动识别文字层损坏页并只对问题页 OCR；Word OMML 公式转 LaTeX；Excel 按工作表转 Markdown 表格；.txt 自动识别 UTF-8/UTF-16/GBK；MOBI/AZW3 自动经 Calibre 转 EPUB）。旧版 .doc/.ppt 与 MOBI/AZW3 一律在后台任务中转换；正在导入中的同名文档自动跳过。**导入前自动查重**：同库重合跳过、跨库重合默认跳过并报告（见下文） |
 | `kb_reparse` | 从库内 `sources/` 重新解析文档（无需重新上传），用于 OCR/解析器升级后刷新旧管线产物；`doc` 单个、`all=true` 批量，支持 `forceOcr`、`forceOcrPages`/`skipOcrPages`、后台任务 |
 | `kb_list` | 列出知识库 / 知识库内文档与状态（旧管线/已修订/文字层损坏/OCR 低置信会标注）；默认最多 50 条，支持 `limit/offset/query/status` 分页过滤 |
 | `kb_query` | 全文检索（ripgrep 正则，中文短语直接搜）；按标题/标题行/命中密度/更新时间排序，每文档默认 5 条；`kb="*"` 跨库检索；命中项带 part 与页码范围 |
@@ -54,6 +54,18 @@ exports/                   导出产物
   （含 README 说明与全部 markdown，`includeSources=true` 时含原始文件）。
   zip 用 `generateNodeStream` **流式写盘**，不会把整包（含原始文件）先读进内存；
   导出清单剥离本机 `sourcePath`，失败条目整条略过。
+
+## Word OMML 公式（0.10.0）
+
+`.docx` 里的 OMML 公式会转成 LaTeX，并保持在正文原位置：
+
+- 行内公式 → `$...$`，独立公式 → `$$...$$`；
+- 支持常用结构：分数、上下标、根式、括号、求和/积分、函数、极限、
+  矩阵/方程组、重音、上划线等；希腊字母/运算符映射为 LaTeX 命令；
+- 无法完整转换的复杂公式会保留可读文本或 `[公式]` 占位，并在导入 warnings
+  中提示；页眉/页脚/脚注里的公式暂不处理；
+- 含公式的旧 `.docx` 需要 `kb_reparse` 才会重新提取；新导入直接生效。
+- 公式仍建议对照原始 Word/`kb_view` 核对（尤其大型分式/矩阵）。
 
 ## 软删除与恢复（0.9.0）
 
@@ -226,7 +238,7 @@ npm test          # node:test；覆盖查重精度、同名文件保护、后台
                   # kb_list 分页/过滤、检索排序、跨库检索、文字层质量启发式、
                   # 逐页 OCR 决策、OCR 帧置信度、质量告警、模型自动下载、
                   # RAG 小块切分与 jsonl 分块导出、xlsx 表格解析、
-                  # 软删除/恢复与导出排除
+                  # Word OMML 公式转 LaTeX、软删除/恢复与导出排除
                   # （全部使用临时目录，不依赖本机知识库）
 ```
 
