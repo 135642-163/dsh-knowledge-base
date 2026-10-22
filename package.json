@@ -1,12 +1,15 @@
 {
   "name": "dsh-knowledge-base",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "DeepSeek Harness 插件：把 Word/PPT/PDF（文字版与扫描版）资料整理为适合大模型阅读的知识库，支持检索、精读、修订、导出",
   "type": "module",
   "main": "lib/index.js",
   "license": "MIT",
   "engines": {
     "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test test/dedup.test.mjs test/export-redaction.test.mjs test/import-name-collision.test.mjs test/kb-import-background.test.mjs test/kb-import-similar.test.mjs test/ocr-tessdata.test.mjs test/query.test.mjs test/report.test.mjs test/worker-report.test.mjs"
   },
   "dependencies": {
     "@deepseek-ai/dsh-tools": "0.1.0-rc.6",
