@@ -70,19 +70,26 @@ duplicate loader id。迁移步骤：
 
 ## 上架 catalog
 
-`docs/catalog-entry.json` 是提交给
-[awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)
-的草案字段，不是可直接覆盖的 catalog 文件；以该仓库当前的 PR 模板为准。
+投稿材料在 `docs/catalog-pr/`：catalog 每个插件一个 YAML 文件，路径为
+`data/plugins/<owner>__<repo>.yml`。本仓库对应：
+
+```
+data/plugins/135642-163__dsh-knowledge-base.yml
+```
 
 关键点：
 
-- `name` 用 `dsh-knowledge-base-cn`（catalog 里 `dsh-knowledge-base` 已被占用，
-  仅用于展示/索引，包名仍是 `dsh-knowledge-base`）；
-- `npm: null`，`url` 指向 GitHub 仓库，安装目标由市场解析为
-  `github:135642-163/dsh-knowledge-base`；
-- 能力声明：`fs-read`、`fs-write`、`shell`（ripgrep/OCR/Calibre）、`network`
-  （标准检查与模型下载）；
-- 上架后市场会按 GitHub commit 比对更新。
+- `name` 是 `135642-163/dsh-knowledge-base`（owner/repo，列表链接文字），
+  不是 npm 包名；
+- **不要写 `npm:` 字段**：catalog 会从 registry 自动采集 npm 映射，手写会被
+  校验拒绝；本仓库因名称冲突本就不发 npm；
+- 不需要 `tarball:`：本仓库无 build scripts，可从源码安装；
+- `category` 用 `memory`；`description.en` 一行、以句号结尾，含 `: ` 时加引号；
+- 一个 PR 只加这一个文件；**不要手工改 README.md / README.zh.md**（合并后自动生成）；
+- PR 标题/正文模板见 `docs/catalog-pr/PR.md`，提交步骤见 `docs/catalog-pr/README.md`。
+
+合并后市场重建，GitHub 安装按 commit 比对更新；发布新版本仍只需
+`git push origin main`。
 
 ## 验证
 
