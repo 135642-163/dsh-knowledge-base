@@ -55,6 +55,18 @@ test("kb_read outline and part expose anchors", async () => {
     index[0].pageStart = 5;
     index[0].pageEnd = 6;
     await writeFile(indexPath, JSON.stringify(index, null, 2), "utf8");
+    await writeFile(
+      join(kbRoot, "测试库", "markdown", doc.id, "pages.json"),
+      JSON.stringify(
+        [
+          { page: 5, source: "ocr", corrupted: true, confidence: 40 },
+          { page: 6, source: "ocr", corrupted: false, confidence: 50 },
+        ],
+        null,
+        2
+      ),
+      "utf8"
+    );
 
     const part = await tools.get("kb_read").execute(
       { kb: "测试库", doc: doc.id, part: 1 },
@@ -63,11 +75,13 @@ test("kb_read outline and part expose anchors", async () => {
     assert.equal(part.part, "1");
     assert.equal(part.pageStart, 5);
     assert.equal(part.pageEnd, 6);
+    assert.equal(part.pageWarnings.length, 2);
     const partText = tools.get("kb_read").output.render(
       { kb: "测试库", doc: doc.id, part: 1 },
       part
     )[0].text;
     assert.match(partText, /第 5–6 页/);
+    assert.match(partText, /文字层损坏\/OCR 低置信：第 5、6 页/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

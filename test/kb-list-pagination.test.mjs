@@ -34,6 +34,9 @@ async function setup() {
       updatedAt: new Date().toISOString(),
     });
   }
+  docs[0].corruptedPages = [2, 3];
+  docs[0].lowConfidencePages = [5];
+  docs[0].ocrConfidence = 72.5;
   await writeFile(
     join(kbDir, "kb.json"),
     JSON.stringify(
@@ -121,6 +124,19 @@ test("kb_list without kb still lists knowledge bases", async () => {
     assert.equal(r.kbs.length, 1);
     assert.equal(r.kbs[0].name, "测试库");
     assert.equal(r.docs.length, 0);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+
+test("kb_list surfaces OCR quality counts", async () => {
+  const { root, tools, exec } = await setup();
+  try {
+    const r = await tools.get("kb_list").execute({ kb: "测试库", query: "电缆资料01" }, exec);
+    const text = tools.get("kb_list").output.render({ kb: "测试库" }, r)[0].text;
+    assert.match(text, /文字层损坏 2页/);
+    assert.match(text, /OCR低置信 1页/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

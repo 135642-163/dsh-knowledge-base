@@ -8,9 +8,9 @@
 
 | 工具 | 作用 |
 | --- | --- |
-| `kb_import` | 导入文件或目录（.docx / .doc 自动转换 / .pptx / .pdf / .md / .txt / .epub / .mobi / .azw3，扫描版 PDF 自动逐页 OCR 中文；.txt 自动识别 UTF-8/UTF-16/GBK；MOBI/AZW3 自动经 Calibre 转 EPUB）。旧版 .doc/.ppt 与 MOBI/AZW3 一律在后台任务中转换；正在导入中的同名文档自动跳过。**导入前自动查重**：同库重合跳过、跨库重合默认跳过并报告（见下文） |
-| `kb_reparse` | 从库内 `sources/` 重新解析文档（无需重新上传），用于 OCR/解析器升级后刷新旧管线产物；`doc` 单个、`all=true` 批量，支持 `forceOcr`、后台任务 |
-| `kb_list` | 列出知识库 / 知识库内文档与状态（旧管线/已修订会标注）；默认最多 50 条，支持 `limit/offset/query/status` 分页过滤 |
+| `kb_import` | 导入文件或目录（.docx / .doc 自动转换 / .pptx / .pdf / .md / .txt / .epub / .mobi / .azw3，扫描版 PDF 自动逐页 OCR 中文，自动识别文字层损坏页并只对问题页 OCR；.txt 自动识别 UTF-8/UTF-16/GBK；MOBI/AZW3 自动经 Calibre 转 EPUB）。旧版 .doc/.ppt 与 MOBI/AZW3 一律在后台任务中转换；正在导入中的同名文档自动跳过。**导入前自动查重**：同库重合跳过、跨库重合默认跳过并报告（见下文） |
+| `kb_reparse` | 从库内 `sources/` 重新解析文档（无需重新上传），用于 OCR/解析器升级后刷新旧管线产物；`doc` 单个、`all=true` 批量，支持 `forceOcr`、`forceOcrPages`/`skipOcrPages`、后台任务 |
+| `kb_list` | 列出知识库 / 知识库内文档与状态（旧管线/已修订/文字层损坏/OCR 低置信会标注）；默认最多 50 条，支持 `limit/offset/query/status` 分页过滤 |
 | `kb_query` | 全文检索（ripgrep 正则，中文短语直接搜）；按标题/标题行/命中密度/更新时间排序，每文档默认 5 条；`kb="*"` 跨库检索；命中项带 part 与页码范围 |
 | `kb_read` | 按分块精读、读大纲、读整篇；大纲条目带页码/部分，读取时返回页码范围 |
 | `kb_view` | 查看原始页面图片（PDF 按页渲染；Word/PPT/EPUB/MOBI 提取内嵌图）——公式、原理图、电路图专用 |
@@ -38,6 +38,7 @@ sources/<docId><ext>       原始文件（逐字节保留）
 markdown/<docId>/<docId>.md   合并版（整篇通读）
 markdown/<docId>/parts/NNNN.md 分块版（检索、精读、RAG）
 markdown/<docId>/parts/index.json 分块索引（合并版行号 → part/页码）
+markdown/<docId>/pages.json   逐页质量（文字层/OCR、损坏标记、置信度）
 exports/                   导出产物
 ```
 
@@ -52,6 +53,22 @@ exports/                   导出产物
   （含 README 说明与全部 markdown，`includeSources=true` 时含原始文件）。
   zip 用 `generateNodeStream` **流式写盘**，不会把整包（含原始文件）先读进内存；
   导出清单剥离本机 `sourcePath`，失败条目整条略过。
+
+## OCR 质量（0.5.0）
+
+- **逐页检测文字层损坏**：U+FFFD 替换字符、私用区字符（E011/E012 连字符除外）、
+  以及拉丁字母被映射成 CJK 表意文字（`犃`–`犣`，如 `犌犅/犜` ← GB/T）。
+  只有被判定损坏或文字量稀薄的页才走 OCR，不再需要为了一个坏文字层整本 `forceOcr`。
+- **置信度保留**：rapidocr / tesserocr / tesseract.js 都返回 0–100 置信度；
+  `ocrConfidence` 是 OCR 页平均值，`lowConfidencePages` 是低于 65 的页。
+  原生 tesseract CLI 兜底后端不提供置信度（该后端下低置信列表为空）。
+- **逐页质量 sidecar**：`markdown/<docId>/pages.json` 记录每页
+  `{page, source, corrupted, confidence}`；清单里保存 `corruptedPages`/
+  `lowConfidencePages`/`ocrConfidence`。
+- **UI 告警**：`kb_list` 标注 `[文字层损坏 N页]` / `[OCR低置信 N页]`；
+  `kb_read` 返回页码范围与 OCR 平均置信度，并在正文后提示问题页，建议 `kb_view` 核对。
+- **精细控制**：`kb_import` / `kb_reparse` 支持 `forceOcrPages="12,48"` 与
+  `skipOcrPages="1,2"`；`forceOcr` 仍可强制全部页面。
 
 ## 检索体验（0.4.1）
 
@@ -159,7 +176,8 @@ done
 npm test          # node:test；覆盖查重精度、同名文件保护、后台失败统计、检索截断/单文档上限、
                   # 相似导入提示、OCR 模型检查、流式 zip、心跳与锁回收、
                   # 清单 v1→v2 迁移、内容哈希跳过、kb_reparse、分块索引/页码锚点、
-                  # kb_list 分页/过滤、检索排序、跨库检索
+                  # kb_list 分页/过滤、检索排序、跨库检索、文字层质量启发式、
+                  # 逐页 OCR 决策、OCR 帧置信度、质量告警
                   # （全部使用临时目录，不依赖本机知识库）
 ```
 
