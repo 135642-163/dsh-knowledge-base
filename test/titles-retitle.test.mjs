@@ -124,3 +124,27 @@ test("kb_retitle requires doc or all", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("kb_retitle refuses documents that are not ready", async () => {
+  const { root, kbDir, tools, exec } = await setup();
+  try {
+    const src = join(root, "坏文件.md");
+    await writeFile(src, "# 内容\n\n测试。\n", "utf8");
+    const imported = await tools.get("kb_import").execute(
+      { path: src, kb: "测试库", title: "1. 坏文件" },
+      exec
+    );
+    const docId = imported.imported[0].docId;
+    const manifest = await readManifest(kbDir);
+    const doc = manifest.docs.find((d) => d.id === docId);
+    doc.status = "failed";
+    doc.error = "模拟失败";
+    await writeFile(join(kbDir, "kb.json"), JSON.stringify(manifest, null, 2), "utf8");
+    await assert.rejects(
+      () => tools.get("kb_retitle").execute({ kb: "测试库", doc: docId }, exec),
+      /暂不能改名/
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
