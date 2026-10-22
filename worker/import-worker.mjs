@@ -8,6 +8,8 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { importFileInto } from "../lib/pipeline.js";
+import { readManifest } from "../lib/store.js";
+import { refreshIndexIfStale } from "../lib/wiki.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const pluginRoot = dirname(here);
@@ -88,6 +90,13 @@ for (let i = 0; i < files.length; i++) {
     results.push({ title: f.title, status: "failed", error: message.slice(0, 500) });
     process.stdout.write(`KB:FAIL [${label}] ${f.title}: ${message}\n`);
   }
+}
+
+// 批量导入结束后刷新一次 index.md（不要每篇都写，避免大库重复写盘）
+try {
+  await refreshIndexIfStale(kbDir, await readManifest(kbDir));
+} catch {
+  /* 索引是附属产物，失败不影响导入结果 */
 }
 
 // 逐文件统计：宿主用它判断“完成/部分失败”，不再只看进程退出码。

@@ -10,12 +10,13 @@
 | --- | --- |
 | `kb_import` | 导入文件或目录（.docx / .doc 自动转换 / .pptx / .xlsx / .xlsm / .pdf / .md / .txt / .epub / .mobi / .azw3，扫描版 PDF 自动逐页 OCR 中文，自动识别文字层损坏页并只对问题页 OCR，文字层双栏页自动重排；Word OMML 公式转 LaTeX；Excel 按工作表转 Markdown 表格；.txt 自动识别 UTF-8/UTF-16/GBK；MOBI/AZW3 自动经 Calibre 转 EPUB）。旧版 .doc/.ppt 与 MOBI/AZW3 一律在后台任务中转换；正在导入中的同名文档自动跳过。**导入前自动查重**：同库重合跳过、跨库重合默认跳过并报告（见下文） |
 | `kb_reparse` | 从库内 `sources/` 重新解析文档（无需重新上传），用于 OCR/解析器升级后刷新旧管线产物；`doc` 单个、`all=true` 批量，支持 `forceOcr`、`forceOcrPages`/`skipOcrPages`、后台任务 |
-| `kb_list` | 列出知识库 / 知识库内文档与状态（旧管线/已修订/文字层损坏/OCR 低置信会标注）；默认最多 50 条，支持 `limit/offset/query/status` 分页过滤 |
+| `kb_list` | 列出知识库 / 知识库内文档与状态（旧管线/已修订/文字层损坏/OCR 低置信会标注），每条带一行摘要与标签；默认最多 50 条，支持 `limit/offset/query/status/kind` 分页过滤（`kind=note` 只看笔记、`kind=source` 只看资料）；本库有维护规范时会提示 |
 | `kb_query` | 全文检索（ripgrep 正则，中文短语直接搜）；按标题/标题行/命中密度/更新时间排序，每文档默认 5 条；`kb="*"` 跨库检索；命中项带 part 与页码范围 |
-| `kb_read` | 按分块精读、读大纲、读整篇；大纲条目带页码/部分，读取时返回页码范围 |
+| `kb_read` | 按分块精读、读大纲、读整篇；大纲条目带页码/部分，读取时返回页码范围；支持虚拟页 `doc="schema"`（维护规范）、`doc="index"`（内容索引）、`doc="log"`（操作日志），按 part 分页读取 |
 | `kb_view` | 查看原始页面图片（PDF 按页渲染；Word/PPT/EPUB/MOBI 提取内嵌图）——公式、原理图、电路图专用 |
-| `kb_edit` | 精确替换修订（持续修改完善） |
-| `kb_add_note` | 沉淀笔记 / 分析结论（单篇上限 2MB） |
+| `kb_edit` | 精确替换修订（持续修改完善）；`doc="schema"` 可修订该库维护规范（index/log 自动维护，不能编辑） |
+| `kb_describe` | 给文档写一行摘要与标签（编目）：摘要会显示在 `kb_list` 与 `index.md`，重解析/重导入不会覆盖模型写的摘要 |
+| `kb_add_note` | 写入编译页/笔记（单篇上限 2MB）：`kind=summary/entity/concept/topic/note`、`tags`、`sources`（docId#页码 或 [[标题]]）；**同一标题再次调用=更新同一篇**（版本+1、保留历史），不要用「续」「修订版」另起新页 |
 | `kb_remove` | 删除文档（默认软删除，可用 `kb_restore` 恢复；`soft=false` 永久删除）或整个知识库（删整库需 `removeKb=true` 且 `confirm` 逐字等于知识库名称） |
 | `kb_restore` | 恢复软删除文档（不带 `version`）或恢复历史版本（`version=N`，来自 `kb_history`） |
 | `kb_history` | 列出文档保存过的历史版本（覆盖导入/重解析/编辑前的快照，最多 10 个） |
@@ -35,7 +36,11 @@ macOS 用自带 `textutil`；Linux 可用 LibreOffice。未装任何转换工具
 
 ```
 kb.json                    清单：文档列表（id/标题/类型/页数/大纲/版本/状态/
-                           sha256/解析管线版本/contentSource/OCR 元数据）
+                           sha256/解析管线版本/contentSource/OCR 元数据/
+                           summary·tags·笔记 kind/sources/linksOut）
+schema.md                  维护规范（每库可定制；建库导入时写入模板）
+index.md                   内容索引（清单自动渲染：笔记在前、资料在后，每条一行摘要）
+log.md                     操作流水（只追加：ingest/edit/note/describe/remove/restore…）
 sources/<docId><ext>       原始文件（逐字节保留）
 markdown/<docId>/<docId>.md   合并版（整篇通读）
 markdown/<docId>/parts/NNNN.md 分块版（检索、精读、RAG）
@@ -47,14 +52,42 @@ exports/                   导出产物
 - **知识库名称**：`kb_import` 的 `kb` 参数决定（可含中文），不存在即创建。
 - **持续修改**：同名文件且内容未变 = **跳过不重跑**（返回 `skippedUnchanged`）；内容变化
   或 `forceReparse`/`kb_reparse` 时原位更新（版本号 +1）。`kb_edit` 精确替换并标记
-  `edited=true`；`kb_add_note` 追加新知识。清单会记录每个文档的 `sourcePath`：**同一路径**重复导入是原位更新，
+  `edited=true`；`kb_add_note` 写编译页（同标题再次调用=更新该笔记）。清单会记录每个文档的 `sourcePath`：**同一路径**重复导入是原位更新，
   不同目录下的同名文件（如 `A/通知.pdf` 与 `B/通知.pdf`）会另建文档，不会互相覆盖。
   旧版本清单没有 `sourcePath` 的条目无法追溯来源，首次重导仍按原位更新，并在导入结果的
   warnings 里提示一次；担心覆盖时请先备份或导入到新库，重导一次后就会记录来源路径。
-- **导出**：md 适合直接上传对话类产品；jsonl 适合 RAG 管道；zip 是完整可迁移包
-  （含 README 说明与全部 markdown，`includeSources=true` 时含原始文件）。
+- **导出**：md 适合直接上传对话类产品（目录带摘要，笔记带 YAML frontmatter）；jsonl 适合 RAG 管道；
+  zip 是完整可迁移包（含 README、`index.md`/`schema.md`/`log.md` 与全部 markdown，
+  `includeSources=true` 时含原始文件）。
   zip 用 `generateNodeStream` **流式写盘**，不会把整包（含原始文件）先读进内存；
   导出清单剥离本机 `sourcePath`，失败条目整条略过。
+
+## 编译层：schema / index / log 与笔记（0.13.0）
+
+对照 Karpathy「LLM Wiki」的三层结构，0.13.0 把知识库从“资料库 + 检索”补成**可累积的 Wiki**：
+原始资料只读，之上的知识页由模型持续编译与维护。
+
+- **schema.md（规则层）**：每个库根目录一份维护规范，写明三层约束、页面规范与
+  ingest/query/lint 流程。建库导入时自动写入，**已存在不覆盖**；
+  `kb_read(doc="schema")` 查看，`kb_edit(doc="schema")` 修订。系统提示会引导 agent
+  先读规范再做整理，换领域时改这一份即可，不必改插件。
+- **index.md（内容目录）**：由清单自动渲染，**编译页（笔记）排在原始资料之前**；
+  每条包含标题、一行摘要、类型/字数/版本/更新时间与标签。`kb_read(doc="index")` 阅读
+  （按 part 分页），导入/编辑/删除/编目后自动刷新。摘要两级：`kb_describe` 写的模型摘要优先，
+  导入时的抽取式摘要兜底；重解析/重导入**不会覆盖**模型摘要。
+- **log.md（操作流水）**：只追加，记录 `ingest / reparse / edit / note / note-update /
+  describe / remove / restore / schema` 的时间、文档与版本；`kb_read(doc="log")` 查看，
+  导出时一并带上。日志超过 1.5MB 自动只保留最近 3000 行。
+- **笔记升级为 Wiki 页**：`kb_add_note` 支持 `kind`（summary/entity/concept/topic/note）、
+  `tags`、`sources`（`docId#页码` 或 `[[标题]]`）；写入时解析来源并维护反链。
+  `kb_read` 会显示“依据来源”和“被引用”（哪些笔记引用了这篇原文）。
+- **不再增生**：同一标题再次调用 `kb_add_note` = 更新同一篇（版本+1、保留历史版本），
+  省略的 kind/tags/sources 会沿用旧值；检索命中里笔记与原文都可按 docId 溯源。
+
+清单升级到 v3（补 `summary/summarySource/tags` 与笔记 `kind/sources/linksOut`）。
+旧库首次写入时惰性迁移，并按来源版本备份为 `kb.json.v2.bak`（v1 仍是 `kb.json.v1.bak`）；
+迁移只补字段，不改正文。已有的旧库在下次导入/写笔记时自动获得 `schema.md`，
+也可以直接 `kb_edit(doc="schema")` 修订来创建。
 
 ## PDF 双栏重排（0.12.0）
 
@@ -257,14 +290,16 @@ done
 ## 测试
 
 ```bash
-npm test          # node:test；覆盖查重精度、同名文件保护、后台失败统计、检索截断/单文档上限、
+npm test          # node:test（111 个用例）；覆盖查重精度、同名文件保护、后台失败统计、检索截断/单文档上限、
                   # 相似导入提示、OCR 模型检查、流式 zip、心跳与锁回收、
-                  # 清单 v1→v2 迁移、内容哈希跳过、kb_reparse、分块索引/页码锚点、
-                  # kb_list 分页/过滤、检索排序、跨库检索、文字层质量启发式、
+                  # 清单 v1→v2→v3 迁移与备份、内容哈希跳过、kb_reparse、分块索引/页码锚点、
+                  # kb_list 分页/过滤/kind、检索排序、跨库检索、文字层质量启发式、
                   # 逐页 OCR 决策、OCR 帧置信度、质量告警、模型自动下载、
                   # RAG 小块切分与 jsonl 分块导出、xlsx 表格解析、
                   # Word OMML 公式转 LaTeX、PDF 双栏重排、
-                  # 软删除/恢复、版本历史快照/恢复
+                  # 软删除/恢复、版本历史快照/恢复、
+                  # schema/index/log 虚拟文档、kb_describe 编目与重解析保护、
+                  # 笔记 kind/tags/sources/同标题 upsert、反链、导出 frontmatter 与索引
                   # （全部使用临时目录，不依赖本机知识库）
 ```
 
@@ -272,8 +307,10 @@ npm test          # node:test；覆盖查重精度、同名文件保护、后台
 
 - “把 /Users/me/资料 目录导入知识库「项目管理」，其中有两本扫描版书，导入后告诉我结构”
 - “在知识库「项目管理」里查一下‘进度偏差 纠偏措施’，结合上下文给我分析”
+- “先读一下知识库的维护规范，再按它的流程整理这批新资料”
+- “把刚才的分析结论沉淀成专题页，注明依据哪几份原文、第几页”
+- “给这几份标准各写一行摘要和标签，方便以后在索引里找”
 - “把知识库中关于 XX 的内容整理成一份 20 页的培训课件（PPT 结构）”
-- “把刚才的分析结论补充进知识库”
 - “导出知识库为 markdown 单文件，我要上传给其他 AI”
 
 ## 插件实现说明
