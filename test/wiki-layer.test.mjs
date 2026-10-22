@@ -175,3 +175,55 @@ test("zip export includes the compiled-layer views", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("apply scaffolds pre-existing knowledge bases", async () => {
+  const root = await mkdtemp(join(tmpdir(), "kb-wiki-scaffold-"));
+  try {
+    const kbRoot = join(root, "kb-root");
+    const kbDir = join(kbRoot, "旧库");
+    await mkdir(kbDir, { recursive: true });
+    await writeFile(
+      join(kbDir, "kb.json"),
+      JSON.stringify(
+        {
+          schemaVersion: 2,
+          name: "旧库",
+          docs: [
+            {
+              id: "olddoc000001",
+              title: "旧资料",
+              type: "text",
+              status: "ready",
+              chars: 10,
+              parts: 1,
+              pages: 0,
+              version: 1,
+              outline: [],
+            },
+          ],
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+    const tools = new Map();
+    const ctx = {
+      tools: { register(def) { tools.set(def.name, def); } },
+      systemPrompt: { section() {} },
+      get() { return undefined; },
+    };
+    await apply(ctx, { kbRoot, defaultKb: "旧库", partMaxChars: 300 });
+    for (const file of ["schema.md", "log.md", "index.md"]) {
+      await access(join(kbDir, file));
+    }
+    const index = await readFile(join(kbDir, "index.md"), "utf8");
+    assert.match(index, /旧资料/);
+    const log = await readFile(join(kbDir, "log.md"), "utf8");
+    assert.match(log, /暂无记录/);
+    const manifest = JSON.parse(await readFile(join(kbDir, "kb.json"), "utf8"));
+    assert.equal(manifest.schemaVersion, 2, "lazy migration: a read-only startup must not rewrite kb.json");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
