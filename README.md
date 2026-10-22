@@ -16,7 +16,8 @@
 | `kb_view` | 查看原始页面图片（PDF 按页渲染；Word/PPT/EPUB/MOBI 提取内嵌图）——公式、原理图、电路图专用 |
 | `kb_edit` | 精确替换修订（持续修改完善） |
 | `kb_add_note` | 沉淀笔记 / 分析结论（单篇上限 2MB） |
-| `kb_remove` | 删除文档或整个知识库（删整库需 `removeKb=true` 且 `confirm` 逐字等于知识库名称） |
+| `kb_remove` | 删除文档（默认软删除，可用 `kb_restore` 恢复；`soft=false` 永久删除）或整个知识库（删整库需 `removeKb=true` 且 `confirm` 逐字等于知识库名称） |
+| `kb_restore` | 恢复通过 `kb_remove` 软删除的文档（保留原 markdown/sources） |
 | `kb_export` | 导出 md（单文件）/ jsonl（分块，RAG 用；`chunkSize`/`chunkOverlap` 可切 RAG 小块）/ zip（完整包，内置 JSZip 打包，不依赖系统命令） |
 | `kb_rename` | 重命名知识库 |
 
@@ -53,6 +54,17 @@ exports/                   导出产物
   （含 README 说明与全部 markdown，`includeSources=true` 时含原始文件）。
   zip 用 `generateNodeStream` **流式写盘**，不会把整包（含原始文件）先读进内存；
   导出清单剥离本机 `sourcePath`，失败条目整条略过。
+
+## 软删除与恢复（0.9.0）
+
+- `kb_remove` 删除单个文档时**默认软删除**：清单标记 `status="deleted"` +
+  `deletedAt`，`markdown/` 与 `sources/` 保留，可用 `kb_restore` 恢复；
+  `soft=false` 才永久删除，删整库始终不可恢复。
+- 软删除后：`kb_list` 仍显示该文档并标 `[已删除]`（可用 `status="deleted"` 过滤），
+  `kb_query` / `kb_read` / `kb_view` / `kb_edit` / `kb_reparse` 默认排除，
+  `kb_export` 的 md/jsonl/zip 也不包含；`kb_restore` 恢复后重新可读可搜。
+- 重新导入同一文档（同 docId）会把软删除文档恢复为 ready 并更新内容。
+- 注意：这是“软删除保护”，不是完整版本历史；覆盖导入/编辑的旧内容仍不保留。
 
 ## Excel 导入（0.8.0）
 
@@ -213,7 +225,8 @@ npm test          # node:test；覆盖查重精度、同名文件保护、后台
                   # 清单 v1→v2 迁移、内容哈希跳过、kb_reparse、分块索引/页码锚点、
                   # kb_list 分页/过滤、检索排序、跨库检索、文字层质量启发式、
                   # 逐页 OCR 决策、OCR 帧置信度、质量告警、模型自动下载、
-                  # RAG 小块切分与 jsonl 分块导出、xlsx 表格解析
+                  # RAG 小块切分与 jsonl 分块导出、xlsx 表格解析、
+                  # 软删除/恢复与导出排除
                   # （全部使用临时目录，不依赖本机知识库）
 ```
 
