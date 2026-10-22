@@ -32,6 +32,15 @@ docs/catalog-pr/data/plugins/135642-163__dsh-knowledge-base.yml
    then revert the README changes before committing.)
 4. Open a PR with the title/body in [PR.md](PR.md).
 
+Or use the one-command helper (uses your authenticated `gh`):
+
+```bash
+bash docs/catalog-pr/submit.sh
+```
+
+It forks/clones the catalog, adds the single YAML file, pushes a branch and
+opens the PR. Review the generated PR before asking maintainers to merge.
+
 ## Format notes (from the catalog's contributing guide)
 
 - `url` must match the repository exactly.
