@@ -11,11 +11,13 @@
 | `kb_import` | 导入文件或目录（.docx / .doc 自动转换 / .pptx / .xlsx / .xlsm / .pdf / .md / .txt / .epub / .mobi / .azw3，扫描版 PDF 自动逐页 OCR 中文，自动识别文字层损坏页并只对问题页 OCR，文字层双栏页自动重排；Word OMML 公式转 LaTeX；Excel 按工作表转 Markdown 表格；.txt 自动识别 UTF-8/UTF-16/GBK；MOBI/AZW3 自动经 Calibre 转 EPUB）。旧版 .doc/.ppt 与 MOBI/AZW3 一律在后台任务中转换；正在导入中的同名文档自动跳过。**导入前自动查重**：同库重合跳过、跨库重合默认跳过并报告（见下文） |
 | `kb_reparse` | 从库内 `sources/` 重新解析文档（无需重新上传），用于 OCR/解析器升级后刷新旧管线产物；`doc` 单个、`all=true` 批量，支持 `forceOcr`、`forceOcrPages`/`skipOcrPages`、后台任务 |
 | `kb_list` | 列出知识库 / 知识库内文档与状态（旧管线/已修订/文字层损坏/OCR 低置信会标注），每条带一行摘要与标签；默认最多 50 条，支持 `limit/offset/query/status/kind` 分页过滤（`kind=note` 只看笔记、`kind=source` 只看资料）；本库有维护规范时会提示 |
-| `kb_query` | 全文检索（ripgrep 正则，中文短语直接搜）；按标题/标题行/命中密度/更新时间排序，每文档默认 5 条；`kb="*"` 跨库检索；命中项带 part 与页码范围 |
+| `kb_query` | 全文检索（ripgrep 正则，中文短语直接搜；标准号自动兼容 GBT=GB/T=GB_T=GB∕T 与年份分隔符变体）；按标题/标题行/命中密度/更新时间排序，每文档默认 5 条；`kb="*"` 跨库检索；命中项带 part、页码与笔记类型 |
 | `kb_read` | 按分块精读、读大纲、读整篇；大纲条目带页码/部分，读取时返回页码范围；支持虚拟页 `doc="schema"`（维护规范）、`doc="index"`（内容索引）、`doc="log"`（操作日志），按 part 分页读取 |
 | `kb_view` | 查看原始页面图片（PDF 按页渲染；Word/PPT/EPUB/MOBI 提取内嵌图）——公式、原理图、电路图专用 |
 | `kb_edit` | 精确替换修订（持续修改完善）；`doc="schema"` 可修订该库维护规范（index/log 自动维护，不能编辑） |
 | `kb_describe` | 给文档写一行摘要与标签（编目）：摘要会显示在 `kb_list` 与 `index.md`，重解析/重导入不会覆盖模型写的摘要 |
+| `kb_retitle` | 修正标题：单篇传 `doc`（默认按 `cleanTitle` 去掉站点域名、`GB_T`、序号、span 残留等噪声），批量传 `all=true`（默认 `dryRun=true` 只预览，确认后 `dryRun=false` 应用）；会重建合并版首行标题、保留历史、版本+1 |
+| `kb_lint` | 机械体检：导入失败、旧管线、文字层损坏/OCR 低置信、内容重复、同标准号同期同阶段重复、同号多版本、未编目、笔记无来源、续/修订版提示、无入链笔记、缺 schema；输出分组问题与建议动作（`kb_reparse`/`kb_describe`/`kb_remove`/`kb_edit`） |
 | `kb_add_note` | 写入编译页/笔记（单篇上限 2MB）：`kind=summary/entity/concept/topic/note`、`tags`、`sources`（docId#页码 或 [[标题]]）；**同一标题再次调用=更新同一篇**（版本+1、保留历史），不要用「续」「修订版」另起新页 |
 | `kb_remove` | 删除文档（默认软删除，可用 `kb_restore` 恢复；`soft=false` 永久删除）或整个知识库（删整库需 `removeKb=true` 且 `confirm` 逐字等于知识库名称） |
 | `kb_restore` | 恢复软删除文档（不带 `version`）或恢复历史版本（`version=N`，来自 `kb_history`） |
@@ -88,6 +90,26 @@ exports/                   导出产物
 旧库首次写入时惰性迁移，并按来源版本备份为 `kb.json.v2.bak`（v1 仍是 `kb.json.v1.bak`）；
 迁移只补字段，不改正文。已有的旧库在下次导入/写笔记时自动获得 `schema.md`，
 也可以直接 `kb_edit(doc="schema")` 修订来创建。
+
+## 维护闭环：lint / 标题清洗 / 检索归一化（0.14.0）
+
+- **`kb_lint`（体检）**：只做机械可判定项，语义矛盾仍需模型判断：
+  - 导入失败、旧管线、文字层损坏/OCR 低置信；
+  - 内容完全相同（`sourceHash` 重复）、同标准号 + 年份 + 阶段重复；
+  - 同号不同阶段（征求意见/报批/发布/编制说明）**不判重复**，单独列为信息项；
+    同号多版本也单独列出，提示可用 `kb_std_check` 查更新；
+  - 未编目（没有摘要）、笔记没有来源、「续/修订版」标题、无入链笔记、缺 `schema.md`；
+  - 输出分组问题 + 建议动作（`kb_reparse` / `kb_describe` / `kb_remove` / `kb_edit`），
+    每组默认最多列 20 条，`maxItems` 可调。
+- **`kb_retitle`（标题清洗）**：`cleanTitle` 保守去掉
+  `(标准网-www.biaozhun.org)` / `_www.upbz.net` 等站点水印、`_span style=…` 残留、
+  `1.`/`2、` 序号前缀，把 `GB_T`/`GBT`/`QGDW`/`T_CEC` 规范成 `GB/T`/`Q/GDW`/`T/CEC`，
+  剩余下划线转空格。单篇传 `doc` 即可；批量 `all=true` 默认只预览（`dryRun=true`），
+  确认后 `dryRun=false` 应用（逐篇保留历史、版本+1、重建合并版 H1）。
+- **检索归一化**：`kb_query` 对“标准号 + 编号（+ 年份)”的简单查询自动扩展写法，
+  `GBT 11032`、`GB∕T 11032`、`GB_T 11032` 都能命中 `GB/T 11032-2020`；
+  年份分隔符 `- — – ~ ～` 等价；`GB 11032` 不会误命中 `GB/T 11032`。
+  显式正则（含 `\d`、括号等元字符）原样执行，输出里会标 `expandedPattern` 说明已扩展。
 
 ## PDF 双栏重排（0.12.0）
 
@@ -290,7 +312,7 @@ done
 ## 测试
 
 ```bash
-npm test          # node:test（113 个用例）；覆盖查重精度、同名文件保护、后台失败统计、检索截断/单文档上限、
+npm test          # node:test（122 个用例）；覆盖查重精度、同名文件保护、后台失败统计、检索截断/单文档上限、
                   # 相似导入提示、OCR 模型检查、流式 zip、心跳与锁回收、
                   # 清单 v1→v2→v3 迁移与备份、内容哈希跳过、kb_reparse、分块索引/页码锚点、
                   # kb_list 分页/过滤/kind、检索排序、跨库检索、文字层质量启发式、
@@ -299,7 +321,8 @@ npm test          # node:test（113 个用例）；覆盖查重精度、同名�
                   # Word OMML 公式转 LaTeX、PDF 双栏重排、
                   # 软删除/恢复、版本历史快照/恢复、
                   # schema/index/log 虚拟文档、kb_describe 编目与重解析保护、
-                  # 笔记 kind/tags/sources/同标题 upsert、反链、导出 frontmatter 与索引
+                  # 笔记 kind/tags/sources/同标题 upsert、反链、导出 frontmatter 与索引、
+                  # kb_lint 分组与假阳性防护、kb_retitle 清洗/批量预览、标准号检索归一变体
                   # （全部使用临时目录，不依赖本机知识库）
 ```
 
