@@ -1,9 +1,10 @@
 import { api, ApiError } from "./api.js";
 import { icons } from "./icons.js";
-import { hrefForKb, hrefForOverview, parseHash } from "./router.js";
+import { hrefForKb, hrefForOverview, hrefForTrash, parseHash } from "./router.js";
 import { renderOverview } from "./views/overview.js";
 import { renderDetail } from "./views/detail.js";
-import { openCreateModal, openDocModal } from "./views/modals.js";
+import { renderTrash } from "./views/trash.js";
+import { openCreateModal, openDocModal, openRestoreModal } from "./views/modals.js";
 
 const app = document.querySelector("#app");
 
@@ -17,6 +18,7 @@ const state = {
   detailLoading: false,
   detailError: "",
   docs: { items: [], total: 0, offset: 0, limit: 50 },
+  trash: { items: [], loading: false, error: "" },
 };
 
 function fmtNumber(value) {
@@ -66,6 +68,21 @@ async function loadDetail(name, tab) {
   }
 }
 
+async function loadTrash() {
+  state.trash.loading = true;
+  state.trash.error = "";
+  render();
+  try {
+    const payload = await api.trash();
+    state.trash.items = Array.isArray(payload?.items) ? payload.items : [];
+  } catch (error) {
+    state.trash.error = error instanceof ApiError ? error.message : String(error?.message ?? error);
+  } finally {
+    state.trash.loading = false;
+    render();
+  }
+}
+
 function render() {
   if (!app) return;
   const current = route();
@@ -88,13 +105,14 @@ function render() {
               <span class="side-count">${fmtNumber(kb.docs.ready + kb.docs.importing + kb.docs.failed)}</span>
             </a>`).join("")}
         </nav>
-        <div class="side-foot muted">${icons.external}<a href="/kb/" target="_blank" rel="noreferrer">在新标签打开</a></div>
+        <div class="side-foot muted">${icons.archive}<a href="${hrefForTrash()}">回收站</a><a href="/kb/" target="_blank" rel="noreferrer">在新标签打开</a></div>
       </aside>
       <main class="main">
         ${state.loading ? `<div class="state">加载中…</div>` : ""}
         ${state.error ? `<div class="state error">${escapeHtml(state.error)}<button class="btn" data-action="reload">重试</button></div>` : ""}
         ${!state.loading && !state.error && current.page === "overview" ? renderOverview(state, { icons, fmtNumber }) : ""}
         ${!state.loading && !state.error && current.page === "detail" ? renderDetail(state, current, { icons, fmtNumber }) : ""}
+        ${!state.loading && !state.error && current.page === "trash" ? renderTrash(state, { icons, fmtNumber }) : ""}
       </main>
     </div>
     <div class="toast" id="toast" hidden></div>
@@ -161,6 +179,33 @@ function bind() {
       } catch (error) {
         showToast(error instanceof ApiError ? error.message : String(error?.message ?? error), "error");
       }
+    } else if (action === "reload-trash") {
+      await loadTrash();
+    } else if (action === "restore-kb") {
+      const dir = target.dataset.dir;
+      const name = target.dataset.name;
+      try {
+        const result = await api.restoreKb(dir);
+        await loadKbs();
+        await loadTrash();
+        showToast(`已恢复「${result.restoredTo}」`);
+        window.location.hash = hrefForKb(result.restoredTo);
+      } catch (error) {
+        if (error instanceof ApiError && error.code === "KB_EXISTS") {
+          openRestoreModal({
+            name,
+            dir,
+            onRestored: async (restoredTo) => {
+              await loadKbs();
+              await loadTrash();
+              showToast(`已恢复为「${restoredTo}」`);
+              window.location.hash = hrefForKb(restoredTo);
+            },
+          });
+        } else {
+          showToast(error instanceof ApiError ? error.message : String(error?.message ?? error), "error");
+        }
+      }
     } else if (action === "toast-close") {
       hideToast();
     }
@@ -211,12 +256,14 @@ function hideToast() {
 function boot() {
   window.addEventListener("hashchange", () => {
     const current = route();
-    if (current.page === "detail") loadDetail(current.name, current.tab);
+    if (current.page === "trash") loadTrash();
+    else if (current.page === "detail") loadDetail(current.name, current.tab);
     else render();
   });
   const current = route();
   loadKbs().then(() => {
-    if (current.page === "detail") loadDetail(current.name, current.tab);
+    if (current.page === "trash") loadTrash();
+    else if (current.page === "detail") loadDetail(current.name, current.tab);
   });
 }
 

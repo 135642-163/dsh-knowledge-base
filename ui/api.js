@@ -41,5 +41,7 @@ export const api = {
   createKb: (body) => request("POST", "/kbs", body),
   patchKb: (name, body) => request("PATCH", `/kbs/${encodeURIComponent(name)}`, body),
   archiveKb: (name, confirm) => request("POST", `/kbs/${encodeURIComponent(name)}/archive`, { confirm }),
+  trash: () => request("GET", "/trash"),
+  restoreKb: (dir, name) => request("POST", `/trash/${encodeURIComponent(dir)}/restore`, name ? { name } : {}),
   sourceUrl: (name, id) => `${BASE}/kbs/${encodeURIComponent(name)}/docs/${encodeURIComponent(id)}/source`,
 };

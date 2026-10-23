@@ -10,4 +10,5 @@ export const icons = {
   upload: svg('<path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M4 20h16"/>'),
   external: svg('<path d="M14 3h7v7"/><path d="M10 14 21 3"/><path d="M21 14v7H3V3h7"/>'),
   file: svg('<path d="M14 3H6v18h12V7z"/><path d="M14 3v4h4"/>'),
+  trash: svg('<path d="M4 7h16"/><path d="M9 7V5h6v2"/><path d="M6 7l1 14h10l1-14"/><path d="M10 11v6M14 11v6"/>'),
 };

@@ -140,3 +140,6 @@ button { font: inherit; color: inherit; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
 .form-error { color: var(--danger); margin: 0; }
 code { background: var(--panel-2); border-radius: 4px; padding: 1px 4px; }
+.right { text-align: right; }
+.side-foot a + a { margin-left: 10px; }
+.trash .empty-card { margin-top: 10px; }

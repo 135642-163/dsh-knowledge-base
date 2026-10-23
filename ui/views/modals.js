@@ -105,6 +105,40 @@ export function openDocModal({ name, id }) {
   });
 }
 
+
+export function openRestoreModal({ name, dir, onRestored }) {
+  const node = overlay(`
+    <form class="modal-form">
+      <h2>恢复「${escapeHtml(name)}」</h2>
+      <p class="muted">原名称被占用时，换一个名称再恢复。</p>
+      <label class="field"><span>恢复后的名称</span><input name="name" value="${escapeAttr(name)}" maxlength="64" /></label>
+      <p class="form-error" hidden></p>
+      <div class="modal-actions">
+        <button type="button" class="btn" data-close>取消</button>
+        <button type="submit" class="btn primary">恢复</button>
+      </div>
+    </form>
+  `);
+  const form = node.querySelector("form");
+  const error = node.querySelector(".form-error");
+  form.onsubmit = async (event) => {
+    event.preventDefault();
+    const next = String(new FormData(form).get("name") ?? "").trim();
+    if (next === "") { error.textContent = "请输入名称"; error.hidden = false; return; }
+    const button = form.querySelector("button[type=submit]");
+    button.disabled = true;
+    try {
+      const result = await api.restoreKb(dir, next === name ? undefined : next);
+      node.remove();
+      onRestored?.(result.restoredTo);
+    } catch (failure) {
+      error.textContent = failure instanceof ApiError ? failure.message : String(failure?.message ?? failure);
+      error.hidden = false;
+      button.disabled = false;
+    }
+  };
+}
+
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
