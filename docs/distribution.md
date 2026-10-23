@@ -1,6 +1,6 @@
-# 分发与市场更新（v0.16.0）
+# 分发与市场更新（v0.17.0）
 
-## 0.16.0 的两个关键变更
+## 0.17.0 的关键变更
 
 1. **包名与 loader id 改名**（解决市场撞名）：
    - 包名：`dsh-knowledge-wiki`（原 `dsh-knowledge-base`）；
@@ -8,8 +8,13 @@
    - 与已收录的 `htcqp802/dsh-knowledge-base` 不再冲突。
 2. **放宽 DSH 兼容范围**：`peerDependencies["@deepseek-ai/dsh-tools"]` 改为
    `>=0.1.0-rc.6 <0.3.0`。已用 `dsh-tools@0.2.1-rc.2` 跑完整测试（139 个用例全通过）。
+3. **免 build-script 安装**：`tesseract.js` 的 postinstall（OpenCollective 提示）会触发
+   pnpm 的 build 审批；已把它的 `src/` vendored 到 `vendor/tesseract`（Apache-2.0），
+   依赖改为无 postinstall 的 `tesseract.js-core` 等。全新 `DSH_HOME` 下
+   `dsh plugin add file:...` 直接成功，不需要编辑 `allowBuilds`。
 
-> catalog PR 的两个阻塞点（维护者评论）就是这两项，现已在 v0.16.0 修复，等待 PR 重新检查/合并。
+> catalog PR 的三个阻塞点（peer 范围、撞名、build 审批）现已在 v0.17.0 修复；
+> PR 分支已更新并回复维护者，等待重新检查/合并。
 
 ## 安装（新用户）
 
