@@ -56,13 +56,12 @@ async function makeV2(dir) {
   );
 }
 
-test("v2 manifest migrates to v4 with compile-layer and trust defaults", async () => {
+test("v2 manifest migrates to v5 with compile-layer and trust defaults", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kb-v3-"));
   try {
     await makeV2(dir);
     const manifest = await readManifest(dir);
     assert.equal(manifest.schemaVersion, SCHEMA_VERSION);
-    assert.equal(manifest.schemaVersion, 4);
     for (const doc of manifest.docs) {
       assert.equal(doc.summary, "");
       assert.equal(doc.summarySource, "");
@@ -82,7 +81,7 @@ test("v2 manifest migrates to v4 with compile-layer and trust defaults", async (
   }
 });
 
-test("first v4 write backs up the v2 manifest", async () => {
+test("first v5 write backs up the v2 manifest", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kb-v3-write-"));
   try {
     await makeV2(dir);
@@ -94,7 +93,7 @@ test("first v4 write backs up the v2 manifest", async () => {
       sourcePath: "/tmp/c.txt",
     });
     const raw = JSON.parse(await readFile(join(dir, "kb.json"), "utf8"));
-    assert.equal(raw.schemaVersion, 4);
+    assert.equal(raw.schemaVersion, SCHEMA_VERSION);
     assert.equal(raw.docs.find((d) => d.id === "d2").kind, "note");
     await access(join(dir, "kb.json.v2.bak"));
     const backup = JSON.parse(await readFile(join(dir, "kb.json.v2.bak"), "utf8"));
