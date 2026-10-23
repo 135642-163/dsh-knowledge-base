@@ -3060,9 +3060,9 @@ export function formatBytes(bytes) {
 }
 
 export function extOf(path) {
-  const name = String(path ?? "").toLowerCase();
+  const name = String(path ?? "").split("/").pop().toLowerCase();
   const index = name.lastIndexOf(".");
-  return index >= 0 ? name.slice(index) : "";
+  return index > 0 ? name.slice(index) : "";
 }
 
 export function classifyFiles(entries, limits = {}) {
@@ -3284,6 +3284,10 @@ function uploadFile(batchId, item, { onProgress, signal } = {}) {
     };
     xhr.onerror = () => reject(new ApiError(0, "NETWORK_ERROR", "上传失败（网络错误）"));
     xhr.onabort = () => reject(new ApiError(0, "ABORTED", "上传已取消"));
+    if (signal?.aborted) {
+      reject(new ApiError(0, "ABORTED", "上传已取消"));
+      return;
+    }
     if (signal) signal.addEventListener("abort", () => xhr.abort(), { once: true });
     xhr.send(item.file);
   });
@@ -3608,6 +3612,7 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
         render();
       };
       await Promise.all(state.files.map((item) => queue.run(async () => {
+        if (state.closed) return;
         if (item.status === "uploaded") return;
         item.status = "uploading";
         render();
