@@ -194,3 +194,44 @@ test("进度文件写失败不改变导入结果，且只告警一次", { timeou
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("worker 进度里的错误文本净化绝对路径", { timeout: 90_000 }, async () => {
+  const root = await mkdtemp(join(tmpdir(), "kb-worker-progress-redact-"));
+  try {
+    const kbRoot = join(root, "kb-root");
+    const kb = "测试库";
+    const kbDir = join(kbRoot, kb);
+    await mkdir(kbDir, { recursive: true });
+    // 源文件不存在 → ENOENT 错误消息里带绝对 sourcePath，正好验证净化。
+    const sourcePath = join(kbDir, "资料", "缺失.md");
+    const progressFile = join(root, "progress.json");
+    const reportFile = join(root, "report.json");
+    const argsFile = join(root, "args.json");
+    await writeFile(
+      argsFile,
+      JSON.stringify({
+        kbRoot,
+        kb,
+        files: [{ sourcePath, relKey: "资料/缺失.md", title: "缺失", sourceFile: "资料/缺失.md" }],
+        config: { partMaxChars: 2000 },
+        reportFile,
+        progressFile,
+      }),
+      "utf8"
+    );
+
+    const result = await runWorker(argsFile);
+    assert.equal(result.exitCode, 1, `unexpected exit: ${result.stderr}`);
+    const progress = JSON.parse(await readFile(progressFile, "utf8"));
+    const failed = progress.files.find((file) => file.path === "资料/缺失.md");
+    assert.equal(failed?.status, "failed");
+    assert.ok(failed?.error?.length > 0);
+    assert.equal(failed.error.includes(sourcePath), false);
+    assert.equal(failed.error.includes(kbDir), false);
+    assert.equal(failed.error.includes(pluginRoot), false);
+    assert.ok(failed.error.includes("资料/缺失.md"), failed.error);
+    assert.ok(failed.error.length <= 200);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

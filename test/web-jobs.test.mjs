@@ -11,6 +11,16 @@ import { createJobRegistry } from "../lib/web/jobs.js";
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
+/** 结算要读 progress 文件（真实 I/O），单个 tick 在负载下可能不够：轮询到终态。 */
+async function waitSettled(jobs, id) {
+  for (let i = 0; i < 100; i += 1) {
+    const job = await jobs.get(id);
+    if (job && job.status !== "running") return job;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error("job did not settle");
+}
+
 function deferred() {
   let resolve;
   const promise = new Promise((r) => { resolve = r; });
@@ -70,8 +80,7 @@ test("import 进度从 progress 文件合并", async () => {
     assert.equal(job.progress.current, "b.pdf");
 
     gate.resolve();
-    await tick();
-    job = await jobs.get(id);
+    job = await waitSettled(jobs, id);
     assert.equal(job.status, "succeeded");
     assert.equal(job.progress.done, 1);
   } finally {

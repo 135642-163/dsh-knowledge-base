@@ -51,6 +51,20 @@ async function writeProgress() {
     }
   }
 }
+
+/**
+ * 进度文件会经 HTTP 下发给客户端：错误文本先做路径净化（绝对路径 → 相对路径/空串），
+ * 再截断 200 字符，避免把 kbDir/sourcePath/插件目录暴露给浏览器。
+ */
+function scrubProgressError(message, file) {
+  let out = String(message ?? "");
+  if (file?.sourcePath) {
+    out = out.split(String(file.sourcePath)).join(String(file.sourceFile ?? file.relKey ?? ""));
+  }
+  out = out.split(kbDir).join("");
+  out = out.split(pluginRoot).join("");
+  return out.slice(0, 200);
+}
 await writeProgress();
 
 // tesseract.js 的 worker 线程偶发在消息回调里抛异常（如内存压力下的图像解码失败），
@@ -115,7 +129,7 @@ for (let i = 0; i < files.length; i++) {
     progress.done += 1;
     progress.fail += 1;
     progress.files[i].status = "failed";
-    progress.files[i].error = message.slice(0, 200);
+    progress.files[i].error = scrubProgressError(message, f);
     await writeProgress();
     process.stdout.write(`KB:FAIL [${label}] ${f.title}: ${message}\n`);
   }
