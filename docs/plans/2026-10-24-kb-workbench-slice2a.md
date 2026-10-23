@@ -3356,7 +3356,7 @@ git commit -m "feat(ui): add upload, job and std API client methods"
 > 2. `similar` 列表必须在报告里显示（低置信相似文件照常导入了，不能静默）。
 > 3. `skip > 0` 的批次会被保留但不属于 `failed`；报告里要把 skipped 行标为可重试（或明确说明“文档正在导入中，稍后重试”）。
 
-- [ ] **Step 11.1: 写 DOM 无关的失败测试**
+- [x] **Step 11.1: 写 DOM 无关的失败测试**
 
 上传弹窗本体不便在 node 里测；把状态机里可测的一段抽到 `ui/upload-core.js`（Task 9 已含标签/队列）。本任务补一个测试保证 `escapeHtml`/状态流转的纯部分：
 
@@ -3379,12 +3379,12 @@ test("nextPhase 覆盖上传/导入状态机", () => {
 });
 ```
 
-- [ ] **Step 11.2: 运行确认失败**
+- [x] **Step 11.2: 运行确认失败**
 
 Run: `node --test test/upload-core.test.mjs`
 Expected: FAIL，`nextPhase` 未导出。
 
-- [ ] **Step 11.3: 在 `ui/upload-core.js` 增加 `nextPhase`**
+- [x] **Step 11.3: 在 `ui/upload-core.js` 增加 `nextPhase`**
 
 ```js
 const TRANSITIONS = {
@@ -3399,7 +3399,7 @@ export function nextPhase(phase, event) {
 }
 ```
 
-- [ ] **Step 11.4: 实现 `ui/views/upload.js`**
+- [x] **Step 11.4: 实现 `ui/views/upload.js`**
 
 ```js
 import { api, ApiError } from "../api.js";
@@ -3759,7 +3759,7 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
 
 > 实现要点：拖拽只接受文件（`showDirectoryPicker` 不做）；`state.abort` 在关闭弹窗时中止上传；关闭时若批次处于 `open` 会 `DELETE` 丢弃批次，已启动导入的任务不取消（下次打开用 localStorage 里的 jobId 恢复进度）。
 
-- [ ] **Step 11.5: 在 `ui/app.js` 接入口**
+- [x] **Step 11.5: 在 `ui/app.js` 接入口**
 
 import 增加：
 
@@ -3789,7 +3789,7 @@ import { openUploadModal } from "./views/upload.js";
         },
 ```
 
-- [ ] **Step 11.6: 在总览与库详情加入口**
+- [x] **Step 11.6: 在总览与库详情加入口**
 
 `ui/views/overview.js` 的 `overview-head` 里的 `filters` 之前插入：
 
@@ -3807,7 +3807,7 @@ import { openUploadModal } from "./views/upload.js";
 
 （`icons` 已在 renderDetail 的 ctx 里，核对传入。）
 
-- [ ] **Step 11.7: 补 `ui/style.css`**
+- [x] **Step 11.7: 补 `ui/style.css`**
 
 ```css
 .head-actions { display: flex; gap: 8px; }
@@ -3825,7 +3825,7 @@ import { openUploadModal } from "./views/upload.js";
 .check { display: inline-flex; gap: 6px; align-items: center; }
 ```
 
-- [ ] **Step 11.8: 跑测试 + 手工冒烟**
+- [x] **Step 11.8: 跑测试 + 手工冒烟**
 
 Run:
 ```bash
@@ -3834,12 +3834,20 @@ npm test
 ```
 Expected: 全通过。然后在 DSH 桌面端 `Cmd+R` 后打开工作台，手工验收（见 Task 14）。
 
-- [ ] **Step 11.9: Commit**
+- [x] **Step 11.9: Commit**
 
 ```bash
-git add ui/views/upload.js ui/app.js ui/views/overview.js ui/views/detail.js ui/views/modals.js ui/style.css test/upload-core.test.mjs
+git add ui/views/upload.js ui/app.js ui/views/overview.js ui/views/detail.js ui/views/modals.js ui/style.css test/upload-core.test.mjs package.json scripts/check-ui.mjs
 git commit -m "feat(ui): add upload modal with per-file progress, retry and job recovery"
 ```
+
+### Task 11 实现修正记录（2026-10-24，已执行）
+
+1. **计划缺陷修复**：选项（跨库重复/OCR）改为 state 保存（计划在 re-render 后读 DOM 会丢）；`importStarted` 只在拿到 jobId 后置位（全重复批次保持 open）；close 只 remember 运行中任务；轮询/导入/恢复全程 `state.closed` 守卫；重试按 `result.files[].path` 匹配（失败+跳过+上传失败）；展示 `similar`、跳过说明、上传失败原因；jobId-null 分支也展示 similar 并回调刷新。
+2. **交互补强**：错误态提供 `重试导入`（同批次重发）与 `重新选择`（删 open 批次、文件回 pending、forget resume）；Esc 改为 document 级（select/done/error）；隐藏 file input 挂到 overlay 防 re-render 丢失；开始按钮 gate 到 resume 检查 + limits 加载完成；KB 切换会重新检查 resume；拖拽守卫改为 overlay 级（任何 phase 都不导航）；轮询失败重试一次后报错，404 清 key。
+3. **样式**：上传行改用 `uprow uprow-progress`，避免全局 `.bar` 把行压成 8px；重复/相似带「同库/跨库」。
+4. **UI 语法门禁**：新增 `scripts/check-ui.mjs`（esbuild transform，覆盖 ui/**/*.js），已接入 `npm test`（当前 10 个模块）。
+5. **测试 282**：upload-core 10 条（含 nextPhase）+ 全量；UI 无 DOM 自动化，浏览器验收留 Task 14。
 
 ---
 
