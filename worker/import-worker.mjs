@@ -1,13 +1,17 @@
 /**
  * 后台导入 worker：由插件通过 ctx.subprocess 以 node 子进程启动。
- * 参数 = process.argv[2]（JSON）: { kbRoot, kb, files: [{path, relKey, title}], config }
- * 进度与结果经 stdout 输出（KB:START / KB:PROGRESS / KB:OK / KB:FAIL / KB:DONE），
+ * 参数 = process.argv[2]（JSON）:
+ *   { kbRoot, kb, files: [{ sourcePath, sourceFile, relKey, title, docId? }],
+ *     config, reportFile?, progressFile? }
+ * progressFile 记录逐文件进度（尽力而为：写失败只在 stderr 告警一次，不影响导入）。
+ * 进度与结果同时经 stdout 输出（KB:START / KB:PROGRESS / KB:OK / KB:FAIL / KB:DONE / KB:RESULT），
  * 由后台任务的 readOutput 流式呈现（配合内置 job_output 工具）。
  */
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { importFileInto } from "../lib/pipeline.js";
+import { createProgress, writeProgressFile } from "../lib/progress.js";
 import { readManifest } from "../lib/store.js";
 import { refreshIndexIfStale } from "../lib/wiki.js";
 
@@ -33,21 +37,18 @@ const kbDir = join(kbRoot, kb);
 await mkdir(kbDir, { recursive: true });
 const jobConfig = { ...config, langPath: config.langPath ?? join(pluginRoot, "data", "tessdata") };
 
-const progressFiles = files.map((f) => ({
-  path: String(f.sourceFile ?? f.relKey ?? f.title ?? ""),
-  status: "pending",
-}));
-const progress = { done: 0, total: files.length, ok: 0, fail: 0, skip: 0, current: null, files: progressFiles };
+const progress = createProgress(files);
+let progressWarned = false;
 
 async function writeProgress() {
   if (!progressFile) return;
-  const tmp = `${progressFile}.tmp`;
   try {
-    await writeFile(tmp, JSON.stringify({ ...progress, updatedAt: new Date().toISOString() }, null, 2), "utf8");
-    await rm(progressFile, { force: true }).catch(() => {});
-    await rename(tmp, progressFile);
-  } catch {
-    /* 进度文件是附属产物，失败不影响导入 */
+    await writeProgressFile(progressFile, progress);
+  } catch (error) {
+    if (!progressWarned) {
+      progressWarned = true;
+      process.stderr.write(`worker: 进度文件写入失败（忽略）: ${String(error?.message ?? error)}\n`);
+    }
   }
 }
 await writeProgress();
@@ -64,14 +65,11 @@ process.on("unhandledRejection", (reason) => {
 });
 
 process.stdout.write(`KB:START 知识库「${kb}」开始导入 ${files.length} 个文件\n`);
-let ok = 0;
-let fail = 0;
-let skip = 0;
 const results = [];
 for (let i = 0; i < files.length; i++) {
   const f = files[i];
   const label = `${i + 1}/${files.length}`;
-  progress.current = progressFiles[i].path;
+  progress.current = progress.files[i].path;
   await writeProgress();
   try {
     const report = await importFileInto(kbDir, {
@@ -86,15 +84,14 @@ for (let i = 0; i < files.length; i++) {
       onProgress: (msg) => process.stdout.write(`KB:PROGRESS [${label}] ${msg}\n`),
     });
     if (report.skipped === true) {
-      skip += 1;
       results.push({ title: f.title, docId: report.docId ?? null, status: "skipped" });
       process.stdout.write(`KB:SKIP [${label}] ${report.title}: 该文档正在导入中，已跳过\n`);
+      progress.done += 1;
       progress.skip += 1;
-      progressFiles[i].status = "skipped";
+      progress.files[i].status = "skipped";
       await writeProgress();
       continue;
     }
-    ok += 1;
     results.push({
       title: f.title,
       docId: report.docId ?? null,
@@ -110,20 +107,23 @@ for (let i = 0; i < files.length; i++) {
     );
     progress.done += 1;
     progress.ok += 1;
-    progressFiles[i].status = "ok";
+    progress.files[i].status = "ok";
     await writeProgress();
   } catch (error) {
-    fail += 1;
     const message = String(error?.message ?? error);
     results.push({ title: f.title, status: "failed", error: message.slice(0, 500) });
     progress.done += 1;
     progress.fail += 1;
-    progressFiles[i].status = "failed";
-    progressFiles[i].error = message.slice(0, 200);
+    progress.files[i].status = "failed";
+    progress.files[i].error = message.slice(0, 200);
     await writeProgress();
     process.stdout.write(`KB:FAIL [${label}] ${f.title}: ${message}\n`);
   }
 }
+
+// 收尾：清空 current，让消费者区分“进行中”和“已结束”（任务状态仍是最终依据）。
+progress.current = null;
+await writeProgress();
 
 // 批量导入结束后刷新一次 index.md（不要每篇都写，避免大库重复写盘）
 try {
@@ -133,7 +133,7 @@ try {
 }
 
 // 逐文件统计：宿主用它判断“完成/部分失败”，不再只看进程退出码。
-const summary = { ok, fail, skip, files: results };
+const summary = { ok: progress.ok, fail: progress.fail, skip: progress.skip, files: results };
 if (reportFile) {
   try {
     await mkdir(dirname(reportFile), { recursive: true });
@@ -142,6 +142,8 @@ if (reportFile) {
     process.stderr.write(`worker: 无法写入导入报告 ${reportFile}: ${String(error?.message ?? error)}\n`);
   }
 }
-process.stdout.write(`KB:RESULT ${JSON.stringify({ ok, fail, skip })}\n`);
-process.stdout.write(`KB:DONE 完成: 成功 ${ok}，失败 ${fail}${skip > 0 ? `，跳过 ${skip}` : ""}\n`);
-process.exit(ok === 0 && fail > 0 ? 1 : 0);
+process.stdout.write(`KB:RESULT ${JSON.stringify({ ok: progress.ok, fail: progress.fail, skip: progress.skip })}\n`);
+process.stdout.write(
+  `KB:DONE 完成: 成功 ${progress.ok}，失败 ${progress.fail}${progress.skip > 0 ? `，跳过 ${progress.skip}` : ""}\n`
+);
+process.exit(progress.ok === 0 && progress.fail > 0 ? 1 : 0);
