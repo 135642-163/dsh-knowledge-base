@@ -1,5 +1,5 @@
 /**
- * 0.13.0 清单 v2 → v3：
+ * 0.13.0/0.16.0 清单 v2 → v4：
  * - 文档补齐 summary/summarySource/tags；
  * - 笔记补齐 kind/sources/linksOut；
  * - 首次写入 v3 前备份为 kb.json.v2.bak（v1 仍沿用 kb.json.v1.bak）。
@@ -56,17 +56,19 @@ async function makeV2(dir) {
   );
 }
 
-test("v2 manifest migrates to v3 with compile-layer defaults", async () => {
+test("v2 manifest migrates to v4 with compile-layer and trust defaults", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kb-v3-"));
   try {
     await makeV2(dir);
     const manifest = await readManifest(dir);
     assert.equal(manifest.schemaVersion, SCHEMA_VERSION);
-    assert.equal(manifest.schemaVersion, 3);
+    assert.equal(manifest.schemaVersion, 4);
     for (const doc of manifest.docs) {
       assert.equal(doc.summary, "");
       assert.equal(doc.summarySource, "");
       assert.deepEqual(doc.tags, []);
+      assert.equal(doc.trust, "unknown");
+      assert.equal(doc.trustReason, "");
     }
     const note = manifest.docs.find((d) => d.id === "d2");
     assert.equal(note.kind, "note");
@@ -80,7 +82,7 @@ test("v2 manifest migrates to v3 with compile-layer defaults", async () => {
   }
 });
 
-test("first v3 write backs up the v2 manifest", async () => {
+test("first v4 write backs up the v2 manifest", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kb-v3-write-"));
   try {
     await makeV2(dir);
@@ -92,7 +94,7 @@ test("first v3 write backs up the v2 manifest", async () => {
       sourcePath: "/tmp/c.txt",
     });
     const raw = JSON.parse(await readFile(join(dir, "kb.json"), "utf8"));
-    assert.equal(raw.schemaVersion, 3);
+    assert.equal(raw.schemaVersion, 4);
     assert.equal(raw.docs.find((d) => d.id === "d2").kind, "note");
     await access(join(dir, "kb.json.v2.bak"));
     const backup = JSON.parse(await readFile(join(dir, "kb.json.v2.bak"), "utf8"));

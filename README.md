@@ -17,6 +17,7 @@
 | `kb_edit` | 精确替换修订（持续修改完善）；`doc="schema"` 可修订该库维护规范（index/log 自动维护，不能编辑） |
 | `kb_describe` | 给文档写一行摘要与标签（编目）：摘要会显示在 `kb_list` 与 `index.md`，重解析/重导入不会覆盖模型写的摘要；存量文档可 `all=true` + `auto=true` 批量回填缺失摘要（抽取式，不递增版本号，`limit` 分批） |
 | `kb_retitle` | 修正标题：单篇传 `doc`（默认按 `cleanTitle` 去掉站点域名、`GB_T`、序号、span 残留等噪声），批量传 `all=true`（默认 `dryRun=true` 只预览，确认后 `dryRun=false` 应用）；会重建合并版首行标题、保留历史、版本+1 |
+| `kb_trust` | 标注来源可信度：`high`（已发布现行标准、正式教材）/ `medium`（企业文件、培训资料、报批稿）/ `low`（草案、征求意见稿、已废止标准）/ `unknown`（清除）；支持单篇、`docs` 列表、`all=true` + `query`/`stage` 过滤（批量默认 dryRun）。检索会优先高可信、标注低可信并提醒用户 |
 | `kb_lint` | 机械体检：导入失败、旧管线、文字层损坏/OCR 低置信、内容重复、同标准号同期同阶段重复、同号多版本、未编目、笔记无来源、续/修订版提示、无入链笔记、缺 schema；输出分组问题与建议动作（`kb_reparse`/`kb_describe`/`kb_remove`/`kb_edit`） |
 | `kb_edit_batch` | 批量精确修订（事务语义）：一次提交 1–50 条 `{doc, old_string, new_string, replaceAll?}`，**先全部校验再写入**；任一条失败整批不改并回滚已写分块；`dryRun=true` 只校验。适合“一次改 10–15 页”的跨文档维护；同一文档一批只允许一条编辑 |
 | `kb_snapshot` | 库级快照：把 `kb.json`、`schema/index/log`、派生 `markdown/`（可选 `sources/`）打包到知识库 `snapshots/`，用于批量编辑/重解析前留档；`list=true` 列出已有快照 |
@@ -112,6 +113,18 @@ exports/                   导出产物
   `GBT 11032`、`GB∕T 11032`、`GB_T 11032` 都能命中 `GB/T 11032-2020`；
   年份分隔符 `- — – ~ ～` 等价；`GB 11032` 不会误命中 `GB/T 11032`。
   显式正则（含 `\d`、括号等元字符）原样执行，输出里会标 `expandedPattern` 说明已扩展。
+
+## 可信度标签（0.16.0）
+
+- **`kb_trust`**：给文档标 `high` / `medium` / `low` / `unknown`（清除），可写理由。
+  - 单篇：`doc`；批量：`docs` 列表；整库按条件：`all=true` + `query`（标题子串）/ `stage`（published / draft / material）。
+  - 批量默认 `dryRun=true` 先预览；写入只改元数据，不递增版本号。
+- **检索与阅读**：`kb_query` 命中项带 `trust`，排序对高可信加分、低可信减分但**不隐藏**；
+  结果里标注 `[可信度:高/中/低]`，命中含低可信文件时给出提醒。
+  `kb_read` 头部显示可信度；`kb_list` 可按 `trust` 过滤并显示标签；`index.md` 每条也带可信度。
+- **使用约定**：多份资料矛盾时，优先采用高可信版本，同时告知用户低可信来源及分歧；
+  已废止标准、草案、征求意见稿应标 `low`，报批稿/企业文件通常 `medium`，发布/现行标准与正式教材为 `high`。
+- **体检**：`kb_lint` 会统计未标注可信度的文档并建议 `kb_trust`。
 
 ## 互操作与维护：Vault / 批量事务 / 快照（0.15.0）
 
@@ -335,7 +348,7 @@ done
 ## 测试
 
 ```bash
-npm test          # node:test（134 个用例）；覆盖查重精度、同名文件保护、后台失败统计、检索截断/单文档上限、
+npm test          # node:test（139 个用例）；覆盖查重精度、同名文件保护、后台失败统计、检索截断/单文档上限、
                   # 相似导入提示、OCR 模型检查、流式 zip、心跳与锁回收、
                   # 清单 v1→v2→v3 迁移与备份、内容哈希跳过、kb_reparse、分块索引/页码锚点、
                   # kb_list 分页/过滤/kind、检索排序、跨库检索、文字层质量启发式、
@@ -347,7 +360,8 @@ npm test          # node:test（134 个用例）；覆盖查重精度、同名�
                   # 笔记 kind/tags/sources/同标题 upsert、反链、导出 frontmatter 与索引、
                   # kb_lint 分组与假阳性防护、kb_retitle 清洗/批量预览、标准号检索归一变体、
                   # Vault 导出结构/双链、批量事务编辑的回滚与 dryRun、库级快照创建/列表、
-                  # 存量摘要回填（模型摘要保护/limit/remaining/表格兜底）
+                  # 存量摘要回填（模型摘要保护/limit/remaining/表格兜底）、
+                  # 可信度标注/过滤/排序/低可信提醒
                   # （全部使用临时目录，不依赖本机知识库）
 ```
 
