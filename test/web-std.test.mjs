@@ -94,9 +94,9 @@ test("readStdStatus 推导 lastCheckAt/pending/valid 且不含 cookie", async ()
     JSON.stringify({
       items: {
         k1: { status: "update", checkedAt: now - 3 * 86400000, siteNo: "GB/T 1" },
-        k2: { status: "released", checkedAt: now - 2 * 86400000, siteNo: "GB/T 2" },
-        k3: { status: "update", checkedAt: now - 10 * 86400000, downloadedAt: "2026-10-14T00:00:00.000Z" },
-        k4: { status: "current", checkedAt: now - 9 * 86400000 },
+        k2: { status: "released", checkedAt: now - 10 * 86400000, siteNo: "GB/T 2" },
+        k3: { status: "update", checkedAt: now - 12 * 86400000, downloadedAt: "2026-10-14T00:00:00.000Z" },
+        k4: { status: "current", checkedAt: now - 11 * 86400000 },
       },
     }),
     "utf8"
