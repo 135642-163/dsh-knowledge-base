@@ -130,3 +130,22 @@ test("kb_lint tool renders a grouped report", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("redline / errata / companion material are distinct stages, not duplicates", () => {
+  const docs = [
+    baseDoc("r1", "IEEE Std 519-2014"),
+    baseDoc("r2", "IEEE Std 519-2014 Redline"),
+    baseDoc("g1", "GB 38755-2019"),
+    baseDoc("g2", "GB 38755-2019-修编情况介绍"),
+    baseDoc("c1", "IEC 61000-4-30-2015"),
+    baseDoc("c2", "IEC 61000-4-30-2015-cor1{ed3.0}b"),
+    baseDoc("s1", "IEC 61869-103-2012"),
+    baseDoc("s2", "IEC 61869-103-2012 SASO"),
+  ];
+  const report = lintManifest(
+    { schemaVersion: 3, name: "阶段测试", docs },
+    { kbName: "阶段测试", hasSchema: true, now }
+  );
+  assert.equal(report.counts.sameNumberDuplicateGroups, 0, "must not flag variants as duplicates");
+  assert.equal(report.counts.sameNumberStageGroups, 4, "each pair is a same-number different-stage info item");
+});
