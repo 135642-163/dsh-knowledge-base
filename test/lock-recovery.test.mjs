@@ -106,18 +106,23 @@ test("sweepStaging keeps ui-batches while removing other stale temp files", asyn
   const dir = await mkdtemp(join(tmpdir(), "kb-sweep-batches-"));
   try {
     const tmp = join(dir, "import-tmp");
-    const batchDir = join(tmp, "ui-batches", "b-000000000000");
+    const batchesRoot = join(tmp, "ui-batches");
+    const batchDir = join(batchesRoot, "b-000000000000");
     await mkdir(batchDir, { recursive: true });
     const staleFile = join(tmp, "worker-old.json");
     await writeFile(staleFile, "{}", "utf8");
     const twoDaysAgo = new Date(Date.now() - 2 * 24 * 3600 * 1000);
     await utimes(staleFile, twoDaysAgo, twoDaysAgo);
     await utimes(batchDir, twoDaysAgo, twoDaysAgo);
+    // sweepStaging 只看 import-tmp 顶层条目的 mtime，必须把 ui-batches 本身也做旧，
+    // 否则顶层目录仍是新的，旧实现也会“通过”，测试没有区分力。
+    await utimes(batchesRoot, twoDaysAgo, twoDaysAgo);
 
     await sweepStaging(dir);
 
     await assert.rejects(access(staleFile), "stale temp file should be removed");
     // ui-batches 批次目录由 sweepOldBatches 负责，不能被 sweepStaging 删掉
+    await access(batchesRoot);
     await access(batchDir);
   } finally {
     await rm(dir, { recursive: true, force: true });
