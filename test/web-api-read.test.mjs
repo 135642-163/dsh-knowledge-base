@@ -66,10 +66,15 @@ async function setup() {
 
 test("GET /status returns feature flags", async () => {
   const { kbRoot } = await setup();
-  const { res, json } = await call({ kbRoot }, makeReq({ url: "/kb/api/status" }));
+  const limits = { maxUploadBytes: 1000, maxBatchFiles: 10, extensions: [".md"] };
+  const { res, json } = await call({ kbRoot, limits }, makeReq({ url: "/kb/api/status" }));
   assert.equal(res.status, 200);
   assert.equal(json.ok, true);
   assert.equal(json.features.merge, false);
+  assert.equal(json.features.upload, true);
+  assert.equal(json.features.std, true);
+  assert.equal(json.limits.maxUploadBytes, 1000);
+  assert.deepEqual(json.limits.extensions, [".md"]);
 });
 
 test("GET /kbs returns summaries with description and stats", async () => {
