@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { handleApi } from "../lib/web/api.js";
 import { createJobRegistry } from "../lib/web/jobs.js";
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -378,4 +379,83 @@ test("hasRunning 按 kb/kind 过滤运行中任务", async () => {
   await tick();
   assert.equal(jobs.hasRunning(), false);
   assert.ok(await jobs.get(id));
+});
+
+function makeRes() {
+  return {
+    status: 0,
+    headers: {},
+    body: "",
+    writeHead(status, headers) { this.status = status; this.headers = headers; },
+    end(body = "") { this.body += body; },
+  };
+}
+
+function makeReq({ method = "GET", url = "/kb/api/status", headers = {}, body } = {}) {
+  return {
+    method,
+    url,
+    headers: { host: "127.0.0.1:55929", origin: "http://127.0.0.1:55929", "x-kb-ui": "1", ...headers },
+    async *[Symbol.asyncIterator]() {
+      if (body !== undefined) yield Buffer.from(String(body));
+    },
+  };
+}
+
+async function call(opts, req) {
+  const res = makeRes();
+  await handleApi(req, res, { opts, fence: () => true });
+  return { res, json: res.body ? JSON.parse(res.body) : null };
+}
+
+test("GET /jobs/:id 返回任务（含 result），未知 id 404", async () => {
+  const jobs = createJobRegistry();
+  const kbRoot = join(await mkdtemp(join(tmpdir(), "kb-jobs-api-")), "kb");
+  const opts = { kbRoot, jobs, limits: { maxUploadBytes: 1024, maxBatchFiles: 10, extensions: [".md"] } };
+  const id = jobs.start({ kind: "kb-import", kb: "A", label: "a", run: async () => ({ status: "succeeded", result: { ok: 0 } }) });
+  await new Promise((resolve) => setImmediate(resolve));
+  const ok = await call(opts, makeReq({ method: "GET", url: `/kb/api/jobs/${id}` }));
+  assert.equal(ok.res.status, 200);
+  assert.equal(ok.json.job.status, "succeeded");
+  assert.equal(ok.json.job.progress, null);
+  assert.deepEqual(ok.json.job.result, { ok: 0 });
+  const missing = await call(opts, makeReq({ method: "GET", url: "/kb/api/jobs/kb-import-nope" }));
+  assert.equal(missing.res.status, 404);
+  assert.equal(missing.json.error.code, "JOB_NOT_FOUND");
+});
+
+test("GET /jobs 支持 kb/kind/limit 过滤，列表行省略 result", async () => {
+  const jobs = createJobRegistry();
+  const kbRoot = join(await mkdtemp(join(tmpdir(), "kb-jobs-api2-")), "kb");
+  const opts = { kbRoot, jobs, limits: { maxUploadBytes: 1024, maxBatchFiles: 10, extensions: [".md"] } };
+  const a = jobs.start({ kind: "kb-import", kb: "A", label: "a", run: async () => ({ status: "succeeded", result: { ok: 1 } }) });
+  const b = jobs.start({ kind: "kb-std", kb: "B", label: "b", run: async () => ({ status: "succeeded", result: { checked: 2 } }) });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const byKb = await call(opts, makeReq({ method: "GET", url: "/kb/api/jobs?kb=A" }));
+  assert.equal(byKb.res.status, 200);
+  assert.equal(byKb.json.jobs.length, 1);
+  assert.equal(byKb.json.jobs[0].id, a);
+  assert.equal("result" in byKb.json.jobs[0], false);
+  // 列表行 = 公开投影去掉 result，且不泄露 progressFile/handle 等内部字段。
+  assert.deepEqual(Object.keys(byKb.json.jobs[0]).sort(), [
+    "detail", "finishedAt", "id", "kb", "kind", "label", "progress", "startedAt", "status",
+  ]);
+
+  const byKind = await call(opts, makeReq({ method: "GET", url: "/kb/api/jobs?kind=kb-std" }));
+  assert.equal(byKind.json.jobs.length, 1);
+  assert.equal(byKind.json.jobs[0].kb, "B");
+  assert.equal(byKind.json.jobs[0].id, b);
+  assert.equal("result" in byKind.json.jobs[0], false);
+
+  const limited = await call(opts, makeReq({ method: "GET", url: "/kb/api/jobs?limit=1" }));
+  assert.equal(limited.json.jobs.length, 1);
+  // limit=0 交给注册表兜底为默认 20，而不是 0 条。
+  const defaulted = await call(opts, makeReq({ method: "GET", url: "/kb/api/jobs?limit=0" }));
+  assert.equal(defaulted.json.jobs.length, 2);
+
+  // 详情才返回完整 result。
+  const detail = await call(opts, makeReq({ method: "GET", url: `/kb/api/jobs/${b}` }));
+  assert.equal(detail.res.status, 200);
+  assert.deepEqual(detail.json.job.result, { checked: 2 });
 });
