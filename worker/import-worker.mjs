@@ -4,7 +4,7 @@
  * 进度与结果经 stdout 输出（KB:START / KB:PROGRESS / KB:OK / KB:FAIL / KB:DONE），
  * 由后台任务的 readOutput 流式呈现（配合内置 job_output 工具）。
  */
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { importFileInto } from "../lib/pipeline.js";
@@ -22,7 +22,7 @@ if (payload.startsWith("@")) {
   await rm(argsFile, { force: true }).catch(() => {});
 }
 const args = JSON.parse(payload);
-const { kbRoot, kb, files = [], config = {}, reportFile } = args;
+const { kbRoot, kb, files = [], config = {}, reportFile, progressFile } = args;
 
 if (!kbRoot || !kb || files.length === 0) {
   process.stderr.write("worker: 缺少 kbRoot/kb/files 参数\n");
@@ -32,6 +32,25 @@ if (!kbRoot || !kb || files.length === 0) {
 const kbDir = join(kbRoot, kb);
 await mkdir(kbDir, { recursive: true });
 const jobConfig = { ...config, langPath: config.langPath ?? join(pluginRoot, "data", "tessdata") };
+
+const progressFiles = files.map((f) => ({
+  path: String(f.sourceFile ?? f.relKey ?? f.title ?? ""),
+  status: "pending",
+}));
+const progress = { done: 0, total: files.length, ok: 0, fail: 0, skip: 0, current: null, files: progressFiles };
+
+async function writeProgress() {
+  if (!progressFile) return;
+  const tmp = `${progressFile}.tmp`;
+  try {
+    await writeFile(tmp, JSON.stringify({ ...progress, updatedAt: new Date().toISOString() }, null, 2), "utf8");
+    await rm(progressFile, { force: true }).catch(() => {});
+    await rename(tmp, progressFile);
+  } catch {
+    /* 进度文件是附属产物，失败不影响导入 */
+  }
+}
+await writeProgress();
 
 // tesseract.js 的 worker 线程偶发在消息回调里抛异常（如内存压力下的图像解码失败），
 // 未捕获会直接杀死进程。这里兜底：记录崩溃点并优雅退出，配合 resume 机制断点续跑。
@@ -52,6 +71,8 @@ const results = [];
 for (let i = 0; i < files.length; i++) {
   const f = files[i];
   const label = `${i + 1}/${files.length}`;
+  progress.current = progressFiles[i].path;
+  await writeProgress();
   try {
     const report = await importFileInto(kbDir, {
       sourcePath: f.sourcePath ?? f.path,
@@ -68,6 +89,9 @@ for (let i = 0; i < files.length; i++) {
       skip += 1;
       results.push({ title: f.title, docId: report.docId ?? null, status: "skipped" });
       process.stdout.write(`KB:SKIP [${label}] ${report.title}: 该文档正在导入中，已跳过\n`);
+      progress.skip += 1;
+      progressFiles[i].status = "skipped";
+      await writeProgress();
       continue;
     }
     ok += 1;
@@ -84,10 +108,19 @@ for (let i = 0; i < files.length; i++) {
     process.stdout.write(
       `KB:OK [${label}] ${report.title} (${report.docId}) ${report.type} ${report.pages ? report.pages + "页 " : ""}${report.chars}字 ${report.parts}部分 ${Math.round(report.ms / 1000)}s${report.warnings?.length ? ` 警告${report.warnings.length}条` : ""}\n`
     );
+    progress.done += 1;
+    progress.ok += 1;
+    progressFiles[i].status = "ok";
+    await writeProgress();
   } catch (error) {
     fail += 1;
     const message = String(error?.message ?? error);
     results.push({ title: f.title, status: "failed", error: message.slice(0, 500) });
+    progress.done += 1;
+    progress.fail += 1;
+    progressFiles[i].status = "failed";
+    progressFiles[i].error = message.slice(0, 200);
+    await writeProgress();
     process.stdout.write(`KB:FAIL [${label}] ${f.title}: ${message}\n`);
   }
 }
