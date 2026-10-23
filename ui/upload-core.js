@@ -104,3 +104,15 @@ export function summarizeResults(result) {
   const skip = Number(result?.skip) || 0;
   return { total: ok + fail + skip, ok, failed: fail, skipped: skip, files };
 }
+
+/** 上传弹窗状态机：未声明的 (phase, event) 保持原状态，避免非法跳转把弹窗卡死。 */
+const TRANSITIONS = {
+  select: { start: "uploading" },
+  uploading: { uploaded: "starting" },
+  starting: { started: "importing", failed: "error" },
+  importing: { settled: "done", failed: "error" },
+};
+
+export function nextPhase(phase, event) {
+  return TRANSITIONS[phase]?.[event] ?? phase;
+}

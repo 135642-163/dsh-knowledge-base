@@ -10,6 +10,47 @@ function overlay(html) {
   return node;
 }
 
+/**
+ * 通用确认弹窗。body 是调用方拼好的 HTML（用户数据必须先 escape），
+ * requireCheckbox=true 时需勾选确认才能提交。
+ */
+export function openConfirmModal({ title, body = "", confirmText = "确认", requireCheckbox = false, onConfirm } = {}) {
+  const node = overlay(`
+    <form class="modal-form">
+      <h2>${escapeHtml(title)}</h2>
+      <div class="confirm-body">${String(body ?? "")}</div>
+      ${requireCheckbox ? `<label class="check"><input type="checkbox" name="ack" /> 我已了解以上内容</label>` : ""}
+      <p class="form-error" hidden></p>
+      <div class="modal-actions">
+        <button type="button" class="btn" data-close>取消</button>
+        <button type="submit" class="btn primary">${escapeHtml(confirmText)}</button>
+      </div>
+    </form>
+  `);
+  const form = node.querySelector("form");
+  const error = node.querySelector(".form-error");
+  form.onsubmit = async (event) => {
+    event.preventDefault();
+    if (requireCheckbox && !form.querySelector("input[name='ack']")?.checked) {
+      error.textContent = "请先勾选确认";
+      error.hidden = false;
+      return;
+    }
+    const button = form.querySelector("button[type=submit]");
+    button.disabled = true;
+    try {
+      await onConfirm?.();
+      node.remove();
+    } catch (failure) {
+      error.textContent = failure instanceof ApiError ? failure.message : String(failure?.message ?? failure);
+      error.hidden = false;
+      button.disabled = false;
+    }
+  };
+  return node;
+}
+
+
 export function openCreateModal({ onCreated }) {
   const node = overlay(`
     <form class="modal-form">

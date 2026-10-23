@@ -20,6 +20,7 @@ export function renderDetail(state, current, { icons, fmtNumber }) {
           <p class="muted">${kb.description ? escapeHtml(kb.description) : "未填写简介"}</p>
         </div>
         <div class="detail-actions">
+          <button class="btn primary" data-action="upload" data-kb="${escapeAttr(kb.name)}">${icons.upload}<span>上传资料</span></button>
           <button class="btn" data-action="archive-kb" data-name="${escapeAttr(kb.name)}">${icons.archive}<span>归档</span></button>
         </div>
       </div>
@@ -85,7 +86,7 @@ function overview(kb, detail, { fmtNumber }) {
 function docs(name, state, { fmtNumber }) {
   const page = state.docs;
   if (!page.items || page.items.length === 0) {
-    return `<div class="state">还没有资料，Slice 2 会上线“上传资料”。</div>`;
+    return `<div class="state">还没有资料，点右上角的「上传资料」开始导入。</div>`;
   }
   return `
     <div class="panel">

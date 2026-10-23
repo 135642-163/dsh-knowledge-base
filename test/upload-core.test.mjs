@@ -3,7 +3,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { classifyFiles, createQueue, extOf, formatBytes, relPathFor, statusLabel, summarizeResults } from "../ui/upload-core.js";
+import { classifyFiles, createQueue, extOf, formatBytes, nextPhase, relPathFor, statusLabel, summarizeResults } from "../ui/upload-core.js";
 
 const LIMITS = { maxBytes: 10, maxFiles: 2, extensions: [".md", ".pdf"] };
 
@@ -103,4 +103,13 @@ test("formatBytes 人类可读", () => {
   assert.equal(formatBytes(512), "512 B");
   assert.equal(formatBytes(2048), "2.0 KB");
   assert.equal(formatBytes(2 * 1024 ** 3), "2.0 GB");
+});
+
+test("nextPhase 覆盖上传/导入状态机", () => {
+  assert.equal(nextPhase("select", "start"), "uploading");
+  assert.equal(nextPhase("uploading", "uploaded"), "starting");
+  assert.equal(nextPhase("starting", "started"), "importing");
+  assert.equal(nextPhase("importing", "settled"), "done");
+  assert.equal(nextPhase("importing", "failed"), "error");
+  assert.equal(nextPhase("uploading", "unexpected"), "uploading");
 });

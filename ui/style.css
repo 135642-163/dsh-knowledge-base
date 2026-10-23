@@ -144,6 +144,26 @@ code { background: var(--panel-2); border-radius: 4px; padding: 1px 4px; }
 .side-foot a + a { margin-left: 10px; }
 .trash .empty-card { margin-top: 10px; }
 
+/* 上传弹窗 */
+.head-actions { display: flex; gap: 8px; margin-left: auto; }
+.modal.modal-wide { width: min(720px, 92vw); }
+.field select { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; color: inherit; font: inherit; }
+.dropzone { border: 1px dashed var(--line); border-radius: var(--radius); padding: 18px; text-align: center; display: grid; gap: 8px; }
+.dropzone p { margin: 0; }
+.dropzone-actions { display: flex; gap: 8px; justify-content: center; }
+.uplist { display: grid; gap: 4px; max-height: 260px; overflow: auto; margin-top: 10px; }
+.uprow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; font-size: 13px; }
+.uprow.bar { grid-template-columns: minmax(0, 1fr) 120px 90px; }
+.upname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.upbar { display: block; height: 6px; background: var(--panel-2); border-radius: 999px; overflow: hidden; }
+.upbar i { display: block; height: 100%; background: var(--accent); }
+.uprow.rejected { color: var(--danger); }
+.progress-line { display: flex; gap: 10px; align-items: baseline; margin: 10px 0 4px; }
+.form-row { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+.check { display: inline-flex; gap: 6px; align-items: center; }
+.confirm-body { color: var(--muted); }
+.confirm-body p { margin: 0 0 8px; }
+
 /* 嵌入 DSH 弹窗时隐藏工作台品牌文字，只保留图标作为回总览入口 */
 body.embed .topbar { height: 44px; padding: 0 12px; }
 body.embed .topbar .brand span { display: none; }

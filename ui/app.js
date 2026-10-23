@@ -5,6 +5,7 @@ import { renderOverview } from "./views/overview.js";
 import { renderDetail } from "./views/detail.js";
 import { renderTrash } from "./views/trash.js";
 import { openCreateModal, openDocModal, openRestoreModal } from "./views/modals.js";
+import { openUploadModal } from "./views/upload.js";
 
 const app = document.querySelector("#app");
 const EMBED = new URLSearchParams(window.location.search).has("embed");
@@ -133,6 +134,26 @@ function bind() {
         onCreated: async (name) => {
           await loadKbs();
           window.location.hash = hrefForKb(name);
+          openUploadModal({
+            kbs: state.kbs,
+            kb: name,
+            onFinished: async () => {
+              await loadKbs();
+              const current = route();
+              if (current.page === "detail") await loadDetail(current.name, current.tab);
+            },
+          });
+        },
+      });
+    } else if (action === "upload") {
+      if (state.kbs.length === 0) { showToast("还没有知识库，先新建一个"); return; }
+      openUploadModal({
+        kbs: state.kbs,
+        kb: target.dataset.kb ?? "",
+        onFinished: async () => {
+          await loadKbs();
+          const current = route();
+          if (current.page === "detail") await loadDetail(current.name, current.tab);
         },
       });
     } else if (action === "reload") {
