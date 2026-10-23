@@ -22,7 +22,10 @@ const state = {
   detailError: "",
   docs: { items: [], total: 0, offset: 0, limit: 50 },
   trash: { items: [], loading: false, error: "" },
-  std: { kb: "", loading: false, error: "", starting: false, status: null, job: null, timer: null },
+  std: {
+    kb: "", loading: false, error: "", warning: "", starting: false,
+    status: null, job: null, timer: null, pollRetry: 0, inFlight: null,
+  },
 };
 
 // 切库/离开标准 tab 时自增：所有在途状态请求与轮询回调凭 token 自行作废。
@@ -48,6 +51,19 @@ async function loadKbs() {
   } finally {
     state.loading = false;
     render();
+  }
+}
+
+/**
+ * 结算后的静默刷新：只更新侧栏计数，不切 state.loading、不 render。
+ * 失败最多让侧栏数字旧一点，不会把详情面板/结果表 unmount 掉。
+ */
+async function refreshKbsQuiet() {
+  try {
+    const payload = await api.kbs();
+    state.kbs = Array.isArray(payload?.kbs) ? payload.kbs : [];
+  } catch {
+    /* ignore：下一轮整页刷新会补齐 */
   }
 }
 
@@ -83,7 +99,7 @@ function stdErrorText(error) {
 
 function isStdRoute(name) {
   const current = route();
-  return current.page === "detail" && current.name === name && (current.tab || "overview") === "std";
+  return current.page === "detail" && current.name === name && current.tab === "std";
 }
 
 function clearStdTimer() {
@@ -97,7 +113,19 @@ function stopStd() {
   stdToken += 1;
 }
 
+/** 任务注册表里的公开摘要，用作 stdStatus 刷新失败时的 lastJob 兜底。 */
+function stdJobRecord(job) {
+  if (!job) return null;
+  return {
+    id: job.id,
+    status: job.status,
+    finishedAt: job.finishedAt ?? null,
+    summary: job.result?.counts ?? null,
+  };
+}
+
 async function loadStd(name) {
+  if (!isStdRoute(name)) return;
   const token = ++stdToken;
   clearStdTimer();
   const sameKb = state.std.kb === name && state.std.status !== null;
@@ -106,41 +134,57 @@ async function loadStd(name) {
     kb: name,
     loading: true,
     error: "",
+    warning: "",
     starting: false,
+    pollRetry: 0,
     ...(sameKb ? {} : { status: null, job: null }),
   };
   render();
   try {
     const status = await api.stdStatus(name);
-    if (token !== stdToken || state.std.kb !== name) return;
+    if (token !== stdToken || state.std.kb !== name || !isStdRoute(name)) return;
     state.std.status = status;
     if (status.activeJobId) {
       const job = await api.job(status.activeJobId);
-      if (token !== stdToken || state.std.kb !== name) return;
+      if (token !== stdToken || state.std.kb !== name || !isStdRoute(name)) return;
       state.std.job = job;
       void pollStd(name, token);
     } else if (status.lastJob) {
-      state.std.job = await api.job(status.lastJob.id).catch(() => null);
+      const job = await api.job(status.lastJob.id).catch(() => null);
+      if (token !== stdToken || state.std.kb !== name || !isStdRoute(name)) return;
+      state.std.job = job;
+    } else {
+      // 注册表里既没有运行中任务也没有历史任务：不要保留上一个 running job。
+      state.std.job = null;
     }
   } catch (error) {
-    if (token !== stdToken || state.std.kb !== name) return;
+    if (token !== stdToken || state.std.kb !== name || !isStdRoute(name)) return;
     state.std.error = stdErrorText(error);
   } finally {
     if (token === stdToken && state.std.kb === name) {
       state.std.loading = false;
-      render();
+      if (isStdRoute(name)) render();
     }
   }
 }
 
 async function pollStd(name, token) {
   if (token !== stdToken || state.std.kb !== name) return;
-  clearStdTimer();
+  if (!isStdRoute(name)) { clearStdTimer(); return; }
   const jobId = state.std.job?.id;
   if (!jobId) return;
+  // 同一轮 token+job 只允许一个在途请求：visibility 切换不会叠出两条 api.job。
+  const inFlightKey = `${token}:${jobId}`;
+  if (state.std.inFlight === inFlightKey) return;
+  state.std.inFlight = inFlightKey;
+  clearStdTimer();
   try {
     const job = await api.job(jobId);
     if (token !== stdToken || state.std.kb !== name || state.std.job?.id !== jobId) return;
+    if (!isStdRoute(name)) { clearStdTimer(); return; }
+    state.std.pollRetry = 0;
+    state.std.warning = "";
+    state.std.error = "";
     state.std.job = job;
     if (job.status === "running") {
       render();
@@ -150,17 +194,55 @@ async function pollStd(name, token) {
       }
       return;
     }
-    render();
-    await loadKbs();
-    if (token !== stdToken || state.std.kb !== name) return;
-    state.std.status = await api.stdStatus(name);
-    if (token !== stdToken || state.std.kb !== name) return;
+
+    // 结算：先清掉 stale running 状态，再做静默刷新 + 唯一一次 render。
+    state.std.starting = false;
+    let status = null;
+    try {
+      const fresh = await api.stdStatus(name);
+      status = fresh && typeof fresh === "object" ? fresh : {};
+    } catch {
+      const previous = state.std.status ?? {};
+      status = { ...previous, activeJobId: null, lastJob: stdJobRecord(job) };
+    }
+    if (token !== stdToken || state.std.kb !== name || !isStdRoute(name)) return;
+    status = {
+      ...status,
+      activeJobId: status.activeJobId === job.id ? null : status.activeJobId ?? null,
+      lastJob: status.lastJob ?? stdJobRecord(job),
+    };
+    state.std.status = status;
+    state.std.job = job;
+    await refreshKbsQuiet();
+    if (token !== stdToken || state.std.kb !== name || !isStdRoute(name)) return;
     render();
   } catch (error) {
     if (token !== stdToken || state.std.kb !== name) return;
+    if (!isStdRoute(name)) { clearStdTimer(); return; }
+    if (error instanceof ApiError && (error.code === "JOB_NOT_FOUND" || error.status === 404)) {
+      // 任务已过期/丢失：停止轮询并重新同步状态，不做无限重试。
+      clearStdTimer();
+      state.std.job = null;
+      state.std.warning = "";
+      state.std.pollRetry = 0;
+      await loadStd(name);
+      return;
+    }
+    // 网络抖动/临时 5xx：最多等两轮，每次 2 秒后再拉一次进度。
+    if (state.std.pollRetry < 2) {
+      state.std.pollRetry += 1;
+      state.std.warning = "进度获取失败，2 秒后重试…";
+      render();
+      state.std.timer = setTimeout(() => { void pollStd(name, token); }, 2000);
+      return;
+    }
+    state.std.warning = "";
+    state.std.pollRetry = 0;
     state.std.error = `读取任务进度失败：${stdErrorText(error)}`;
     clearStdTimer();
     render();
+  } finally {
+    if (state.std.inFlight === inFlightKey) state.std.inFlight = null;
   }
 }
 
@@ -170,12 +252,16 @@ async function startStd(mode) {
   const token = stdToken;
   const force = Boolean(app.querySelector("#std-force")?.checked);
   const limit = Math.max(0, Math.round(Number(app.querySelector("#std-limit")?.value) || 0));
+  // 新一轮开始前丢掉上轮进度/结果（result 挂在 job 上，置空 job 即清掉），避免 running 时还显示旧 job。
+  state.std.job = null;
   state.std.error = "";
+  state.std.warning = "";
+  state.std.pollRetry = 0;
   state.std.starting = true;
   render();
   try {
     const result = await api.stdCheck(name, { action: mode, force, limit });
-    if (state.std.kb !== name) return;
+    if (state.std.kb !== name || !isStdRoute(name)) return;
     if (token !== stdToken) {
       // 期间切走又切回来：不把旧请求的 job 硬塞给新状态，改为重新同步。
       if (isStdRoute(name)) await loadStd(name);
@@ -183,11 +269,12 @@ async function startStd(mode) {
     }
     if (!result?.jobId) throw new Error("标准任务没有返回 jobId");
     const job = await api.job(result.jobId);
-    if (token !== stdToken || state.std.kb !== name) return;
+    if (token !== stdToken || state.std.kb !== name || !isStdRoute(name)) return;
     state.std.job = job;
     void pollStd(name, token);
   } catch (error) {
     if (state.std.kb !== name) return;
+    if (!isStdRoute(name)) return;
     if (error instanceof ApiError && error.code === "STD_JOB_RUNNING") {
       showToast("该库已有标准任务在运行，正在同步进度");
       await loadStd(name);
@@ -197,7 +284,7 @@ async function startStd(mode) {
   } finally {
     if (state.std.kb === name) {
       state.std.starting = false;
-      render();
+      if (isStdRoute(name)) render();
     }
   }
 }

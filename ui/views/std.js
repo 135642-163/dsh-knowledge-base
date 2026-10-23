@@ -16,6 +16,10 @@ const STATUS_LABELS = {
   current: "已是最新",
 };
 
+const PHASE_LABELS = { collect: "收集", check: "检查", download: "下载", import: "导入" };
+
+const JOB_STATUS_LABELS = { running: "进行中", succeeded: "已完成", failed: "失败", cancelled: "已取消" };
+
 export function stdStatusLabel(status, message = "") {
   if (status !== "failed") return STATUS_LABELS[status] ?? String(status ?? "");
   if (/金币/.test(message)) return "金币不足";
@@ -49,8 +53,10 @@ export function renderStdPanel(state, kb, { escapeHtml = defaultEscapeHtml } = {
         <h3>更新状态</h3>
         <div class="kv"><span>登录状态</span><strong>${configured ? "已配置" : "未配置（在 profile 的 cordis.patch.yml 填 bzCookie）"}</strong></div>
         <div class="kv"><span>上次检查</span><strong>${cache.lastCheckAt ? escape(formatDateTime(cache.lastCheckAt)) : "从未检查"}</strong></div>
-        <div class="kv"><span>缓存</span><strong>${cache.exists ? `${count(cache.items)} 条 · ${ageText(cache.ageDays)} 天前 · ${cache.valid ? "有效" : "已过期"}` : "无缓存"}</strong></div>
-        <div class="kv"><span>待下载</span><strong>有新版 ${count(pending.update)} · 草案转正 ${count(pending.released)}</strong></div>
+        <div class="kv"><span>缓存</span><strong>${cache.exists
+          ? `${count(cache.items)} 条 · ${ageText(cache.ageDays)} · ${cache.valid ? "有效" : "已过期"} · TTL ${count(cache.ttlDays ?? 7)} 天`
+          : `无记录 · TTL ${count(cache.ttlDays ?? 7)} 天`}</strong></div>
+        <div class="kv"><span>待下载</span><strong>有新版 ${count(pending.update)} · 草案转正 ${count(pending.released)} · 可补下载 ${count(pending.downloadable)}</strong></div>
       </div>
       <div class="panel wide">
         <h3>运行</h3>
@@ -61,12 +67,13 @@ export function renderStdPanel(state, kb, { escapeHtml = defaultEscapeHtml } = {
           <label class="check"><input type="checkbox" id="std-force" ${running ? "disabled" : ""} /> 强制全查</label>
           <label class="check">本轮上限 <input id="std-limit" type="number" min="0" step="1" value="0" style="width:70px" ${running ? "disabled" : ""} /></label>
         </div>
-        ${running ? `<div class="progress-line"><strong>${escape(progress?.phase ?? "准备中")}</strong>
+        ${running ? `<div class="progress-line"><strong>${escape(phaseLabel(progress?.phase))}</strong>
           <span class="muted">${count(progress?.done)}/${count(progress?.total)} · ${escape(progress?.current ?? "")}</span></div>` : ""}
         ${std.error ? `<p class="form-error">${escape(std.error)} <button class="btn" data-action="std-reload">重试</button></p>` : ""}
+        ${std.warning ? `<p class="muted">${escape(std.warning)}</p>` : ""}
         ${job?.status === "failed" ? `<p class="form-error">任务失败：${escape(job.detail || "未知错误")}</p>` : ""}
         ${result ? stdResultHtml(result, { escape }) : ""}
-        ${status.lastJob && !result && job?.status !== "failed" ? `<p class="muted">上次任务：${escape(status.lastJob.status)} · ${escape(status.lastJob.finishedAt ?? "")}</p>` : ""}
+        ${status.lastJob && !result && job?.status !== "failed" ? `<p class="muted">上次任务：${escape(jobStatusLabel(status.lastJob.status))}${status.lastJob.finishedAt ? ` · ${escape(formatDateTime(status.lastJob.finishedAt))}` : ""}</p>` : ""}
       </div>
     </section>`;
 }
@@ -100,14 +107,25 @@ function count(value) {
   return Number.isFinite(number) ? String(number) : "0";
 }
 
+function phaseLabel(phase) {
+  if (phase === null || phase === undefined || phase === "") return "准备中";
+  return PHASE_LABELS[phase] ?? String(phase);
+}
+
+function jobStatusLabel(status) {
+  return JOB_STATUS_LABELS[status] ?? String(status ?? "");
+}
+
 function ageText(value) {
+  if (value === null || value === undefined || value === "") return "无记录";
   const number = Number(value);
-  return Number.isFinite(number) ? String(number) : "?";
+  return Number.isFinite(number) ? `${number} 天前` : "无记录";
 }
 
 function formatDateTime(value) {
+  if (!value) return "";
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return String(value ?? "");
+  if (Number.isNaN(date.getTime())) return String(value);
   return date.toLocaleString("zh-CN");
 }
 
