@@ -103,13 +103,16 @@ React 由宿主通过 `require("react")` 提供，不能打进第二份 React。
 
 ### 4.2 点击行为
 
-```js
-window.open("/kb/", "_blank", "noopener,noreferrer");
-```
+入口使用真实锚点 `<a href="/kb/">`：
 
-- 使用相对路径 `/kb/`，桌面端端口变化也能正确打开
-- 打开失败（弹窗被拦截）时不改变当前页；不静默跳转，避免丢会话
-- 桌面端由 Electron/浏览器决定新窗口或新标签；两者都满足验收
+- 普通浏览器：`target="_blank"` + `rel="noopener noreferrer"`，新标签打开
+- Electron 桌面端：`target="_self"`，在当前 DSH 窗口打开 `/kb/`
+  - 原因：DSH 主窗口的 `setWindowOpenHandler` 对 `http(s)` 只调用
+    `shell.openExternal` 并 `deny` 应用内新窗口；`window.open(..., "noopener")`
+    在部分 Electron/Chromium 组合下会先拿到 `about:blank`，导致点击无响应
+  - 工作台顶栏在 `history.length > 1` 时显示「返回」按钮，可回到 DSH 会话
+- 使用相对路径 `/kb/`，端口变化也能正确打开
+- 不做静默当前页跳转；锚点天然不受弹窗拦截影响
 
 ## 5. 架构与文件
 
@@ -392,5 +395,5 @@ Slice 2 计划只需在此基础上增加组件与状态，不再从零搭客户
 - [x] `npm run check:client` / `npm run typecheck` / `npm test`（186 tests / 0 fail）
 - [x] `lib/client.js` 按 boot graph 注册 `dsh-knowledge-base`（当前 profile），也兼容 `dsh-knowledge-wiki`
 - [x] 临时 `dsh web --port 55930`（真实宿主）+ WebKit：侧栏底部「知识库」入口可见
-- [x] 点击入口：`window.open("/kb/", "_blank", "noopener,noreferrer")`；当前 GUI 不跳转
-- [ ] 桌面端重启后视觉确认（客户端 bundle 只在宿主启动时扫描 `dsh.client`）
+- [x] 入口为真实锚点：浏览器 `target="_blank"`，Electron `target="_self"`；工作台顶栏有「返回」
+- [ ] 桌面端重启/刷新后点击确认（点击应进入 `/kb/`，不再无响应）
