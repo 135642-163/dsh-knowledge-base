@@ -11,14 +11,14 @@ function overlay(html) {
 }
 
 /**
- * 通用确认弹窗。body 是调用方拼好的 HTML（用户数据必须先 escape），
- * requireCheckbox=true 时需勾选确认才能提交。
+ * 通用确认弹窗。body 按纯文本渲染（内部统一 escapeHtml），
+ * requireCheckbox=true 时需勾选确认才能提交；onConfirm 可同步或异步。
  */
 export function openConfirmModal({ title, body = "", confirmText = "确认", requireCheckbox = false, onConfirm } = {}) {
   const node = overlay(`
     <form class="modal-form">
       <h2>${escapeHtml(title)}</h2>
-      <div class="confirm-body">${String(body ?? "")}</div>
+      <div class="confirm-body"><p class="muted">${escapeHtml(body)}</p></div>
       ${requireCheckbox ? `<label class="check"><input type="checkbox" name="ack" /> 我已了解以上内容</label>` : ""}
       <p class="form-error" hidden></p>
       <div class="modal-actions">

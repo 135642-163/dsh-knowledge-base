@@ -53,20 +53,27 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
     jobId: null,
     job: null,
     error: "",
+    warning: "",
     timer: null,
     abort: null,
     closed: false,
     importStarted: false,
+    resumeChecked: false,
+    resumeJob: false,
+    restoredJob: false,
+    pollRetry: 0,
     allowCrossDuplicates: false,
     ocrModel: "best",
   };
 
-  const resumeKey = () => `kb.upload.job.${state.kb}`;
+  let resumeToken = 0;
+
+  const resumeKeyFor = (name) => `kb.upload.job.${name}`;
   function remember(jobId) {
-    try { localStorage.setItem(resumeKey(), jobId); } catch { /* 隐私模式下忽略 */ }
+    try { localStorage.setItem(resumeKeyFor(state.kb), jobId); } catch { /* 隐私模式下忽略 */ }
   }
-  function forget() {
-    try { localStorage.removeItem(resumeKey()); } catch { /* ignore */ }
+  function forget(name = state.kb) {
+    try { localStorage.removeItem(resumeKeyFor(name)); } catch { /* ignore */ }
   }
 
   function stopPolling() {
@@ -74,17 +81,23 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
     state.timer = null;
   }
 
+  function onKeydown(event) {
+    if (event.key !== "Escape") return;
+    if (state.phase === "select" || state.phase === "done" || state.phase === "error") close();
+  }
+
   function close() {
     if (state.closed) return;
     state.closed = true;
+    document.removeEventListener("keydown", onKeydown);
     stopPolling();
     state.abort?.abort();
     // 只丢弃还没开始导入的 open 批次；导入中的批次由后端保留（失败/跳过时供重试）。
     if (state.batchId && !state.importStarted) {
       api.deleteBatch(state.batchId).catch(() => {});
     }
-    // 仍在后台跑的任务记下来，下次打开时恢复；已结算的任务不再恢复。
-    if (state.jobId && (state.phase === "importing" || state.job?.status === "running")) remember(state.jobId);
+    // 仍在后台跑的任务记下来，下次打开时恢复；已结算/已过期的任务不再恢复。
+    if (state.jobId && state.resumeJob) remember(state.jobId);
     node.remove();
     onFinished?.();
   }
@@ -107,6 +120,7 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
   }
 
   function selectHtml() {
+    const startDisabled = state.files.length === 0 || !state.resumeChecked || state.limits === null;
     return `
       <div class="modal-form">
         <h2>上传资料</h2>
@@ -133,10 +147,11 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
           <label class="check"><input type="radio" name="ocr" value="best" ${state.ocrModel === "best" ? "checked" : ""} /> best</label>
           <label class="check"><input type="radio" name="ocr" value="fast" ${state.ocrModel === "fast" ? "checked" : ""} /> fast</label>
         </div>
+        ${state.resumeChecked ? "" : `<p class="muted">正在检查该库上次的导入任务…</p>`}
         <p class="form-error" ${state.error ? "" : "hidden"}>${escapeHtml(state.error)}</p>
         <div class="modal-actions">
           <button type="button" class="btn" data-close>取消</button>
-          <button type="button" class="btn primary" data-start ${state.files.length === 0 ? "disabled" : ""}>开始上传</button>
+          <button type="button" class="btn primary" data-start ${startDisabled ? "disabled" : ""}>开始上传</button>
         </div>
       </div>`;
   }
@@ -157,6 +172,7 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
     const similar = Array.isArray(result?.similar) ? result.similar : [];
     const retryable = retryCandidates();
     const jobRunning = state.job?.status === "running";
+    const retryLabel = summary.skipped > 0 ? "重试失败/跳过项" : "重试失败项";
 
     const actions = [];
     if (state.phase === "uploading" || state.phase === "starting") {
@@ -164,12 +180,18 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
     } else if (state.phase === "importing") {
       actions.push(`<button type="button" class="btn" data-close>关闭（后台继续导入）</button>`);
     } else if (state.phase === "done" || state.phase === "error") {
+      if (state.phase === "error" && state.batchId && !state.jobId) {
+        actions.push(`<button type="button" class="btn" data-action="retry-import">重试导入</button>`);
+      }
       if (!jobRunning && retryable.length > 0) {
-        const retryLabel = summary.skipped > 0 ? "重试失败/跳过项" : "重试失败项";
         actions.push(`<button type="button" class="btn" data-retry>${retryLabel}</button>`);
       }
       if (state.phase === "done") {
         actions.push(`<button type="button" class="btn" data-action="view">刷新并查看资料</button>`);
+      }
+      if (state.phase === "error" || state.restoredJob) {
+        const resetLabel = state.restoredJob ? "重新选择文件" : "重新选择";
+        actions.push(`<button type="button" class="btn" data-action="reset-upload">${resetLabel}</button>`);
       }
       actions.push(`<button type="button" class="btn${state.phase === "done" ? " primary" : ""}" data-close>关闭</button>`);
     }
@@ -178,8 +200,9 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
       <div class="modal-form">
         <h2>${escapeHtml(phaseText)} · ${escapeHtml(state.kb)}</h2>
         ${state.error ? `<p class="form-error">${escapeHtml(state.error)}</p>` : ""}
+        ${state.warning ? `<p class="form-error">${escapeHtml(state.warning)}</p>` : ""}
         ${state.phase === "uploading" ? `<div class="uplist">${state.files.map((item) => `
-          <div class="uprow bar">
+          <div class="uprow uprow-progress">
             <span class="upname" title="${escapeAttr(item.path)}">${escapeHtml(item.path)}</span>
             <span class="upbar"><i style="width:${Math.max(0, Math.min(100, Math.round((item.percent ?? 0) * 100)))}%"></i></span>
             <span class="muted">${escapeHtml(statusLabel(item.status))}${item.error ? `：${escapeHtml(item.error)}` : ""}</span>
@@ -201,12 +224,12 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
                 <span class="muted">${escapeHtml(statusLabel(item.status))}${item.status === "skipped" ? "（文档正在导入中）" : ""}${item.error ? `：${escapeHtml(item.error)}` : ""}</span></div>`).join("")}</div>` : ""}
           ${summary.skipped > 0 ? `<p class="muted">${summary.skipped} 个文件因文档正在导入中已跳过，可稍后重试。</p>` : ""}
           ${failedUploads.length > 0 ? `
-            <p class="form-error">${failedUploads.length} 个文件上传失败，可用「重试失败项」重新上传。</p>
+            <p class="form-error">${failedUploads.length} 个文件上传失败，可用「${retryLabel}」重新上传。</p>
             <div class="uplist">${failedUploads.map((item) => `
               <div class="uprow"><span class="upname" title="${escapeAttr(item.path)}">${escapeHtml(item.path)}</span>
                 <span class="muted">${escapeHtml(item.error || "上传失败")}</span></div>`).join("")}</div>` : ""}
-          ${duplicates.length > 0 ? `<p class="muted">重合跳过 ${duplicates.length} 个：${duplicates.map((item) => escapeHtml(item.title ?? "")).join("、")}</p>` : ""}
-          ${similar.length > 0 ? `<p class="muted">相似资料 ${similar.length} 个（已照常导入，请留意是否重复）：${similar.map((item) => escapeHtml(item.title ?? "")).join("、")}</p>` : ""}
+          ${duplicates.length > 0 ? `<p class="muted">重合跳过 ${duplicates.length} 个：${duplicates.map(matchLabel).join("、")}</p>` : ""}
+          ${similar.length > 0 ? `<p class="muted">相似资料 ${similar.length} 个（已照常导入，请留意是否重复）：${similar.map(matchLabel).join("、")}</p>` : ""}
         ` : ""}
         ${state.phase === "error" && jobRunning ? `<p class="muted">任务仍在后台运行；关闭后重新打开可从本地记录恢复进度。</p>` : ""}
         <div class="modal-actions">${actions.join("")}</div>
@@ -223,15 +246,32 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
     return state.files.filter((item) => item.status === "failed" || rerun.has(item.path));
   }
 
+  function matchLabel(item) {
+    const title = escapeHtml(item?.title ?? "");
+    if (item?.scope === "same-kb") return `${title}（同库）`;
+    if (item?.scope === "cross-kb") return `${title}（跨库）`;
+    return title;
+  }
+
   function bind() {
     modal.querySelector("[data-close]")?.addEventListener("click", close);
     const kbSelect = modal.querySelector("#upload-kb");
-    if (kbSelect) kbSelect.addEventListener("change", (event) => { state.kb = event.target.value; });
+    if (kbSelect) {
+      kbSelect.addEventListener("change", (event) => {
+        state.kb = event.target.value;
+        state.resumeChecked = false;
+        state.error = "";
+        render();
+        void checkResume(state.kb);
+      });
+    }
     modal.querySelectorAll("[data-pick]").forEach((button) => {
       button.addEventListener("click", () => pick({ directory: button.dataset.pick === "dir" }));
     });
     modal.querySelector("[data-start]")?.addEventListener("click", () => { void startUpload(); });
     modal.querySelector("[data-retry]")?.addEventListener("click", () => retryFailed());
+    modal.querySelector("[data-action='retry-import']")?.addEventListener("click", () => { void retryImport(); });
+    modal.querySelector("[data-action='reset-upload']")?.addEventListener("click", () => resetUpload());
     modal.querySelector("[data-action='view']")?.addEventListener("click", () => {
       close();
       window.location.hash = `#/kb/${encodeURIComponent(state.kb)}/docs`;
@@ -242,25 +282,6 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
     modal.querySelectorAll("input[name='ocr']").forEach((input) => {
       input.addEventListener("change", (event) => { if (event.target.checked) state.ocrModel = event.target.value; });
     });
-
-    const dropzone = modal.querySelector("#upload-drop");
-    if (dropzone) {
-      dropzone.addEventListener("dragover", (event) => { event.preventDefault(); });
-      dropzone.addEventListener("drop", (event) => {
-        event.preventDefault();
-        const items = Array.from(event.dataTransfer?.items ?? []);
-        const hasDirectory = items.some((item) => {
-          const entry = typeof item.webkitGetAsEntry === "function" ? item.webkitGetAsEntry() : null;
-          return entry?.isDirectory === true;
-        });
-        if (hasDirectory) {
-          state.error = DIRECTORY_HINT;
-          render();
-          return;
-        }
-        addFiles(Array.from(event.dataTransfer?.files ?? []));
-      });
-    }
   }
 
   function pick({ directory }) {
@@ -276,7 +297,8 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
       addFiles(files);
     };
     input.addEventListener("cancel", remove, { once: true });
-    modal.appendChild(input);
+    // 挂到 overlay 而不是 modal：任何一次 render() 都不会把还开着的选择器弄丢。
+    node.appendChild(input);
     input.click();
   }
 
@@ -309,13 +331,26 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
 
   async function startUpload() {
     if (state.phase !== "select" || state.importStarted) return;
+    if (!state.resumeChecked || state.limits === null) return;
     if (state.files.length === 0) return;
     if (!state.kb) {
       state.error = "请先选择目标知识库";
       render();
       return;
     }
+    // 限制可能在选文件之后才返回：开传前按最终限制再筛一次。
+    const classified = classifyFiles(state.files.map((item) => item.file), state.limits);
+    state.files = classified.accepted.map((item) => ({ ...item, status: "pending", percent: 0, error: "" }));
+    state.rejected.push(...classified.rejected);
+    if (state.files.length === 0) {
+      state.error = "没有符合上传限制的文件";
+      render();
+      return;
+    }
     state.error = "";
+    state.warning = "";
+    state.pollRetry = 0;
+    state.restoredJob = false;
     state.phase = nextPhase(state.phase, "start");
     render();
     try {
@@ -328,8 +363,6 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
         state.batchId = created.batch.id;
         state.limits = mapLimits(created.limits) ?? state.limits;
       }
-      const allowCrossDuplicates = state.allowCrossDuplicates;
-      const ocrModel = state.ocrModel;
       const queue = createQueue(2);
       state.abort = new AbortController();
       let lastPaint = 0;
@@ -368,35 +401,7 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
       }
       state.phase = nextPhase(state.phase, "uploaded");
       render();
-      const imported = await api.importBatch(state.batchId, { allowCrossDuplicates, ocrModel });
-      if (state.closed) {
-        // 关闭发生在导入请求期间：任务可能已经启动，记下来供下次恢复。
-        if (imported.jobId) remember(imported.jobId);
-        return;
-      }
-      if (!imported.jobId) {
-        state.importStarted = false;
-        state.phase = "done";
-        state.job = {
-          result: {
-            ok: 0,
-            fail: 0,
-            skip: 0,
-            files: [],
-            duplicates: imported.duplicates ?? [],
-            similar: imported.similar ?? [],
-          },
-        };
-        render();
-        onFinished?.();
-        return;
-      }
-      state.importStarted = true;
-      state.jobId = imported.jobId;
-      remember(state.jobId);
-      state.phase = nextPhase(state.phase, "started");
-      render();
-      void pollJob();
+      await beginImport();
     } catch (error) {
       if (state.closed) return;
       state.phase = "error";
@@ -405,12 +410,92 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
     }
   }
 
+  /** 对当前 batchId 发起导入；调用方负责把 phase 置为 starting 与错误兜底。 */
+  async function beginImport() {
+    const imported = await api.importBatch(state.batchId, {
+      allowCrossDuplicates: state.allowCrossDuplicates,
+      ocrModel: state.ocrModel,
+    });
+    if (state.closed) {
+      // 关闭发生在导入请求期间：任务可能已经启动，记下来供下次恢复。
+      if (imported.jobId) remember(imported.jobId);
+      return;
+    }
+    state.warning = "";
+    state.pollRetry = 0;
+    if (!imported.jobId) {
+      state.importStarted = false;
+      state.phase = "done";
+      state.job = {
+        result: {
+          ok: 0,
+          fail: 0,
+          skip: 0,
+          files: [],
+          duplicates: imported.duplicates ?? [],
+          similar: imported.similar ?? [],
+        },
+      };
+      render();
+      onFinished?.();
+      return;
+    }
+    state.importStarted = true;
+    state.jobId = imported.jobId;
+    state.resumeJob = true;
+    remember(state.jobId);
+    state.phase = nextPhase(state.phase, "started");
+    render();
+    void pollJob();
+  }
+
+  /** 导入请求失败后复用同一个批次重试，不重新上传文件。 */
+  async function retryImport() {
+    if (state.closed || !state.batchId || state.jobId || state.importStarted) return;
+    state.error = "";
+    state.warning = "";
+    state.pollRetry = 0;
+    state.phase = "starting";
+    render();
+    try {
+      await beginImport();
+    } catch (error) {
+      if (state.closed) return;
+      state.phase = "error";
+      state.error = errorText(error);
+      render();
+    }
+  }
+
+  /** 放弃当前批次/任务，回到选文件阶段（保留 File 引用）。 */
+  function resetUpload() {
+    stopPolling();
+    if (state.batchId) api.deleteBatch(state.batchId).catch(() => {});
+    if (state.jobId) forget();
+    state.batchId = null;
+    state.jobId = null;
+    state.job = null;
+    state.phase = "select";
+    state.abort = null;
+    state.importStarted = false;
+    state.resumeJob = false;
+    state.restoredJob = false;
+    state.warning = "";
+    state.pollRetry = 0;
+    state.error = "";
+    state.files = state.files.map((item) => ({ ...item, status: "pending", percent: 0, error: "" }));
+    state.rejected = [];
+    render();
+  }
+
   async function pollJob() {
     if (state.closed) return;
     stopPolling();
     try {
       const job = await api.job(state.jobId);
       if (state.closed) return;
+      state.pollRetry = 0;
+      state.warning = "";
       state.job = job;
       if (job.status === "running") {
         state.timer = setTimeout(() => { void pollJob(); }, 1000);
@@ -418,19 +503,39 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
       } else if (job.status === "failed") {
         state.phase = nextPhase(state.phase, "failed");
         state.error = job.detail || "导入任务失败";
+        state.resumeJob = false;
         forget();
         render();
         onFinished?.();
       } else {
         state.phase = nextPhase(state.phase, "settled");
+        state.resumeJob = false;
         forget();
         render();
         onFinished?.();
       }
     } catch (error) {
       if (state.closed) return;
+      if (error instanceof ApiError && error.status === 404) {
+        state.resumeJob = false;
+        forget();
+        state.phase = "error";
+        state.warning = "";
+        state.error = "导入任务已过期或不存在，可重新选择文件后再试。";
+        render();
+        return;
+      }
+      // 网络抖动/临时 5xx：先内联提示并重试一次，别把仍在后台跑的任务丢掉。
+      if (state.pollRetry < 1) {
+        state.pollRetry += 1;
+        state.warning = `读取导入进度失败：${errorText(error)}，2 秒后重试…`;
+        render();
+        state.timer = setTimeout(() => { void pollJob(); }, 2000);
+        return;
+      }
       state.phase = "error";
-      state.error = errorText(error);
+      state.warning = "";
+      state.error = `读取导入进度失败：${errorText(error)}`;
       render();
     }
   }
@@ -442,6 +547,8 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
       render();
       return;
     }
+    if (state.batchId) api.deleteBatch(state.batchId).catch(() => {});
+    if (state.jobId) forget();
     stopPolling();
     state.batchId = null;
     state.jobId = null;
@@ -449,10 +556,58 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
     state.phase = "select";
     state.abort = null;
     state.importStarted = false;
+    state.resumeJob = false;
+    state.restoredJob = false;
+    state.warning = "";
+    state.pollRetry = 0;
     state.files = failed.map((item) => ({ ...item, status: "pending", percent: 0, error: "" }));
     state.rejected = [];
     state.error = "";
     render();
+  }
+
+  /** 检查某个库上次未结算的导入任务；换库时旧检查结果按 token/kb 丢弃。 */
+  async function checkResume(name) {
+    const token = ++resumeToken;
+    state.resumeChecked = false;
+    let id = null;
+    try { id = localStorage.getItem(resumeKeyFor(name)); } catch { id = null; }
+    if (!id) {
+      if (token === resumeToken && state.kb === name && state.phase === "select") {
+        state.resumeChecked = true;
+        render();
+      }
+      return;
+    }
+    try {
+      const job = await api.job(id);
+      // 检查期间用户可能已经开传/换库/关闭：不要抢回控制权。
+      if (state.closed || token !== resumeToken || state.kb !== name || state.phase !== "select") return;
+      state.resumeChecked = true;
+      state.jobId = job.id;
+      state.job = job;
+      state.restoredJob = true;
+      if (job.status === "running") {
+        state.phase = "importing";
+        state.importStarted = true;
+        state.resumeJob = true;
+        state.warning = "";
+        state.pollRetry = 0;
+        render();
+        void pollJob();
+      } else {
+        forget(name);
+        state.resumeJob = false;
+        state.phase = job.status === "failed" ? "error" : "done";
+        state.error = job.status === "failed" ? (job.detail || "导入任务失败") : "";
+        render();
+      }
+    } catch (error) {
+      if (state.closed || token !== resumeToken || state.kb !== name || state.phase !== "select") return;
+      if (error instanceof ApiError && error.status === 404) forget(name);
+      state.resumeChecked = true;
+      render();
+    }
   }
 
   api.status().then((status) => {
@@ -464,28 +619,26 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
   node.addEventListener("mousedown", (event) => {
     if (event.target === node && state.phase === "select") close();
   });
-  node.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && state.phase === "select") close();
+  // 覆盖整个 overlay：文件拖到弹窗外也不会让浏览器导航走；只有选文件阶段才接收。
+  node.addEventListener("dragover", (event) => { event.preventDefault(); });
+  node.addEventListener("drop", (event) => {
+    event.preventDefault();
+    if (state.phase !== "select") return;
+    const items = Array.from(event.dataTransfer?.items ?? []);
+    const hasDirectory = items.some((item) => {
+      const entry = typeof item.webkitGetAsEntry === "function" ? item.webkitGetAsEntry() : null;
+      return entry?.isDirectory === true;
+    });
+    if (hasDirectory) {
+      state.error = DIRECTORY_HINT;
+      render();
+      return;
+    }
+    addFiles(Array.from(event.dataTransfer?.files ?? []));
   });
+  document.addEventListener("keydown", onKeydown);
 
-  // 页面刷新/重开后恢复最近一次导入任务（结果保留 1 小时）。
-  let resumeId = null;
-  try { resumeId = localStorage.getItem(resumeKey()); } catch { resumeId = null; }
-  if (resumeId) {
-    api.job(resumeId).then((job) => {
-      if (state.closed) return;
-      state.jobId = job.id;
-      state.job = job;
-      state.phase = job.status === "running" ? "importing" : job.status === "failed" ? "error" : "done";
-      state.error = job.status === "failed" ? (job.detail || "导入任务失败") : "";
-      if (job.status === "running") {
-        render();
-        void pollJob();
-      } else {
-        forget();
-        render();
-      }
-    }).catch(() => { forget(); });
-  }
+  // 恢复当前库上次未结算的导入任务；换库时重新检查。
+  void checkResume(state.kb);
   render();
 }

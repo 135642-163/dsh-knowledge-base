@@ -153,7 +153,7 @@ code { background: var(--panel-2); border-radius: 4px; padding: 1px 4px; }
 .dropzone-actions { display: flex; gap: 8px; justify-content: center; }
 .uplist { display: grid; gap: 4px; max-height: 260px; overflow: auto; margin-top: 10px; }
 .uprow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; font-size: 13px; }
-.uprow.bar { grid-template-columns: minmax(0, 1fr) 120px 90px; }
+.uprow.uprow-progress { grid-template-columns: minmax(0, 1fr) 120px 90px; }
 .upname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .upbar { display: block; height: 6px; background: var(--panel-2); border-radius: 999px; overflow: hidden; }
 .upbar i { display: block; height: 100%; background: var(--accent); }
