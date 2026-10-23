@@ -2,7 +2,7 @@
 
 > 状态：Approved（2026-10-24）  
 > 目标版本：`dsh-knowledge-wiki` 0.19.1  
-> 依赖：Slice 1 已安装（`/kb/` 工作台、`lib/web/*` 服务端路由、180 tests）  
+> 依赖：Slice 1 已安装（`/kb/` 工作台、`lib/web/*` 服务端路由、180 tests；本切片完成后 186 tests）  
 > 后续：本设计建立的客户端构建链由 Slice 2（上传/范围/胶囊）复用
 
 ## 1. 目标
@@ -46,16 +46,30 @@ DSH 的侧栏 `sidebar.footer.action` 是 **list slot**，位于侧栏底部、�
 客户端 bundle 必须是宿主模块加载器格式：
 
 ```js
-window.__ModuleLoader__.load({
-  id: "dsh-knowledge-wiki",
-  factory: (require) => {
-    var module = { exports: {} };
-    var exports = module.exports;
-    // bundle body
-    return module.exports;
-  }
-});
+(() => {
+  const KB_CLIENT_IDS = ["dsh-knowledge-base", "dsh-knowledge-wiki"];
+  const boot = typeof window !== "undefined" ? window.__DSH_BOOT__ : undefined;
+  const rows = boot && Array.isArray(boot.entries) ? boot.entries : [];
+  const known = new Set(rows.map((row) => row && row.id));
+  const id = KB_CLIENT_IDS.find((candidate) => known.has(candidate)) || KB_CLIENT_IDS[0];
+  window.__ModuleLoader__.load({
+    id,
+    factory: (require) => {
+      var module = { exports: {} };
+      var exports = module.exports;
+      // bundle body
+      return module.exports;
+    }
+  });
+})();
 ```
+
+**loader entry id 兼容：** 当前 profile 的 loader entry 名是历史别名 `dsh-knowledge-base`，
+而 package name 是 `dsh-knowledge-wiki`。`client-modules` 用 loader entry 名作为 graph row id，
+bundle 必须注册同一个 id，否则浏览器会报
+`bundle /plugins/.../client.js loaded without registering "<id>"`。因此 bundle 从
+`window.__DSH_BOOT__.entries` 中选择实际存在的候选 id（当前安装为 `dsh-knowledge-base`），
+兼容未来按 package name 安装为 `dsh-knowledge-wiki` 的部署。
 
 React 由宿主通过 `require("react")` 提供，不能打进第二份 React。
 
@@ -181,7 +195,8 @@ export function apply(ctx: SlotContext) {
    - `bundle: true`、`format: "cjs"`、`platform: "browser"`、`target: "es2022"`
    - `external: ["react", "react/jsx-runtime", "react-dom"]`
    - `jsx: "automatic"`、`charset: "utf8"`、`legalComments: "none"`
-2. 把 CJS 输出嵌入 `window.__ModuleLoader__.load({ id, factory })`
+2. 把 CJS 输出嵌入 `window.__ModuleLoader__.load({ id, factory })`；`id` 从 boot graph
+   的 `dsh-knowledge-base` / `dsh-knowledge-wiki` 候选中选择实际存在的那个
 3. 写 `lib/client.js`，首行注释：
 
 ```js
@@ -254,8 +269,8 @@ export function apply(ctx: SlotContext) {
 
 ```text
 DSH 启动
-  → client-modules 扫描 dsh-knowledge-wiki 的 dsh.client
-  → 加载 /plugins/dsh-knowledge-wiki/client.js
+  → client-modules 扫描 package 的 dsh.client（loader entry 名当前为 dsh-knowledge-base）
+  → 加载 /plugins/<loader-entry>/client.js
   → __ModuleLoader__ 执行 factory，exports.apply
   → apply(ctx) 注入 CSS，ctx.slots.inject("sidebar.footer.action", ...)
   → 侧栏底部渲染 KbWorkbenchAction
@@ -287,7 +302,8 @@ const sandbox = {
 
 加载 `lib/client.js` 后：
 
-1. 断言 `captured.id === "dsh-knowledge-wiki"`
+1. 断言 `captured.id` 是 boot graph 中的实际 id（当前 profile 为 `dsh-knowledge-base`；
+   package-name 安装为 `dsh-knowledge-wiki`）
 2. 用 fake `require("react")` / `require("react/jsx-runtime")` 执行 factory
 3. `exports.apply(fakeCtx)` 后断言：
    - `fakeCtx.slots.inject` 收到 `"sidebar.footer.action"`
@@ -302,7 +318,7 @@ const sandbox = {
 
 ### 8.2 `npm test`
 
-在现有 180 个测试前追加：
+在现有 180 个测试前追加 `check:client`，并增加 6 个客户端测试（总计 186）：
 
 ```text
 node scripts/build-client.mjs --check && node --test test/client-entry.test.mjs ...（现有列表）
@@ -310,14 +326,14 @@ node scripts/build-client.mjs --check && node --test test/client-entry.test.mjs 
 
 ### 8.3 不做
 
-- 不做真实浏览器渲染测试（DSH GUI 需要登录 token；桌面端手动验收）
-- 不做截图回归
+- 用临时 `dsh web --port 55930`（真实宿主）+ WebKit 做侧栏入口与点击验证
+- 桌面端重启后的最终视觉确认仍由人工完成；不做截图回归
 
 ## 9. 验收标准
 
 - [ ] `npm run check:client` 通过
 - [ ] `npm run typecheck` 通过
-- [ ] `npm test` 全通过（180 + 新增）
+- [ ] `npm test` 全通过（186）
 - [ ] 安装/重启桌面端后，侧栏底部出现「知识库」入口
 - [ ] 展开显示图标 + “知识库”，收起只显示图标
 - [ ] 点击在新标签/新窗口打开 `/kb/`，显示 9 个库
@@ -339,6 +355,7 @@ node scripts/build-client.mjs --check && node --test test/client-entry.test.mjs 
 | 打包进第二份 React | 运行时 hooks 冲突 | esbuild `external: ["react", ...]`；测试断言不含 React 实现 |
 | `sidebar.footer.action` 样式与主题不一致 | 视觉突兀 | 只用 `--dsw-alias-*` 变量；内联 SVG；展开/收起两态验收 |
 | 客户端 bundle 缓存/重启 | 改完看不到 | 验收时重启桌面端；`check:client` 保证产物最新 |
+| loader entry id 与 package name 不一致 | bundle 注册 id 错误，入口不出现 | bundle 从 `__DSH_BOOT__.entries` 选择实际 graph id；VM 测试覆盖两种 id |
 | `dsh.client.inject` 包名在不同版本变化 | 启动报错 | 先在当前桌面端验证；失败时去掉 `inject`，仅保留 `ctx.slots.inject` |
 | `exports` 字段影响包解析 | 服务端加载失败 | 保留 `.`、`./client`、`./package.json`；安装后跑 `npm test` 与桌面端启动验证 |
 
@@ -366,4 +383,14 @@ Slice 2 计划只需在此基础上增加组件与状态，不再从零搭客户
 - **打开方式**：新标签/新窗口，不内嵌、不当前页跳转
 - **实现路线**：B-lite（TypeScript/React + esbuild + 提交产物），不是纯手写 bundle，也不是完整 tsdown 预设
 - **构建器**：esbuild（官方预设不可用；产物格式用 `__ModuleLoader__` 包装手动生成）
-- **测试**：VM 级 bundle/slot 测试 + 桌面端手动验收；不做 GUI 截图回归
+- **bundle id**：从 `__DSH_BOOT__.entries` 选择 `dsh-knowledge-base` / `dsh-knowledge-wiki` 中实际存在的 id
+- **测试**：VM 级 bundle/slot 测试 + 临时真实 DSH 宿主 WebKit 验证 + 桌面端手动验收
+
+
+## Slice 1.5 验收记录（2026-10-24）
+
+- [x] `npm run check:client` / `npm run typecheck` / `npm test`（186 tests / 0 fail）
+- [x] `lib/client.js` 按 boot graph 注册 `dsh-knowledge-base`（当前 profile），也兼容 `dsh-knowledge-wiki`
+- [x] 临时 `dsh web --port 55930`（真实宿主）+ WebKit：侧栏底部「知识库」入口可见
+- [x] 点击入口：`window.open("/kb/", "_blank", "noopener,noreferrer")`；当前 GUI 不跳转
+- [ ] 桌面端重启后视觉确认（客户端 bundle 只在宿主启动时扫描 `dsh.client`）
