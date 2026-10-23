@@ -3865,6 +3865,7 @@ const STATUS_LABELS = {
   update: "有新版",
   released: "草案转正",
   failed: "失败",
+  importFailed: "导入失败",
   notfound: "未找到",
   newer: "库内已有更新",
   current: "已是最新",
