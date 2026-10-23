@@ -80,6 +80,25 @@ exports/                   导出产物
 打开方式：在浏览器访问 `http://127.0.0.1:<dsh-web-port>/kb/`（端口见 `dsh web` 启动行）。
 当前版本还不支持上传、合并、标准更新、对话范围；这些在后续版本加入。
 
+## 侧栏入口（0.19.1）
+
+桌面端/网页端的左侧栏底部新增「知识库」入口：
+
+- 展开侧栏显示数据库图标 + “知识库”；收起侧栏只显示图标；
+- 点击在新标签/新窗口打开 `/kb/`，不离开当前会话；
+- 客户端源码在 `src/client/index.tsx`，构建产物为 `lib/client.js`。
+
+客户端构建：
+
+```bash
+npm run build:client   # 重新生成 lib/client.js
+npm run check:client   # 校验产物是否与源码同步（npm test 会先跑）
+npm run typecheck      # 客户端 TypeScript 类型检查
+```
+
+bundle 只依赖宿主提供的 React，不打包第二份 React；`package.json` 的 `dsh.client`
+声明 `platform: "web"` 与对 `@deepseek-ai/dsh-client-ui-sidebar` 的依赖。
+
 ## 编译层：schema / index / log 与笔记（0.13.0）
 
 对照 Karpathy「LLM Wiki」的三层结构，0.13.0 把知识库从“资料库 + 检索”补成**可累积的 Wiki**：
