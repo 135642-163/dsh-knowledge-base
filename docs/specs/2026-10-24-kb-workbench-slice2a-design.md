@@ -79,12 +79,12 @@ lib/index.js             （改）startImportJob 委托 lib/import-job.js；新�
   limits: { maxUploadBytes, maxBatchFiles, extensions },
   jobs,                    // createJobRegistry() 实例
   spawn,                   // (spec) => ctx.subprocess.spawn(spec)
-  std: { configured, baseUrl, rateMs, maxAgeDays, timeoutMs, importConfig },
-  stdService,              // createStdService(...)，测试可注入假任务体
+  std: { configured, baseUrl, cookie, rateMs, maxAgeDays, importConfig,
+         runStdCheck },    // runStdCheck 可选：测试注入假任务体（实现体在 lib/web/std.js）
 }
 ```
 
-- 生产：`registerKbWeb(ctx, opts)` 里构造 `jobs`、`spawn = ctx.subprocess.spawn`、`stdService`，再传给 `handleApi`。
+- 生产：`registerKbWeb(ctx, opts)` 里构造 `jobs`、`spawn = ctx.subprocess.spawn`、`std` 配置，再传给 `handleApi`。
 - 测试：直接用 `handleApi`，传假 `spawn`（写 progress/report 后退出）与真注册表，不需要 HTTP 服务。
 - `uiEnabled === false` 时整条链路不注册（现状不变）。
 
@@ -368,7 +368,7 @@ select → uploading(并发 2) → starting → importing(1s 轮询) → done | 
 - **error**：错误码 + 文案；批次保留时可重新发起。
 - **关闭行为**
   - 上传中：中止进行中的 XHR，`DELETE /upload-batches/:id` 丢弃批次。
-  - 导入中：不取消任务；写 `localStorage["kb.upload.job.<kb>"] = jobId`；下次打开弹窗时用 `GET /jobs?kb=<kb>&kind=kb-import&limit=1` 恢复横幅「上次导入仍在进行/已完成」。
+  - 导入中：不取消任务；写 `localStorage["kb.upload.job.<kb>"] = jobId`；下次打开弹窗时用 `GET /jobs/:id` 直接恢复到该任务的进度/结果视图（任务已过期则忽略并清理该键）。
   - Esc 只在非运行态关闭。
 - 所有库名/文件名走 `escapeHtml`；同一弹窗内不重渲染外层页面，避免打断上传。
 
@@ -433,8 +433,11 @@ select → uploading(并发 2) → starting → importing(1s 轮询) → done | 
 | `test/worker-progress.test.mjs` | 真 worker + `progressFile`：原子写无残留临时文件、`done/ok/files[]` 正确、失败文件带 `error` |
 | `test/import-job.test.mjs` | `prepareImportArgs` 透传 `progressFile`、runner 的 done/cancel/报告兜底与 args 清理 |
 | `test/web-std.test.mjs` | `readStdStatus` 计数与 TTL、无 cookie 泄露、action 校验、无 cookie 下载 400、并发 409、`buildStdEntries` 状态映射与 200 条截断、`onProgress` 阶段序列（注入假 `runStdCheck`） |
-| `test/upload-core.test.mjs` | 文件分类/拒绝原因、相对路径、并发队列、状态标签、结果汇总 |
-| `test/web-api-read.test.mjs`（扩展） | `/status` 的 `features` 与 `limits`、新路由缺 `x-kb-ui`/跨源 403 |
+| `test/upload-core.test.mjs` | 文件分类/拒绝原因、相对路径、并发队列、状态标签、结果汇总、状态机 |
+| `test/ui-api.test.mjs` | 批次/任务/标准方法映射、XHR 上传的 URL/请求头/进度、错误映射 |
+| `test/std-view.test.mjs` | 标准面板渲染：摘要、按钮禁用、结果表 |
+| `test/web-api-read.test.mjs`（扩展） | `/status` 的 `features` 与 `limits` |
+| `test/web-server.test.mjs`（扩展） | `registerKbWeb` 注入 `jobs`/`limits`、`/kb/api` 装配、dispose 注册 |
 
 ### 11.2 手动/浏览器验收
 
