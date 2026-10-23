@@ -3642,10 +3642,9 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
 
   function retryFailed() {
     const importFailed = new Set(
-      (state.job?.result?.files ?? []).filter((item) => item.status === "failed").map((item) => String(item.title ?? ""))
+      (state.job?.result?.files ?? []).filter((item) => item.status === "failed").map((item) => String(item.path ?? ""))
     );
-    const baseName = (path) => String(path ?? "").split("/").pop();
-    const failed = state.files.filter((item) => item.status === "failed" || importFailed.has(baseName(item.path)));
+    const failed = state.files.filter((item) => item.status === "failed" || importFailed.has(item.path));
     if (failed.length === 0) {
       state.error = "没有可重试的失败文件";
       render();

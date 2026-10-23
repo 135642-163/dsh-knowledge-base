@@ -197,7 +197,7 @@ createJobRegistry({ retentionMs = 3600_000, maxJobs = 200, now = Date.now })
 
 `result` 按 kind：
 
-- import：`{ fileCount, ok, fail, skip, files: [{ title, status, error? }], duplicates: [{ title, scope: "same-kb"|"cross-kb", matched: [{ kb, title, id }] }], similar: 同构 }`。`sourcePath` 等内部路径不下发。
+- import：`{ fileCount, ok, fail, skip, files: [{ path, title, status, error? }], duplicates: [{ title, scope: "same-kb"|"cross-kb", matched: [{ kb, title, id }] }], similar: 同构 }`。`path` 是批次内相对路径（Task 11 用它匹配重试项）；`sourcePath` 等内部路径不下发。
 - std：见 5.4。
 
 ### 5.4 标准状态与结果
