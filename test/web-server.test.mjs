@@ -38,14 +38,13 @@ test("registerKbWeb is a no-op without webServer", () => {
   assert.equal(routes.length, 0);
 });
 
-test("registerKbWeb registers /kb, /kb/api and /kb/ routes", () => {
+test("registerKbWeb registers /kb, /kb/api and /kb static routes", () => {
   const { ctx, routes } = fakeCtx();
   registerKbWeb(ctx, { kbRoot: "/tmp/none", uiEnabled: true });
   assert.deepEqual(routes.map((route) => `${route.kind}:${route.path}`), [
     "exact:/kb",
-    "exact:/kb/api",
-    "prefix:/kb/api/",
-    "prefix:/kb/",
+    "prefix:/kb/api",
+    "prefix:/kb",
   ]);
 });
 
@@ -59,22 +58,27 @@ test("kbRoot option is accepted (no filesystem access at registration)", async (
   const root = await mkdtemp(join(tmpdir(), "kb-web-server-"));
   const { ctx, routes } = fakeCtx();
   registerKbWeb(ctx, { kbRoot: root, uiEnabled: true });
-  assert.equal(routes.length, 4);
+  assert.equal(routes.length, 3);
 });
 
-test("static /kb/api.js is not captured by the JSON API route", () => {
+test("DSH prefix semantics keep /kb/api.js out of the JSON API route", () => {
   const { ctx, routes } = fakeCtx();
   registerKbWeb(ctx, { kbRoot: "/tmp/none", uiEnabled: true });
+  // dsh-host-webserver: prefix p 命中 p 或 p/<anything>，最长前缀优先。
   const match = (path) => {
     const exact = routes.find((route) => route.kind === "exact" && route.path === path);
     if (exact) return exact.path;
-    const prefixes = routes
-      .filter((route) => route.kind === "prefix" && path.startsWith(route.path))
-      .sort((a, b) => b.path.length - a.path.length);
-    return prefixes[0]?.path ?? null;
+    let best = null;
+    for (const route of routes) {
+      if (route.kind !== "prefix") continue;
+      if (path !== route.path && !path.startsWith(`${route.path}/`)) continue;
+      if (!best || route.path.length > best.path.length) best = route;
+    }
+    return best?.path ?? null;
   };
   assert.equal(match("/kb/api"), "/kb/api");
-  assert.equal(match("/kb/api/kbs"), "/kb/api/");
-  assert.equal(match("/kb/api.js"), "/kb/");
-  assert.equal(match("/kb/app.js"), "/kb/");
+  assert.equal(match("/kb/api/kbs"), "/kb/api");
+  assert.equal(match("/kb/api.js"), "/kb");
+  assert.equal(match("/kb/app.js"), "/kb");
+  assert.equal(match("/kb/"), "/kb");
 });
