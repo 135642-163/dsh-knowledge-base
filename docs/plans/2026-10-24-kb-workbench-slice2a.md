@@ -2767,7 +2767,7 @@ git commit -m "feat(web): std check panel API with progress events and trimmed r
 > 4. 装配测试除 `/status`/`/jobs` 外，加一条 `GET /kbs/:name/std` 200 冒烟（防 Task 7 路由漏接 `opts.std`）。
 > 5. `opts.std` 由 index.js 传入：`{configured, baseUrl, cookie, rateMs, maxAgeDays, importConfig}`（不会传 `runStdCheck`/`importDownloadedImpl` 测试 seam）。
 
-- [ ] **Step 8.1: 写失败测试**
+- [x] **Step 8.1: 写失败测试**
 
 在 `test/web-server.test.mjs` 末尾追加（该文件已 import `registerKbWeb`；若无则补）：
 
@@ -2830,12 +2830,12 @@ test("registerKbWeb 注入 jobs/limits 并注册任务清单与 dispose", async 
 });
 ```
 
-- [ ] **Step 8.2: 运行确认失败**
+- [x] **Step 8.2: 运行确认失败**
 
 Run: `node --test test/web-server.test.mjs`
 Expected: FAIL——`/kb/api/jobs/kb-import-nope` 在未注入 `opts.jobs` 时抛 `TypeError`，返回 500；且 `effects` 里没有 `kb-web: jobs-dispose`。
 
-- [ ] **Step 8.3: 在 `lib/index.js` 增加配置并注入服务**
+- [x] **Step 8.3: 在 `lib/index.js` 增加配置并注入服务**
 
 1. `Config` 增加：
 
@@ -2900,7 +2900,7 @@ Expected: FAIL——`/kb/api/jobs/kb-import-nope` 在未注入 `opts.jobs` 时�
 import { sectionsFromMarkdown, SUPPORTED_EXTS } from "./parsers.js";
 ```
 
-- [ ] **Step 8.4: 改 `lib/web/server.js` 装配**
+- [x] **Step 8.4: 改 `lib/web/server.js` 装配**
 
 import 增加：
 
@@ -2936,7 +2936,7 @@ import { createJobRegistry } from "./jobs.js";
     }
 ```
 
-- [ ] **Step 8.5: 跑测试**
+- [x] **Step 8.5: 跑测试**
 
 Run:
 ```bash
@@ -2945,12 +2945,20 @@ npm test
 ```
 Expected: 全通过。
 
-- [ ] **Step 8.6: Commit**
+- [x] **Step 8.6: Commit**
 
 ```bash
-git add lib/index.js lib/web/server.js test/web-server.test.mjs
+git add lib/index.js lib/web/server.js lib/store.js lib/web/upload.js test/web-server.test.mjs
 git commit -m "feat(web): wire job registry, upload limits and std config into the workbench server"
 ```
+
+### Task 8 实现修正记录（2026-10-24，已执行）
+
+1. **配置**：`uiMaxUploadBytes`（2 GiB，1 MiB–16 GiB）、`uiMaxBatchFiles`（1000，1–5000）；`normalizeLimits` 对 `<=0/NaN/Infinity` 回退默认值。
+2. **共享 import config**：`buildImportConfig` 是 `kb_import` / `kb_reparse` / `kb_std_check` 与 web upload/std 的唯一基准；工具路径只覆盖每次调用的 `ocrLang`/force 标志。`kb_std_check` 因此也开始遵守 `autoDownloadModels:false`（有意修复的漂移）。
+3. **装配**：`registerKbWeb` 收到 `limits`、`importConfig`、`std {configured,baseUrl,cookie,rateMs,maxAgeDays,importConfig}`；server 每个 webServer mount 创建一个 registry、`spawn` 委托 `ctx.subprocess.spawn`、dispose 注册 `kb-web: jobs-dispose → jobs.cancelAll()`。
+4. **清扫**：`sweepStaging` 跳过 `import-tmp/ui-batches`（批次生命周期归 `sweepOldBatches`，目前只在创建新批次时触发；无新上传的库会保留残留超过 24h，是已知限制）。
+5. **测试 264**：装配测试（/status limits、/jobs 404、GET std configured:true + ttlDays:2、dispose 可执行）、normalizeLimits 回退、sweepStaging 父目录老化判别。
 
 ---
 
