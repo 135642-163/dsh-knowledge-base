@@ -99,6 +99,12 @@ npm run typecheck      # 客户端 TypeScript 类型检查
 bundle 只依赖宿主提供的 React，不打包第二份 React；`package.json` 的 `dsh.client`
 声明 `platform: "web"` 与对 `@deepseek-ai/dsh-client-ui-sidebar` 的依赖。
 
+> **DSH 0.2.x 注意**：`client-modules` 要求 profile 里 loader entry 的 `name`
+> 与 `package.json` 的 `name` 完全一致（本插件为 `dsh-knowledge-wiki`）。
+> 如果从旧版的 `dsh-knowledge-base` 别名迁移，请把 profile `cordis.patch.yml`
+> 的 `name` 改为 `dsh-knowledge-wiki`，并在 `~/.dsh/profiles/node_modules/` 建同名软链；
+> 否则 `/kb/` 服务端仍可用，但客户端侧栏入口不会加载。
+
 ## 编译层：schema / index / log 与笔记（0.13.0）
 
 对照 Karpathy「LLM Wiki」的三层结构，0.13.0 把知识库从“资料库 + 检索”补成**可累积的 Wiki**：
