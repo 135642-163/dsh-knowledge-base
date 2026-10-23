@@ -115,7 +115,6 @@ function render() {
         ${!state.loading && !state.error && current.page === "trash" ? renderTrash(state, { icons, fmtNumber }) : ""}
       </main>
     </div>
-    <div class="toast" id="toast" hidden></div>
   `;
   bind();
 }
@@ -238,9 +237,20 @@ function escapeHtml(value) {
   }[char]));
 }
 
+function toastNode() {
+  let node = document.querySelector("#toast");
+  if (!node) {
+    node = document.createElement("div");
+    node.id = "toast";
+    node.className = "toast";
+    node.hidden = true;
+    document.body.appendChild(node);
+  }
+  return node;
+}
+
 function showToast(message, kind = "info") {
-  const node = document.querySelector("#toast");
-  if (!node) return;
+  const node = toastNode();
   node.textContent = message;
   node.className = `toast show ${kind}`;
   node.hidden = false;
