@@ -97,7 +97,11 @@ React 由宿主通过 `require("react")` 提供，不能打进第二份 React。
 ```
 
 - 使用 `var(--dsw-alias-*)` 主题变量，不写死颜色
-- hover / focus-visible 有背景与轮廓反馈
+- 尺寸/字体对齐 DSH 侧栏 panel 按钮：高 36px、圆角 `--dsw-radius-md`（8px）、
+  字体 14px/行高 22px、内边距 7px 8px、gap 8px
+- 上边距 8px，与 region/foot 分区之间的间距一致；下方与 settings 区保持 4px 视觉间距
+- 与同一 `footerActions` 行的其他 action（如「有更新」）分享宽度，不强行占满整行
+- hover / active 背景使用 `--dsw-alias-interactive-bg-hover`；focus-visible 有轮廓反馈
 - `aria-label="知识库工作台"`，`title="知识库工作台"`
 - 不挤压设置入口；`sidebar.footer.action` 的 list 顺序由 `order` 控制（建议 10）
 
