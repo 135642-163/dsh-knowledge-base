@@ -1,4 +1,5 @@
 import { hrefForKb } from "../router.js";
+import { renderStdPanel } from "./std.js";
 
 export function renderDetail(state, current, { icons, fmtNumber }) {
   if (state.detailLoading && !state.detail) return `<div class="state">加载中…</div>`;
@@ -29,12 +30,14 @@ export function renderDetail(state, current, { icons, fmtNumber }) {
         ${tabLink(kb.name, "docs", "资料", tab)}
         ${tabLink(kb.name, "notes", "笔记", tab)}
         ${tabLink(kb.name, "log", "日志", tab)}
+        ${tabLink(kb.name, "std", "标准更新", tab)}
         ${tabLink(kb.name, "settings", "设置", tab)}
       </nav>
       ${tab === "overview" ? overview(kb, detail, { fmtNumber }) : ""}
       ${tab === "docs" ? docs(kb.name, state, { fmtNumber }) : ""}
       ${tab === "notes" ? notes(kb, { fmtNumber }) : ""}
       ${tab === "log" ? log(detail.logTail) : ""}
+      ${tab === "std" ? renderStdPanel(state, kb.name, { escapeHtml }) : ""}
       ${tab === "settings" ? settings(kb) : ""}
     </section>
   `;

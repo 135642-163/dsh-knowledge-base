@@ -4,7 +4,7 @@ import { hrefForKb, hrefForOverview, hrefForTrash, parseHash } from "./router.js
 import { renderOverview } from "./views/overview.js";
 import { renderDetail } from "./views/detail.js";
 import { renderTrash } from "./views/trash.js";
-import { openCreateModal, openDocModal, openRestoreModal } from "./views/modals.js";
+import { openConfirmModal, openCreateModal, openDocModal, openKbPickerModal, openRestoreModal } from "./views/modals.js";
 import { openUploadModal } from "./views/upload.js";
 
 const app = document.querySelector("#app");
@@ -22,7 +22,11 @@ const state = {
   detailError: "",
   docs: { items: [], total: 0, offset: 0, limit: 50 },
   trash: { items: [], loading: false, error: "" },
+  std: { kb: "", loading: false, error: "", starting: false, status: null, job: null, timer: null },
 };
+
+// 切库/离开标准 tab 时自增：所有在途状态请求与轮询回调凭 token 自行作废。
+let stdToken = 0;
 
 function fmtNumber(value) {
   return new Intl.NumberFormat("zh-CN").format(Number(value) || 0);
@@ -58,7 +62,9 @@ async function loadDetail(name, tab) {
   try {
     const detail = await api.kb(name);
     state.detail = detail;
-    if (tab === "docs") {
+    if (tab === "std") {
+      await loadStd(name);
+    } else if (tab === "docs") {
       const docs = await api.docs(name, { offset: state.docs.offset, limit: state.docs.limit, query: state.docs.query });
       state.docs = { items: docs.docs, total: docs.total, offset: docs.offset, limit: docs.limit, query: state.docs.query };
     }
@@ -68,6 +74,131 @@ async function loadDetail(name, tab) {
   } finally {
     state.detailLoading = false;
     render();
+  }
+}
+
+function stdErrorText(error) {
+  return error instanceof ApiError ? error.message : String(error?.message ?? error);
+}
+
+function isStdRoute(name) {
+  const current = route();
+  return current.page === "detail" && current.name === name && (current.tab || "overview") === "std";
+}
+
+function clearStdTimer() {
+  if (state.std.timer) clearTimeout(state.std.timer);
+  state.std.timer = null;
+}
+
+/** 离开标准 tab / 切库 / 关页面：停掉轮询并作废所有在途回调。 */
+function stopStd() {
+  clearStdTimer();
+  stdToken += 1;
+}
+
+async function loadStd(name) {
+  const token = ++stdToken;
+  clearStdTimer();
+  const sameKb = state.std.kb === name && state.std.status !== null;
+  state.std = {
+    ...state.std,
+    kb: name,
+    loading: true,
+    error: "",
+    starting: false,
+    ...(sameKb ? {} : { status: null, job: null }),
+  };
+  render();
+  try {
+    const status = await api.stdStatus(name);
+    if (token !== stdToken || state.std.kb !== name) return;
+    state.std.status = status;
+    if (status.activeJobId) {
+      const job = await api.job(status.activeJobId);
+      if (token !== stdToken || state.std.kb !== name) return;
+      state.std.job = job;
+      void pollStd(name, token);
+    } else if (status.lastJob) {
+      state.std.job = await api.job(status.lastJob.id).catch(() => null);
+    }
+  } catch (error) {
+    if (token !== stdToken || state.std.kb !== name) return;
+    state.std.error = stdErrorText(error);
+  } finally {
+    if (token === stdToken && state.std.kb === name) {
+      state.std.loading = false;
+      render();
+    }
+  }
+}
+
+async function pollStd(name, token) {
+  if (token !== stdToken || state.std.kb !== name) return;
+  clearStdTimer();
+  const jobId = state.std.job?.id;
+  if (!jobId) return;
+  try {
+    const job = await api.job(jobId);
+    if (token !== stdToken || state.std.kb !== name || state.std.job?.id !== jobId) return;
+    state.std.job = job;
+    if (job.status === "running") {
+      render();
+      // 页面隐藏时暂停轮询；visibilitychange 回到可见再续查。
+      if (!document.hidden) {
+        state.std.timer = setTimeout(() => { void pollStd(name, token); }, 1000);
+      }
+      return;
+    }
+    render();
+    await loadKbs();
+    if (token !== stdToken || state.std.kb !== name) return;
+    state.std.status = await api.stdStatus(name);
+    if (token !== stdToken || state.std.kb !== name) return;
+    render();
+  } catch (error) {
+    if (token !== stdToken || state.std.kb !== name) return;
+    state.std.error = `读取任务进度失败：${stdErrorText(error)}`;
+    clearStdTimer();
+    render();
+  }
+}
+
+async function startStd(mode) {
+  const name = state.std.kb;
+  if (!name || state.std.starting) return;
+  const token = stdToken;
+  const force = Boolean(app.querySelector("#std-force")?.checked);
+  const limit = Math.max(0, Math.round(Number(app.querySelector("#std-limit")?.value) || 0));
+  state.std.error = "";
+  state.std.starting = true;
+  render();
+  try {
+    const result = await api.stdCheck(name, { action: mode, force, limit });
+    if (state.std.kb !== name) return;
+    if (token !== stdToken) {
+      // 期间切走又切回来：不把旧请求的 job 硬塞给新状态，改为重新同步。
+      if (isStdRoute(name)) await loadStd(name);
+      return;
+    }
+    if (!result?.jobId) throw new Error("标准任务没有返回 jobId");
+    const job = await api.job(result.jobId);
+    if (token !== stdToken || state.std.kb !== name) return;
+    state.std.job = job;
+    void pollStd(name, token);
+  } catch (error) {
+    if (state.std.kb !== name) return;
+    if (error instanceof ApiError && error.code === "STD_JOB_RUNNING") {
+      showToast("该库已有标准任务在运行，正在同步进度");
+      await loadStd(name);
+      return;
+    }
+    state.std.error = stdErrorText(error);
+  } finally {
+    if (state.std.kb === name) {
+      state.std.starting = false;
+      render();
+    }
   }
 }
 
@@ -155,6 +286,28 @@ function bind() {
           const current = route();
           if (current.page === "detail") await loadDetail(current.name, current.tab);
         },
+      });
+    } else if (action === "std-open") {
+      if (state.kbs.length === 0) { showToast("还没有知识库，先新建一个"); return; }
+      openKbPickerModal({
+        kbs: state.kbs,
+        onPick: (name) => { window.location.hash = hrefForKb(name, "std"); },
+      });
+    } else if (action === "std-reload") {
+      const current = route();
+      const name = current.page === "detail" ? current.name : state.std.kb;
+      if (name) await loadStd(name);
+    } else if (action === "std-run") {
+      await startStd(target.dataset.mode ?? "check");
+    } else if (action === "std-download") {
+      const mode = target.dataset.mode ?? "check-download";
+      const limit = Math.max(0, Math.round(Number(app.querySelector("#std-limit")?.value) || 0));
+      openConfirmModal({
+        title: mode === "download" ? "补下载更新" : "检查并下载更新",
+        body: `每个标准约 6 金币（VIP 免金币），本轮最多 ${limit > 0 ? `${limit} 个` : "不限"}；下载会消耗金币。`,
+        confirmText: "开始下载",
+        requireCheckbox: true,
+        onConfirm: () => startStd(mode),
       });
     } else if (action === "reload") {
       await loadKbs();
@@ -290,12 +443,22 @@ function hideToast() {
 }
 
 function boot() {
+  clearStdTimer();
   window.addEventListener("hashchange", () => {
+    stopStd();
     const current = route();
     if (current.page === "trash") loadTrash();
     else if (current.page === "detail") loadDetail(current.name, current.tab);
     else render();
   });
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) { clearStdTimer(); return; }
+    const current = route();
+    if (current.page !== "detail" || (current.tab || "overview") !== "std") return;
+    if (state.std.kb !== current.name || state.std.job?.status !== "running") return;
+    void pollStd(current.name, stdToken);
+  });
+  window.addEventListener("pagehide", () => { clearStdTimer(); });
   const current = route();
   loadKbs().then(() => {
     if (current.page === "trash") loadTrash();

@@ -13,6 +13,7 @@ export function renderOverview(state, { icons, fmtNumber }) {
           <p class="muted">${fmtNumber(state.kbs.length)} 个库 · ${fmtNumber(totalDocs)} 篇有效文档 · ${fmtNumber(totalNotes)} 篇笔记 · ${compact(totalPages)} 页 · ${compact(totalChars)} 字</p>
         </div>
         <div class="head-actions">
+          <button class="btn" data-action="std-open">标准更新</button>
           <button class="btn" data-action="upload">上传资料</button>
         </div>
         <div class="filters">

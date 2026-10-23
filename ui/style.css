@@ -164,6 +164,12 @@ code { background: var(--panel-2); border-radius: 4px; padding: 1px 4px; }
 .confirm-body { color: var(--muted); }
 .confirm-body p { margin: 0 0 8px; }
 
+/* 标准更新面板 */
+.std-panel { display: grid; gap: 14px; }
+.std-panel .panel { margin-bottom: 0; }
+.std-panel .form-row { margin-top: 0; }
+.std-panel input[type="number"] { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; color: inherit; font: inherit; }
+
 /* 嵌入 DSH 弹窗时隐藏工作台品牌文字，只保留图标作为回总览入口 */
 body.embed .topbar { height: 44px; padding: 0 12px; }
 body.embed .topbar .brand span { display: none; }

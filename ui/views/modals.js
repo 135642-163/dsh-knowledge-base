@@ -19,7 +19,7 @@ export function openConfirmModal({ title, body = "", confirmText = "确认", req
     <form class="modal-form">
       <h2>${escapeHtml(title)}</h2>
       <div class="confirm-body"><p class="muted">${escapeHtml(body)}</p></div>
-      ${requireCheckbox ? `<label class="check"><input type="checkbox" name="ack" /> 我已了解以上内容</label>` : ""}
+      ${requireCheckbox ? `<label class="check"><input type="checkbox" name="ack" /> 我已知晓</label>` : ""}
       <p class="form-error" hidden></p>
       <div class="modal-actions">
         <button type="button" class="btn" data-close>取消</button>
@@ -32,7 +32,7 @@ export function openConfirmModal({ title, body = "", confirmText = "确认", req
   form.onsubmit = async (event) => {
     event.preventDefault();
     if (requireCheckbox && !form.querySelector("input[name='ack']")?.checked) {
-      error.textContent = "请先勾选确认";
+      error.textContent = "请先勾选「我已知晓」";
       error.hidden = false;
       return;
     }
@@ -50,6 +50,31 @@ export function openConfirmModal({ title, body = "", confirmText = "确认", req
   return node;
 }
 
+/** 知识库选择弹窗：标准更新入口用；只返回库名，具体跳转由调用方决定。 */
+export function openKbPickerModal({ kbs = [], onPick } = {}) {
+  const node = overlay(`
+    <div class="modal-form">
+      <h2>选择知识库</h2>
+      <p class="muted">对哪个库检查标准更新？</p>
+      <div class="uplist">
+        ${kbs.length === 0 ? `<p class="muted">还没有知识库</p>` : kbs.map((kb) => {
+          const docs = kb?.docs ?? {};
+          const live = Number(docs.ready ?? 0) + Number(docs.importing ?? 0) + Number(docs.failed ?? 0);
+          return `<button type="button" class="btn" data-kb="${escapeAttr(kb?.name ?? "")}">${escapeHtml(kb?.name ?? "")} <span class="muted">${live} 篇</span></button>`;
+        }).join("")}
+      </div>
+      <div class="modal-actions"><button type="button" class="btn" data-close>取消</button></div>
+    </div>
+  `);
+  node.querySelectorAll("[data-kb]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const name = button.dataset.kb;
+      node.remove();
+      if (name) onPick?.(name);
+    });
+  });
+  return node;
+}
 
 export function openCreateModal({ onCreated }) {
   const node = overlay(`
