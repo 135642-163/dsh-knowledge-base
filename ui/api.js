@@ -38,21 +38,32 @@ function uploadFile(batchId, item, { onProgress, signal } = {}) {
         if (event.lengthComputable && event.total > 0) onProgress?.(event.loaded / event.total);
       };
     }
+    let finished = false;
+    const onAbort = () => xhr.abort();
+    const settle = (fn, value) => {
+      if (finished) return;
+      finished = true;
+      if (signal) signal.removeEventListener("abort", onAbort);
+      xhr.onload = null;
+      xhr.onerror = null;
+      xhr.onabort = null;
+      fn(value);
+    };
     xhr.onload = () => {
       const payload = xhr.response ?? null;
       if (xhr.status >= 200 && xhr.status < 300) {
-        resolve(payload);
+        settle(resolve, payload);
         return;
       }
-      reject(new ApiError(xhr.status, payload?.error?.code ?? "HTTP_ERROR", payload?.error?.message ?? `上传失败 (${xhr.status})`));
+      settle(reject, new ApiError(xhr.status, payload?.error?.code ?? "HTTP_ERROR", payload?.error?.message ?? `上传失败 (${xhr.status})`));
     };
-    xhr.onerror = () => reject(new ApiError(0, "NETWORK_ERROR", "上传失败（网络错误）"));
-    xhr.onabort = () => reject(new ApiError(0, "ABORTED", "上传已取消"));
+    xhr.onerror = () => settle(reject, new ApiError(0, "NETWORK_ERROR", "上传失败（网络错误）"));
+    xhr.onabort = () => settle(reject, new ApiError(0, "ABORTED", "上传已取消"));
     if (signal?.aborted) {
-      reject(new ApiError(0, "ABORTED", "上传已取消"));
+      settle(reject, new ApiError(0, "ABORTED", "上传已取消"));
       return;
     }
-    if (signal) signal.addEventListener("abort", () => xhr.abort(), { once: true });
+    if (signal) signal.addEventListener("abort", onAbort, { once: true });
     xhr.send(item.file);
   });
 }
