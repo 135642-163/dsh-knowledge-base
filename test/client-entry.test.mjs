@@ -29,9 +29,9 @@ function loadClient(overrides = {}) {
   const context = {
     window: {
       __ModuleLoader__: { load(value) { entry = value; } },
-      open: () => ({ closed: false }),
       ...(overrides.window ?? {}),
     },
+    navigator: overrides.navigator,
     document: overrides.document,
     console,
   };
@@ -86,7 +86,7 @@ test("component renders the label only when the sidebar is wide", () => {
   });
 
   const wide = component({ wide: true });
-  assert.equal(wide.type, "button");
+  assert.equal(wide.type, "a");
   assert.equal(wide.props.title, "知识库工作台");
   assert.equal(wide.props["aria-label"], "知识库工作台");
   assert.ok(childrenOf(wide).some((child) => child?.type === "span" && child.props?.children === "知识库"));
@@ -95,19 +95,30 @@ test("component renders the label only when the sidebar is wide", () => {
   assert.ok(!childrenOf(collapsed).some((child) => child?.type === "span"));
 });
 
-test("click opens /kb/ in a new tab", () => {
-  const { mod, context } = loadClient();
-  const opened = [];
-  context.window.open = (...args) => { opened.push(args); return { closed: false }; };
-  let component;
-  mod.apply({
-    slots: {
-      inject(_name, callback) { callback(); },
-      register(_decl, value) { component = value; },
-    },
-  });
-  component({ wide: true }).props.onClick();
-  assert.deepEqual(opened, [["/kb/", "_blank", "noopener,noreferrer"]]);
+test("anchor navigates to /kb/ in a new tab in browsers and same window in Electron", () => {
+  const render = (options) => {
+    const { mod } = loadClient(options);
+    let component;
+    mod.apply({
+      slots: {
+        inject(_name, callback) { callback(); },
+        register(_decl, value) { component = value; },
+      },
+    });
+    return component({ wide: true });
+  };
+
+  const browser = render();
+  assert.equal(browser.type, "a");
+  assert.equal(browser.props.href, "/kb/");
+  assert.equal(browser.props.target, "_blank");
+  assert.match(browser.props.rel, /noopener/);
+
+  const desktop = render({ navigator: { userAgent: "Mozilla/5.0 Electron/0.2.1" } });
+  assert.equal(desktop.type, "a");
+  assert.equal(desktop.props.href, "/kb/");
+  assert.equal(desktop.props.target, "_self");
+  assert.equal(desktop.props.rel, undefined);
 });
 
 test("injects the sidebar CSS once", () => {

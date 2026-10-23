@@ -90,6 +90,7 @@ function render() {
     <header class="topbar">
       <a class="brand" href="${hrefForOverview()}">${icons.database}<span>知识库工作台</span></a>
       <div class="topbar-actions">
+        ${window.history.length > 1 ? `<button class="btn" data-action="back">${icons.back}<span>返回</span></button>` : ""}
         <button class="btn primary" data-action="create-kb">${icons.plus}<span>新建知识库</span></button>
       </div>
     </header>
@@ -134,6 +135,8 @@ function bind() {
       });
     } else if (action === "reload") {
       await loadKbs();
+    } else if (action === "back") {
+      window.history.back();
     } else if (action === "open-kb") {
       window.location.hash = hrefForKb(target.dataset.name);
     } else if (action === "open-doc") {

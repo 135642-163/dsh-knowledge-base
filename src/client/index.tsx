@@ -31,6 +31,7 @@ const CSS = `
   font-size: 12px;
   line-height: 18px;
   text-align: left;
+  text-decoration: none;
   cursor: pointer;
 }
 .dsh-kb-entry:hover {
@@ -76,24 +77,26 @@ function DatabaseIcon() {
   );
 }
 
+function isElectron() {
+  return typeof navigator !== "undefined" && /Electron/i.test(navigator.userAgent);
+}
+
 export function KbWorkbenchAction({ wide = false }: KbProps) {
-  const open = () => {
-    const opened = window.open("/kb/", "_blank", "noopener,noreferrer");
-    if (opened === null) {
-      console.warn("[dsh-knowledge-wiki] 无法打开知识库工作台（新窗口被拦截）");
-    }
-  };
+  // Electron 主窗口拒绝应用内新窗口（setWindowOpenHandler deny），所以桌面端
+  // 走当前窗口导航；普通浏览器仍用新标签。这样点击一定有可见响应。
+  const desktop = isElectron();
   return (
-    <button
-      type="button"
+    <a
       className={wide ? "dsh-kb-entry" : "dsh-kb-entry dsh-kb-entry-collapsed"}
+      href="/kb/"
+      target={desktop ? "_self" : "_blank"}
+      rel={desktop ? undefined : "noopener noreferrer"}
       title="知识库工作台"
       aria-label="知识库工作台"
-      onClick={open}
     >
       <DatabaseIcon />
       {wide ? <span className="dsh-kb-entry-label">知识库</span> : null}
-    </button>
+    </a>
   );
 }
 
