@@ -2138,7 +2138,7 @@ git commit -m "feat(web): expose workbench job status endpoints"
 - Modify: `lib/web/api.js`
 - Create: `test/web-std.test.mjs`
 
-- [ ] **Step 7.1: 写失败测试**
+- [x] **Step 7.1: 写失败测试**
 
 创建 `test/web-std.test.mjs`：
 
@@ -2328,12 +2328,12 @@ test("同一库已有运行中标准任务时 409；完成后结果可读", asyn
 });
 ```
 
-- [ ] **Step 7.2: 运行确认失败**
+- [x] **Step 7.2: 运行确认失败**
 
 Run: `node --test test/web-std.test.mjs`
 Expected: FAIL（`lib/web/std.js` 不存在）。
 
-- [ ] **Step 7.3: 给 `runStdCheck` 加 `onProgress`**
+- [x] **Step 7.3: 给 `runStdCheck` 加 `onProgress`**
 
 `lib/standards.js`：
 
@@ -2392,7 +2392,7 @@ export async function runStdCheck(opts) {
 
 实现时把 `continue;` 改为 `{ reportDownload(); continue; }`，正常下载成功后加 `reportDownload();`，`break;` 前加 `reportDownload();`。`downloadDone` 在循环体开头递增。
 
-- [ ] **Step 7.4: 在 `lib/standards.js` 增加 `createStdImportFn`**
+- [x] **Step 7.4: 在 `lib/standards.js` 增加 `createStdImportFn`**
 
 在 `importDownloaded` 之前加入：
 
@@ -2424,7 +2424,7 @@ export function createStdImportFn({ kbDir, existing = new Set(), config = {}, on
 import { importFileInto } from "./pipeline.js";
 ```
 
-- [ ] **Step 7.5: `kb_std_check` 改用 `createStdImportFn`**
+- [x] **Step 7.5: `kb_std_check` 改用 `createStdImportFn`**
 
 `lib/index.js` 的 standards import 增加 `createStdImportFn`：
 
@@ -2457,7 +2457,7 @@ import { runStdCheck, importDownloaded, renderStdReport, createStdImportFn } fro
         );
 ```
 
-- [ ] **Step 7.6: 实现 `lib/web/std.js`**
+- [x] **Step 7.6: 实现 `lib/web/std.js`**
 
 ```js
 /**
@@ -2681,7 +2681,7 @@ export async function startStdJob({
 }
 ```
 
-- [ ] **Step 7.7: 在 `lib/web/api.js` 加标准路由**
+- [x] **Step 7.7: 在 `lib/web/api.js` 加标准路由**
 
 import 增加：
 
@@ -2725,7 +2725,7 @@ import { readStdStatus, startStdJob } from "./std.js";
 
 > `ensureKb` 已存在且返回 `{ name, dir }`。
 
-- [ ] **Step 7.8: 跑测试与既有标准测试**
+- [x] **Step 7.8: 跑测试与既有标准测试**
 
 Run:
 ```bash
@@ -2734,12 +2734,22 @@ npm test
 ```
 Expected: 新测试全通过；`npm test` 全绿（之前 189 + 本任务用例）。
 
-- [ ] **Step 7.9: Commit**
+- [x] **Step 7.9: Commit**
 
 ```bash
 git add lib/standards.js lib/web/std.js lib/web/api.js lib/index.js test/web-std.test.mjs
 git commit -m "feat(web): std check panel API with progress events and trimmed results"
 ```
+
+### Task 7 实现修正记录（2026-10-24，已执行）
+
+1. **并发竞态**：成功路径 `jobs.hasRunning(...)`（同步）后立刻 `jobs.start(...)`，不 await；仅 409 分支 await `jobs.list` 取 `details.jobId`。并发 POST 恰好一个 202、一个 409。
+2. **结果映射**：失败草稿按 `failed` + title/message；`downloadFailed` 独立回退按 `stdNo ?? aid ?? number` 去重；新增 `importFailed` 状态与 `counts.importFailed`，并 append 到 `hint`。
+3. **路径净化**：`lib/web/redact.js` 共享 `redactPaths`；std 任务前缀 `[kbDir, kbRoot, PLUGIN_ROOT, tmpdir()]`，entry message/hint/importError/detail 全部净化并截 300 字；run 体抛错先净化再抛。
+4. **进度**：`createStdImportFn` 对每个文件回调 `{skipped}`；std 导入阶段 `done=processed`、`imported=processed-skipped`，并带 `processed/skipped`；skip 也不会让进度条卡住。
+5. **hint**：`deferred>0` 的 limit 顺延提示 + 导入失败提示（用「；」拼接）。
+6. **测试 15 条**：并发、`details.jobId`、失败更新/草稿去重、importFailed、净化、skip 进度、deferred hint、lastCheckAt 判别、参数转发、check-download 编排、activeJobId/lastJob、dryRun 绕过 cookie。
+7. **已定契约**：`importDownloaded` 整体抛错 → 任务 succeeded + hint（逐文件错误才是 importFailed）；`failed`/`importFailed` 共用 STATUS_ORDER 4。
 
 ---
 
@@ -2749,6 +2759,13 @@ git commit -m "feat(web): std check panel API with progress events and trimmed r
 - Modify: `lib/index.js`（配置 schema、apply、registerKbWeb 调用）
 - Modify: `lib/web/server.js`
 - Modify: `test/web-server.test.mjs`（装配测试）
+
+> **Task 8 附加约束（来自 Task 3/4/7 复审）**：
+> 1. 抽一个共享的 import config 构造器，供 `lib/index.js`（工具路径）与 `lib/web/std.js` 复用，避免 OCR/langPath 三份漂移。
+> 2. `lib/store.js` 的 `sweepStaging` 显式跳过 `import-tmp/ui-batches`（批次生命周期由 `sweepOldBatches` 负责，否则重启会误删失败保留批次）。
+> 3. `normalizeLimits` 对 `maxUploadBytes <= 0`/`maxBatchFiles <= 0` 回退默认值，不要出现 1 字节上限。
+> 4. 装配测试除 `/status`/`/jobs` 外，加一条 `GET /kbs/:name/std` 200 冒烟（防 Task 7 路由漏接 `opts.std`）。
+> 5. `opts.std` 由 index.js 传入：`{configured, baseUrl, cookie, rateMs, maxAgeDays, importConfig}`（不会传 `runStdCheck`/`importDownloadedImpl` 测试 seam）。
 
 - [ ] **Step 8.1: 写失败测试**
 
