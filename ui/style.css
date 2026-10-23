@@ -1,0 +1,7 @@
+:root { color-scheme: light dark; }
+html, body { margin: 0; min-height: 100%; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+body { background: #f6f7f9; color: #1f2328; }
+@media (prefers-color-scheme: dark) {
+  body { background: #16181d; color: #e6e8eb; }
+}
+.boot { display: grid; place-items: center; min-height: 100vh; color: #6b7280; }
