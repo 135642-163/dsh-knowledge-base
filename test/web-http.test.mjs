@@ -7,6 +7,8 @@ import {
   isTrustedApiRequest,
   assertSameOrigin,
   requireUiHeader,
+  relativeApiPath,
+  relativeUiPath,
 } from "../lib/web/http.js";
 
 function req(headers = {}) {
@@ -34,4 +36,18 @@ test("cross-site origin is rejected", () => {
 test("mutations require x-kb-ui header", () => {
   assert.doesNotThrow(() => requireUiHeader(req({ "x-kb-ui": "1" })));
   assert.throws(() => requireUiHeader(req({})), /请求头/);
+});
+
+test("host may pass full or prefix-stripped paths to handlers", () => {
+  assert.equal(relativeApiPath("/kb/api/status"), "/status");
+  assert.equal(relativeApiPath("/status"), "/status");
+  assert.equal(relativeApiPath("/kb/api"), "/");
+  assert.equal(relativeApiPath("/kbs/%E6%A0%87%E5%87%86/docs"), "/kbs/%E6%A0%87%E5%87%86/docs");
+
+  assert.equal(relativeUiPath("/kb/"), "index.html");
+  assert.equal(relativeUiPath("/"), "index.html");
+  assert.equal(relativeUiPath("/kb/app.js"), "app.js");
+  assert.equal(relativeUiPath("/app.js"), "app.js");
+  assert.equal(relativeUiPath("/kb/api.js"), "api.js");
+  assert.equal(relativeUiPath("/api.js"), "api.js");
 });
