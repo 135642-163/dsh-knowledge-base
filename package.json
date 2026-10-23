@@ -28,7 +28,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "node scripts/build-client.mjs --check && node --test \"test/**/*.test.mjs\"",
+    "test": "node scripts/build-client.mjs --check && node scripts/run-tests.mjs",
     "build:client": "node scripts/build-client.mjs",
     "check:client": "node scripts/build-client.mjs --check",
     "typecheck": "tsc --noEmit"
