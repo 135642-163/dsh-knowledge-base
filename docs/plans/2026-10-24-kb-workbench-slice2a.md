@@ -3963,7 +3963,7 @@ function stdResultHtml(result, { escapeHtml }) {
   const entries = result.entries ?? [];
   return `
     <div class="progress-line">
-      <strong>检查 ${counts.checked ?? 0} 组 · 更新 ${counts.updates ?? 0} · 下载 ${counts.downloaded ?? 0} · 导入 ${counts.imported ?? 0} · 失败 ${counts.downloadFailed ?? 0}</strong>
+      <strong>检查 ${counts.checked ?? 0} 组 · 更新 ${counts.updates ?? 0} · 下载 ${counts.downloaded ?? 0} · 导入 ${counts.imported ?? 0} · 导入失败 ${counts.importFailed ?? 0} · 下载失败 ${counts.downloadFailed ?? 0}</strong>
     </div>
     ${counts.authOk === false ? `<p class="form-error">登录态失效：请更新 bzCookie 后重试。</p>` : ""}
     ${entries.length === 0 ? `<p class="muted">没有结果</p>` : `
@@ -3983,7 +3983,9 @@ function stdResultHtml(result, { escapeHtml }) {
 }
 ```
 
-- [ ] **Step 12.4: `ui/views/modals.js` 增加确认框与库选择框**
+- [ ] **Step 12.4: `ui/views/modals.js` 增加库选择框（确认框 Task 11 已有）**
+
+> Task 11 已添加 `openConfirmModal`（`body` 默认转义、支持 async onConfirm、requireCheckbox）。这里**不要重复添加**；只补 `openKbPickerModal`，并确认 `openConfirmModal` 的签名/文案满足本任务的金币确认需求。
 
 ```js
 export function openConfirmModal({ title, body, confirmText = "确认", requireCheckbox = false, onConfirm }) {
