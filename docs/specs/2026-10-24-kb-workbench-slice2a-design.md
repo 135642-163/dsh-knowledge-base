@@ -108,17 +108,20 @@ export function createImportWorkerRunner({ spawn, dir, argsFile, reportFile, fil
 ```js
 createJobRegistry({ retentionMs = 3600_000, maxJobs = 200, now = Date.now })
   .start({ kind, kb, label, run, onSettle? }) -> jobId   // 立即执行 run()
-  .get(id) -> job | null                                  // 合并 progressFile
-  .list({ kb, kind, limit }) -> job[]
+  .get(id) -> job | null                                  // 合并/回退 progress
+  .list({ kb, kind, limit }) -> job[]                     // running 行合并 progressFile
+  .hasRunning({ kb, kind }) -> boolean                    // 供 STD_JOB_RUNNING 检查
   .cancelAll()                                            // 终止所有运行中任务的子进程
 ```
 
 - `jobId = "<kind>-<base36 计数>-<4 hex>"`，如 `kb-import-3-9f2a`；进程内唯一。
-- 状态：`running → succeeded | failed`。逐文件部分失败仍是 `succeeded`（`result.fail > 0` 由 UI 表达），进程级崩溃才 `failed`。
-- `progress`：import 每次 `get/list` 读 `progressFile`（小文件，best-effort）；std 由 `onProgress` 更新内存。
-- 保留：`start/get/list` 时淘汰已结算超过 1 小时的任务；总数超 `maxJobs` 时淘汰最旧的已结算任务。
+- 状态：`running → succeeded | failed`。outcome 归一化：`succeeded|completed → succeeded`，`failed|cancelled → failed`，其他（null/非对象/未知 status）→ `failed` 且 detail 注明。逐文件部分失败仍是 `succeeded`（`result.fail > 0` 由 UI 表达），进程级崩溃/取消才 `failed`。
+- **`onSettle({ id, kind, kb, status, detail, result })`**：每个终态（成功/失败/取消/`run` 拒绝）恰好调用一次，且在任务对外可见为终态之前 await；hook 抛错把 `；收尾失败：…` 追加到 detail，不改变 status。批次的落盘/清理必须写在这里。
+- `progress`：import 在 `running` 时读 `progressFile`（best-effort，校验普通对象、缓存、`kind` 由服务端覆盖）；std 由 `setProgress` 更新内存。结算后清 `progressFile`/`handle`/`onSettle`，`get` 返回最后一次进度快照。
+- 取消：`cancelAll` 单个 handle 抛错不影响其他任务；尚未 attach handle 的运行任务置 `cancelRequested`，`setHandle` 时立即取消。
+- 保留：`start/get/list` 时淘汰已结算超过 1 小时的任务；总数超 `maxJobs` 时淘汰最旧的已结算任务（running 不淘汰）。
 - 插件 dispose：`ctx.effect(() => () => jobs.cancelAll())`，避免孤儿 worker。
-- **响应净化**：`progressFile`、`batchDir`、绝对路径只存在于任务对象内部；序列化给客户端前统一走 `toPublicJob()`。
+- **响应净化**：注册表只保证顶层 key 白名单（`progressFile`/`handle`/`onSettle` 不出现）；`detail`/`result` 由调用方组成，调用方负责把批次目录、临时目录等绝对路径替换成 `<path>`。
 
 ## 5. 数据模型
 

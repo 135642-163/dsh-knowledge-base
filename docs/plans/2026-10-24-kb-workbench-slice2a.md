@@ -941,12 +941,24 @@ export function createJobRegistry({ retentionMs = DEFAULT_RETENTION_MS, maxJobs 
 Run: `node --test test/web-jobs.test.mjs`
 Expected: 6/6 通过。
 
-- [ ] **Step 3.5: Commit**
+- [x] **Step 3.5: Commit**
 
 ```bash
 git add lib/web/jobs.js test/web-jobs.test.mjs
 git commit -m "feat(web): add in-plugin job registry for workbench tasks"
 ```
+
+### Task 3 实现修正记录（2026-10-24，已执行）
+
+代码质量审查后，注册表的最终契约（Task 5/6/7 按此实现）：
+
+1. **结算单一入口** `finish(rec, outcome)`：正常完成与 `run` 拒绝走同一条路径。outcome 归一化：`succeeded|completed → succeeded`；`failed|cancelled → failed`；其他（null/非对象/未知 status/误传 runner handle）→ `failed`，detail 追加 `run() 未返回有效结果（status=…）`。
+2. **`onSettle` 契约**：`onSettle({ id, kind, kb, status, detail, result })` 在**每个**终态（成功/失败/取消/拒绝）恰好调用一次，且在任务对外可见为终态**之前** await；hook 抛错把 `；收尾失败：<msg>` 追加到 detail，不改变 status。Task 5 的批次落盘/清理必须写在这里，不能只写在成功分支。
+3. **`list` 合并进度**：`list` 是 async，running 的 import 任务会读 `progressFile`；settle 后进度快照进内部缓存，`get` 返回该快照，`list` 对已结算任务返回 `progress: null`。
+4. **进度读取加固**：只接受普通对象，`{ ...parsed, kind: "import" }` 覆盖文件里的 kind，读/解析失败回退上次缓存。
+5. **取消**：`cancelAll` 单个 handle 抛错不影响其他任务；无 handle 的 running 记录置 `cancelRequested`，`setHandle` 时立即取消；新增 `hasRunning({ kb, kind })` 供 Task 7 使用（不要再用 `list(limit:50)` 扫描）。
+6. **结算后清内部引用**：`handle`、`onSettle`、`progressFile`、`cancelRequested` 清空；`result` 保留。
+7. **净化责任**：注册表只做顶层 key 白名单；`detail`/`result` 由调用方负责组成“可下发”的内容。Task 5 必须把批次绝对路径从 `detail` 与 `files[].error` 里替换掉（见 Task 5 修正）。
 
 ---
 
@@ -1751,9 +1763,10 @@ Expected: FAIL（POST import 路由不存在 → 404）。
 
 - [ ] **Step 5.3: 在 `lib/web/upload.js` 追加导入实现**
 
-在文件末尾追加（`import` 区补 `basename`、`extname` 已 import；再补 `createImportWorkerRunner`、`prepareImportArgs`、`tempReportFile`、`scanDuplicates`）：
+在文件末尾追加（`import` 区补 `basename`、`extname` 已 import；再补 `createImportWorkerRunner`、`prepareImportArgs`、`tempReportFile`、`scanDuplicates`、`tmpdir`）：
 
 ```js
+import { tmpdir } from "node:os";
 import { createImportWorkerRunner, prepareImportArgs, tempReportFile } from "../import-job.js";
 import { createProgress, writeProgressFile } from "../progress.js";
 import { scanDuplicates } from "../dedup.js";
@@ -1762,6 +1775,16 @@ import { scanDuplicates } from "../dedup.js";
 追加函数：
 
 ```js
+/** 把内部绝对路径从面向客户端文本里替换掉（注册表只做 key 白名单，内容净化由调用方负责）。 */
+export function redactPaths(text, prefixes = []) {
+  let out = String(text ?? "");
+  for (const prefix of prefixes) {
+    if (!prefix) continue;
+    out = out.split(String(prefix)).join("<path>");
+  }
+  return out;
+}
+
 export function buildImportFiles(kbDir, batch) {
   const dir = batchDirFor(kbDir, batch.batchId);
   return batch.files.map((file) => {
@@ -1833,21 +1856,25 @@ export async function importBatch({
       const crashed = outcome.cancelled === true || (outcome.exitCode ?? 1) !== 0;
       return {
         status: crashed ? "failed" : "succeeded",
-        detail: outcome.detail,
+        detail: redactPaths(outcome.detail, [dir, tmpdir()]),
         result: {
           fileCount: kept.length,
           ok: report.ok ?? 0,
           fail: report.fail ?? 0,
           skip: report.skip ?? 0,
-          files: report.files ?? [],
+          files: (report.files ?? []).map((file) => ({
+            title: file.title,
+            status: file.status,
+            ...(file.error ? { error: redactPaths(file.error, [dir, tmpdir()]) } : {}),
+          })),
           duplicates,
           similar,
         },
       };
     },
-    onSettle: async (record) => {
-      const fail = record.result?.fail ?? 0;
-      if (record.status === "succeeded" && fail === 0) {
+    onSettle: async ({ status, result }) => {
+      const fail = result?.fail ?? 0;
+      if (status === "succeeded" && fail === 0) {
         await removeUploadBatch(kbDir, batchId);
       } else {
         batch.status = "failed";
@@ -2500,8 +2527,9 @@ export async function startStdJob({
   if (wantsDownload && !stdOpts.configured) {
     throw new WebError("STD_NO_COOKIE", 400, "未配置 bzCookie，无法下载；可先只做检查");
   }
-  const running = (await jobs.list({ kb, kind: "kb-std", limit: 50 })).find((job) => job.status === "running");
-  if (running) throw new WebError("STD_JOB_RUNNING", 409, "该库已有标准更新任务在运行", { jobId: running.id });
+  if (await jobs.hasRunning({ kb, kind: "kb-std" })) {
+    throw new WebError("STD_JOB_RUNNING", 409, "该库已有标准更新任务在运行");
+  }
 
   const force = body?.force === true;
   const limit = Math.max(0, Math.round(Number(body?.limit) || 0));
