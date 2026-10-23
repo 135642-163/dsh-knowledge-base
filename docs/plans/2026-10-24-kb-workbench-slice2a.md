@@ -1553,7 +1553,7 @@ git commit -m "feat(web): upload batches with streamed raw PUT and path/limit gu
 - Modify: `lib/web/api.js`（POST import 路由）
 - Create: `test/web-upload-import.test.mjs`
 
-- [ ] **Step 5.1: 写失败测试**
+- [x] **Step 5.1: 写失败测试**
 
 创建 `test/web-upload-import.test.mjs`：
 
@@ -1790,12 +1790,12 @@ test("空批次 import 返回 400 BATCH_EMPTY", async () => {
 });
 ```
 
-- [ ] **Step 5.2: 运行测试确认失败**
+- [x] **Step 5.2: 运行测试确认失败**
 
 Run: `node --test test/web-upload-import.test.mjs`
 Expected: FAIL（POST import 路由不存在 → 404）。
 
-- [ ] **Step 5.3: 在 `lib/web/upload.js` 追加导入实现**
+- [x] **Step 5.3: 在 `lib/web/upload.js` 追加导入实现**
 
 在文件末尾追加（`import` 区补 `basename`、`extname` 已 import；再补 `createImportWorkerRunner`、`prepareImportArgs`、`tempReportFile`、`scanDuplicates`、`tmpdir`）：
 
@@ -1956,7 +1956,7 @@ export async function importBatch({
 }
 ```
 
-- [ ] **Step 5.4: 在 `lib/web/api.js` 加 import 路由**
+- [x] **Step 5.4: 在 `lib/web/api.js` 加 import 路由**
 
 import 增加 `importBatch`；在 DELETE 路由之后插入：
 
@@ -1979,17 +1979,26 @@ import 增加 `importBatch`；在 DELETE 路由之后插入：
     }
 ```
 
-- [ ] **Step 5.5: 跑测试**
+- [x] **Step 5.5: 跑测试**
 
 Run: `node --test test/web-upload-import.test.mjs test/web-upload-batch.test.mjs`
 Expected: 全通过。
 
-- [ ] **Step 5.6: Commit**
+- [x] **Step 5.6: Commit**
 
 ```bash
 git add lib/web/upload.js lib/web/api.js test/web-upload-import.test.mjs
 git commit -m "feat(web): import uploaded batches as workbench jobs with dedup and cleanup"
 ```
+
+### Task 5 实现修正记录（2026-10-24，已执行）
+
+1. **全部重复测试修正**：`lib/dedup.js` 对同一 `relKey` 视为原位更新、且标题核心匹配有 6 字符下限，计划原测试（`a.md` + 标题 `a`）无法触发 duplicates。最终用例：先把 `旧/电气设备安装说明.md`（标题 `电气设备安装说明`）导入库，再上传 `电气设备安装说明.md`；断言 `jobId === null`、`status === "empty"`、`duplicates.length >= 1`、批次仍 `open`。
+2. **duplicates/similar 下发形状**：新增内部 `publicMatches()`，把 dedup 的 `{title, sourcePath, scope, matched}` 映射为 `{ title, scope, matched }`，避免 `sourcePath`（批次绝对路径）进入 HTTP 响应与 `job.result`。
+3. **导入锁与快照**：调用 `markBatchImporting(kbDir, batchId, { expectedFiles: batch.files })`，不额外 try/catch（非 WebError 由 api 层净化成 500 `UPLOAD_FAILED`）。
+4. **初始进度 best-effort**：`writeProgressFile(progressFile, createProgress(kept)).catch(() => {})`，进度文件位于 `<batchDir>/progress.json`（与 sweep 的 importing 判龄约定一致）。
+5. **run/onSettle**：`runner.run()` 与 `handle.done` 各自 try/catch 返回净化后的失败 outcome；`onSettle({status,result})` 仅在 `succeeded && fail===0` 删除批次，否则写 `failed`；抛错消息先 `redactPaths`。
+6. 测试 8 条（成功、部分失败、进程级失败、spawn 失败净化、全部重复、已锁定 409、并发 202/409、空批次 400），并断言响应/job JSON 不含 `kbRoot` 绝对路径。
 
 ---
 
