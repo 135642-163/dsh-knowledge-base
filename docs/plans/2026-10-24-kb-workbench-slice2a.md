@@ -2012,7 +2012,7 @@ git commit -m "feat(web): import uploaded batches as workbench jobs with dedup a
 
 > **Task 6 约束（来自 Task 5 复审）**：`GET /jobs` 列表必须**省略 `result`**（最多 50 条、单条 result 可达 1000 文件），只返回 `id/kind/kb/label/status/detail/startedAt/finishedAt/progress`；`GET /jobs/:id` 才返回完整 `result`。
 
-- [ ] **Step 6.1: 追加失败测试**
+- [x] **Step 6.1: 追加失败测试**
 
 在 `test/web-jobs.test.mjs` 顶部 import 区补：
 
@@ -2080,12 +2080,12 @@ test("GET /jobs 支持 kb/kind/limit 过滤", async () => {
 });
 ```
 
-- [ ] **Step 6.2: 运行确认失败**
+- [x] **Step 6.2: 运行确认失败**
 
 Run: `node --test test/web-jobs.test.mjs`
 Expected: 新增两条 FAIL（404 NOT_FOUND）。
 
-- [ ] **Step 6.3: 实现路由**
+- [x] **Step 6.3: 实现路由**
 
 在 `lib/web/api.js` 批次路由之后加：
 
@@ -2108,17 +2108,24 @@ Expected: 新增两条 FAIL（404 NOT_FOUND）。
     }
 ```
 
-- [ ] **Step 6.4: 跑测试**
+- [x] **Step 6.4: 跑测试**
 
 Run: `node --test test/web-jobs.test.mjs`
 Expected: 8/8 通过。
 
-- [ ] **Step 6.5: Commit**
+- [x] **Step 6.5: Commit**
 
 ```bash
 git add lib/web/api.js test/web-jobs.test.mjs
 git commit -m "feat(web): expose workbench job status endpoints"
 ```
+
+### Task 6 实现修正记录（2026-10-24，已执行）
+
+1. `GET /jobs` 列表在 API 边界用 `listJobRow()` 去掉 `result`（保留 9 个字段），`GET /jobs/:id` 返回完整 job（含 `result`）。不要在注册表内部裁剪：Task 7 的 `lastJob.summary` 依赖 `result.counts`。
+2. kb/kind/limit 原样转发给注册表（注册表负责 [1,50]/默认 20；`limit=0` 表示默认 20）。
+3. 测试在 `test/web-jobs.test.mjs` 增至 18 条（含列表精确 key 集合、`result` 缺失、详情含 result、404、limit=0）。
+4. 已知边界：`opts.jobs` 在 Task 8 才注入；Task 6 之后单独部署时 `/jobs` 会返回 500，Task 8 完成后恢复。
 
 ---
 
