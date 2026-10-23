@@ -155,6 +155,7 @@ createJobRegistry({ retentionMs = 3600_000, maxJobs = 200, now = Date.now })
 - `status` 迁移：`open → importing`（启动导入）→ `done`（结算且 `fail===0`）或 `failed`（结算但有失败 / 进程级失败）。
   - `done`：**立即删除整个批次目录**（文件已拷入 `sources/`），任务结果只存在于注册表的 `job.result`。
   - `failed`：保留目录与 `progress.json` 供排查，24 小时清扫兜底。
+  - 清扫（`sweepOldBatches`）在批次锁内按状态判龄：`open` 取 `max(createdAt, updatedAt, batch.json mtime)`；`failed` 取 `max(updatedAt, mtime)`；`importing` 仅当 `batch.json` 与 `progress.json` 都超过 24h 才删（崩溃遗留）；未知元数据回退目录 mtime。
   - 「客户端并发 2」只是浏览器侧限流，服务端接受任意并发 PUT（批次内更新靠串行队列保证一致）。
 
 ### 5.2 进度文件
@@ -260,11 +261,11 @@ createJobRegistry({ retentionMs = 3600_000, maxJobs = 200, now = Date.now })
 **PUT 校验顺序**
 
 1. 批次存在（404 `BATCH_NOT_FOUND`）、`status === "open"`（409 `BATCH_LOCKED`）、id 合法（400 `BATCH_INVALID`）。
-2. `path` 合法（`UPLOAD_PATH_INVALID` 400）：非空、≤400 字符、NFC、`/` 分隔、无 `\`、无控制字符、无绝对路径/盘符、无 `.`/`..` 段；`resolve(batchDir, rel)` 必须以 `batchDir + sep` 开头。
+2. `path` 合法（`UPLOAD_PATH_INVALID` 400）：非空、≤400 字符、NFC、`/` 分隔、无 `\`、无控制字符、无绝对路径/盘符、无 `.`/`..` 段；每个 segment 的 UTF-8 字节数 ≤255；不以 `.`/空格结尾；仅大小写不同的重复路径也拒绝；`resolve(batchDir)` 必须先归一，目标必须以 `base + sep` 开头。
 3. 扩展名在 `SUPPORTED_EXTS` 内（415 `UNSUPPORTED_TYPE`，`details.extensions` 返回白名单）。
-4. 文件数 `batch.files.length + 1 <= maxBatchFiles`（413 `BATCH_TOO_MANY_FILES`）。
-5. 流式写 `<batchDir>/.upload-<hex>.part`；累计超 `maxUploadBytes` 立刻停止读取、删除临时文件、413 `UPLOAD_TOO_LARGE`（`details.maxBytes`）。
-6. `mkdir -p` 父目录 → 覆盖前 `rm` → `rename` → 更新 `batch.json`（串行队列）。
+4. 无锁状态把 body 流式写到批次目录内唯一 `.part`；累计超 `maxUploadBytes` 立刻停止读取、删除临时文件、413 `UPLOAD_TOO_LARGE`（`details.maxBytes`）。
+5. 进 `withBatchLock`：重新校验 `open`、文件数（413 `BATCH_TOO_MANY_FILES`）、大小写重复；`mkdir` 父目录 → 覆盖前 `rm` → `rename` → 更新 `batch.json`。
+6. 临时文件在 `finally` 里删除；任何失败都不得残留 `.part` 或空父目录。`WebError` 之外的异常统一记日志并返回 500 `UPLOAD_FAILED`（不暴露 Node errno/绝对路径）。
 
 **import 流程**
 
@@ -285,7 +286,7 @@ createJobRegistry({ retentionMs = 3600_000, maxJobs = 200, now = Date.now })
 
 3. `scanDuplicates({ root, targetKb, files, allowCrossKb: allowCrossDuplicates })`：同库重合跳过；跨库重合默认跳过；仅标题前缀相似照常导入并回报 `similar`。
 4. 若 `kept.length === 0`：返回 `{jobId: null, status: "empty", duplicates, similar}`，批次保持 `open`。
-5. 写初始 `progress.json`，`batch.status = "importing"`，`jobs.start(...)`；`onSettle` 里：`fail === 0` → 删批次目录；否则保留并写 `status = "failed"`（进程级失败同样）。
+5. `markBatchImporting(kbDir, batchId, { expectedFiles: batch.files })` 在批次锁内完成 `open → importing`（防 dedup 期间新上传：409 `BATCH_CHANGED`）；写初始 `progress.json`，`jobs.start(...)`；`onSettle` 里：`fail === 0` → 删批次目录；否则保留并写 `status = "failed"`（进程级失败同样）。
 6. 成功返回 202 `{jobId, files: kept.length, duplicates, similar}`。
 
 ### 6.2 任务
@@ -404,7 +405,9 @@ select → uploading(并发 2) → starting → importing(1s 轮询) → done | 
 | `BATCH_NOT_FOUND` | 404 | 批次不存在 |
 | `BATCH_INVALID` | 400 | 批次 id 非法 |
 | `BATCH_LOCKED` | 409 | 批次不在 `open` 状态 |
+| `BATCH_CHANGED` | 409 | dedup 后批次文件快照变化（期间又有上传） |
 | `BATCH_EMPTY` | 400 | 导入时批次没有文件 |
+| `UPLOAD_FAILED` | 500 | 上传写入的其他失败（响应不暴露内部路径/errno） |
 | `UPLOAD_PATH_INVALID` | 400 | `path` 非法 |
 | `UPLOAD_TOO_LARGE` | 413 | 单文件超 `uiMaxUploadBytes` |
 | `BATCH_TOO_MANY_FILES` | 413 | 超 `uiMaxBatchFiles` |

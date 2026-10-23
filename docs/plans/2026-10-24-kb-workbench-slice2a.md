@@ -1526,12 +1526,23 @@ node --test test/web-upload-batch.test.mjs test/web-api-read.test.mjs
 ```
 Expected: 全通过（若 `web-api-read` 的 limits 断言因 opts 构造未改而失败，按 Step 4.1 备注补齐）。
 
-- [ ] **Step 4.7: Commit**
+- [x] **Step 4.7: Commit**
 
 ```bash
 git add lib/web/http.js lib/web/upload.js lib/web/api.js test/web-upload-batch.test.mjs test/web-api-read.test.mjs
 git commit -m "feat(web): upload batches with streamed raw PUT and path/limit guards"
 ```
+
+### Task 4 实现修正记录（2026-10-24，已执行）
+
+代码质量审查后，批次存储/API 的最终契约（Task 5/11 按此实现）：
+
+1. **PUT 不长时间持锁**：校验 → 在无锁状态把 body 流式写入批次目录内的唯一 `.part` → 进 `withBatchLock` 重新校验状态/文件数/大小写重复 → `mkdir` 父目录 → `rm`+`rename` → 更新 `batch.json`；`finally` 永远删除临时文件。失败路径不得残留 `.part` 或空目录。
+2. **错误契约**：`WebError` 之外的异常统一 `console.error` 后用 `500 UPLOAD_FAILED / 上传写入失败` 返回，响应里不带 Node errno/绝对路径。`readJsonBody`/`assertSameOrigin`/`requireUiHeader` 也改为抛 `WebError`（保持 400/403 code）。
+3. **路径组件**：每个 segment 的 UTF-8 字节数 ≤255；拒绝以 `.`/空格结尾的组件与仅大小写不同的重复路径（400 `UPLOAD_PATH_INVALID`）。完全相同的路径仍按“原位覆盖”处理。
+4. **限额**：`normalizeLimits(opts.limits)` = 2 GiB / 1000 / `SUPPORTED_EXTS`；`/status` 返回 raw 形态（`maxUploadBytes/maxBatchFiles/extensions`），批次响应返回 `publicBatch` 的归一化形态（`maxBytes/maxFiles/extensions`）。
+5. **清扫**：`withBatchLock` 内按状态判龄——`open` 取 `max(createdAt, updatedAt, batch.json mtime)`；`failed` 取 `max(updatedAt, mtime)`；`importing` 仅当 `batch.json` 与 `progress.json` 都超过 24h（崩溃遗留）才删；未知元数据回退目录 mtime。
+6. **导入锁**：`markBatchImporting(kbDir, batchId, { expectedFiles })` 在锁内校验 `open`/非空/文件快照，返回 409 `BATCH_LOCKED`、400 `BATCH_EMPTY`、409 `BATCH_CHANGED`。Task 5 的 import 必须调用它，不能自己写 `batch.status = "importing"`。
 
 ---
 
@@ -1759,6 +1770,17 @@ test("已导入过的批次再次 import 返回 409", async () => {
   assert.equal(json.error.code, "BATCH_LOCKED");
 });
 
+test("并发 import：一个 202、一个 409（批次锁）", async () => {
+  const { opts } = await setup();
+  const id = await createBatch(opts, { "a.md": "# a\n" });
+  const request = () => call(opts, makeReq({ method: "POST", url: `/kb/api/upload-batches/${id}/import`, body: "{}" }));
+  const [first, second] = await Promise.all([request(), request()]);
+  const statuses = [first.res.status, second.res.status].sort();
+  assert.deepEqual(statuses, [202, 409]);
+  const failed = first.res.status === 409 ? first : second;
+  assert.equal(failed.json.error.code, "BATCH_LOCKED");
+});
+
 test("空批次 import 返回 400 BATCH_EMPTY", async () => {
   const { opts } = await setup();
   const id = await createBatch(opts, {});
@@ -1842,13 +1864,18 @@ export async function importBatch({
   const similar = scanned.similar ?? [];
   if (kept.length === 0) return { jobId: null, status: "empty", duplicates, similar };
 
+  // 锁定 open → importing：与 PUT/DELETE 互斥；expectedFiles 防止 dedup 期间又上传了新文件。
+  try {
+    await markBatchImporting(kbDir, batchId, { expectedFiles: batch.files });
+  } catch (error) {
+    if (error instanceof WebError) throw error;
+    throw new WebError("BATCH_LOCKED", 409, "批次状态已变化，请重试");
+  }
+
   const dir = batchDirFor(kbDir, batchId);
   const progressFile = join(dir, "progress.json");
   const config = importConfig({ ocrModel: body?.ocrModel === "fast" ? "fast" : "best" });
   await writeProgressFile(progressFile, createProgress(kept)).catch(() => {});
-  batch.status = "importing";
-  batch.updatedAt = new Date().toISOString();
-  await writeBatch(kbDir, batchId, batch);
 
   const reportFile = tempReportFile();
   const argsFile = await prepareImportArgs({ dir: kbDir, kbRoot, kb, files: kept, config, reportFile, progressFile });
