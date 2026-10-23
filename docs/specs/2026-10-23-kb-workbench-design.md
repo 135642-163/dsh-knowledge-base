@@ -1257,3 +1257,25 @@ README.md               修改：工作台、配置、限制
 | 取消归档 | 把 `.trash/` 中的库移回 `kbRoot/<name>/`，恢复使用 |
 | 批次 | 一次上传的一组文件，导入任务以批次为单位 |
 | 移动日志 | `merge-<ts>.json`，记录每个文档的 from/to |
+
+## Slice 1 验收记录（2026-10-24）
+
+- [x] `/kb/` 总览 9 个库（`标准` 有效文档 935 = 就绪 934 + 失败 1，43,094 页，80,950,464 字；全部库合计 1,590 篇有效文档、10 篇笔记、21.2 万页、约 2.69 亿字）
+- [x] 新建 / 简介与标签 / 重命名 / 归档（含非空库）/ 归档确认名输错被拦截 / 回收站恢复
+- [x] 资料分页（50 篇/页，第 1 页 1–50、第 2 页 51–100）、文档详情弹窗、下载原件（HTTP 200，`content-disposition: attachment`，PDF 完整）
+- [x] `npm test` 全通过（178 tests / 0 fail）
+- [x] 真实浏览器（WebKit/Safari 引擎）1280×900 深色模式与 800×900 窄屏布局均正常
+- [x] 回归：`kb_list` 仍返回 9 个库；`kb_read(kb="标准", doc="schema")` 正常
+- [ ] 上传/合并/标准/范围（Slice 2/3）
+
+验收说明：本切片尚未安装进 `~/.dsh/plugins/dsh-knowledge-base`（执行会话沙箱为 workspace-write），
+验收使用 `.acceptance/` 下的只读镜像（kb.json 复制、sources/markdown 符号链接）挂载同一套
+`lib/web/*` 路由，真实知识库根目录未被写入（无测试库、无 `.trash/`）。安装补丁见
+`kb-workbench-slice1.patch`，安装后需重启 `dsh web` 再用真实端口复核一次。
+
+验收中发现并修复两处问题：
+
+1. `/kb/api` 前缀会把静态文件 `/kb/api.js` 抢进 JSON API（模块加载失败）；改为 `exact:/kb/api`
+   + `prefix:/kb/api/`，并加回归测试。
+2. 工作台 toast 原本放在 `#app` 内，任何一次 `render()` 都会把它清掉；改为挂在 `body` 上，
+   保存简介/重命名/恢复的提示才能稳定显示。
