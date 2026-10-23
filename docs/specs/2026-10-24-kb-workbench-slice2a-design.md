@@ -58,6 +58,7 @@ Slice 1 让工作台具备了库管理、资料浏览与原件下载；Slice 1.5
 
 ```text
 lib/import-job.js        （新）prepareImportArgs / createImportWorkerRunner
+lib/progress.js          （新）createProgress / writeProgressFile（worker 与工作台共用的进度对象与原子写）
 lib/web/jobs.js          （新）任务注册表
 lib/web/upload.js        （新）批次存储、原始 body 落盘、路径与限额校验、24h 清扫、批次导入封装
 lib/web/std.js           （新）标准状态读取、标准任务封装、结果裁剪
@@ -169,8 +170,9 @@ createJobRegistry({ retentionMs = 3600_000, maxJobs = 200, now = Date.now })
 ```
 
 - 字段是 M1 7.4 的 `{done,total,ok,fail,skip,current}` 之上加 `files[]`：否则「逐文件状态」只能等任务结束才有。
+- `done = ok + fail + skip`（跳过也算已处理，否则 UI 的 `done/total` 进度条走不满）；任务结束时 `current` 置 `null`，结束与否以 job 状态为准。
 - 启动导入时由服务端写一次初始进度（查重后保留的文件，全部 `pending`）；worker 启动后再写一次，每完成一个文件写一次；`error` 截断 200 字；`path` 一律批次内相对路径。
-- 原子写：先写 `progress.json.tmp` 再 `rename` 覆盖（Windows 上先 `rm`），读方读不到时回退到上一次已知进度，不报错。
+- 原子写：`lib/progress.js` 的 `writeProgressFile` 写唯一临时文件 `<file>.<8hex>.tmp` 后 `rename` 覆盖（不再先 `rm`，与 `store.js` 的 manifest 原子写一致）；失败时清理临时文件。worker 路径是 best-effort，首次失败向 stderr 记一行后继续；读方读不到时回退到上一次已知进度，不报错。
 
 ### 5.3 任务对象
 

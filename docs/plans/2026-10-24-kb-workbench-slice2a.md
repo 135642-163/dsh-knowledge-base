@@ -636,12 +636,22 @@ node --test test/worker-progress.test.mjs test/worker-report.test.mjs
 ```
 Expected: 两个文件全通过。
 
-- [ ] **Step 2.5: Commit**
+- [x] **Step 2.5: Commit**
 
 ```bash
-git add worker/import-worker.mjs test/worker-progress.test.mjs
+git add worker/import-worker.mjs test/worker-progress.test.mjs lib/progress.js
 git commit -m "feat(worker): write per-file progress for workbench imports"
 ```
+
+### Task 2 实现修正记录（2026-10-24，已执行）
+
+代码质量审查后，Task 2 的最终契约（Task 5/11 按此实现）：
+
+1. **计数器单一来源**：worker 不再保留局部 `ok/fail/skip`；`KB:RESULT`/`KB:DONE`、报告 summary、退出码都读 `progress.*`。`done === ok + fail + skip`（跳过也计入 `done`，否则 UI 的 `done/total` 进度条永远走不满）。
+2. **共享原子写模块** `lib/progress.js`：`createProgress(files)` 与 `writeProgressFile(file, progress)`（唯一 tmp 后缀 `<file>.<8hex>.tmp` → `rename` 覆盖，不再先 `rm`；失败时清理 tmp 后抛出）。worker 用 best-effort 包装：首次失败向 stderr 打一行 `worker: 进度文件写入失败（忽略）: …`，其余吞掉，导入不受影响。Task 5 的 `lib/web/upload.js` 必须 import 这两个函数，不要复制。
+3. **收尾清空 `current`**：循环结束后 `progress.current = null` 再写一次，消费者用 job 状态而不是 `current` 判断结束。
+4. **worker 头部注释**记录真实 args 契约（`sourcePath/sourceFile/relKey/title/docId?`、`reportFile?`、`progressFile?`）。
+5. 测试扩展到 4 条：混合失败、skip（用 `markImporting` 预置 importing 行复现）、进度写失败仍 best-effort、stdout/report 断言。
 
 ---
 
@@ -1745,19 +1755,13 @@ Expected: FAIL（POST import 路由不存在 → 404）。
 
 ```js
 import { createImportWorkerRunner, prepareImportArgs, tempReportFile } from "../import-job.js";
+import { createProgress, writeProgressFile } from "../progress.js";
 import { scanDuplicates } from "../dedup.js";
 ```
 
 追加函数：
 
 ```js
-export async function writeProgressFile(progressFile, progress) {
-  const tmp = `${progressFile}.tmp`;
-  await writeFile(tmp, JSON.stringify({ ...progress, updatedAt: new Date().toISOString() }, null, 2), "utf8");
-  await rm(progressFile, { force: true }).catch(() => {});
-  await rename(tmp, progressFile);
-}
-
 export function buildImportFiles(kbDir, batch) {
   const dir = batchDirFor(kbDir, batch.batchId);
   return batch.files.map((file) => {
@@ -1806,15 +1810,7 @@ export async function importBatch({
   const dir = batchDirFor(kbDir, batchId);
   const progressFile = join(dir, "progress.json");
   const config = importConfig({ ocrModel: body?.ocrModel === "fast" ? "fast" : "best" });
-  await writeProgressFile(progressFile, {
-    done: 0,
-    total: kept.length,
-    ok: 0,
-    fail: 0,
-    skip: 0,
-    current: null,
-    files: kept.map((file) => ({ path: file.sourceFile, status: "pending" })),
-  });
+  await writeProgressFile(progressFile, createProgress(kept));
   batch.status = "importing";
   batch.updatedAt = new Date().toISOString();
   await writeBatch(kbDir, batchId, batch);
