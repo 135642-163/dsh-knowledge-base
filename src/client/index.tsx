@@ -21,11 +21,13 @@ const CSS = `
 .dsh-kb-entry {
   box-sizing: border-box;
   display: flex;
+  flex: 1 1 0;
   align-items: center;
   gap: 8px;
   width: 100%;
+  min-width: 0;
   min-height: 36px;
-  margin: 0 2px;
+  margin: 8px 2px 0;
   padding: 7px 8px;
   border: 0;
   border-radius: var(--dsw-radius-md, 8px);
@@ -50,11 +52,12 @@ const CSS = `
 }
 .dsh-kb-entry svg { flex: none; }
 .dsh-kb-entry-collapsed {
+  flex: 0 0 auto;
   width: 36px;
   height: 36px;
   min-height: 36px;
   justify-content: center;
-  margin: 0;
+  margin: 8px 0 0;
   padding: 0;
 }
 .dsh-kb-entry-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
