@@ -20,32 +20,34 @@ Entry file: `data/plugins/135642-163__dsh-knowledge-base.yml` (one file, no READ
 "dsh": { "bundle": { "patch": "./cordis.patch.yml" } }
 ```
 
-`cordis.patch.yml` mounts `id: knowledge-base` with `kbRoot`/`defaultKb` defaults.
+`cordis.patch.yml` mounts `id: knowledge-wiki` / `name: dsh-knowledge-wiki` with `kbRoot`/`defaultKb` defaults.
 Source install works:
 
 ```bash
 dsh plugin --profile web add github:135642-163/dsh-knowledge-base
 ```
 
-No `npm:` field: the npm name `dsh-knowledge-base` is taken by an unrelated
-package (`htcqp802/dsh-knowledge-base`), so this repo installs from GitHub.
+No `npm:` field. The package was renamed to `dsh-knowledge-wiki` and the loader
+id to `knowledge-wiki` to avoid the existing `htcqp802/dsh-knowledge-base`
+entry; it installs from GitHub.
 The repo has no build scripts; `npm pack --dry-run` produces 22 files / ~95 KB
 and excludes the 35 MB OCR model directory (models are downloaded on first use).
 
 ## Verification
 
-- `npm test`: 99/99 passing.
+- `npm test`: 139/139 passing (also verified against `dsh-tools@0.2.1-rc.2`).
 - Bundle composition verified in an isolated profile:
 
   ```bash
   DSH_HOME=/tmp/dsh-bundle-test dsh --profile web --dump-config
   ```
 
-  → emits `- id: knowledge-base` / `name: dsh-knowledge-base` from the package's
+  → emits `- id: knowledge-wiki` / `name: dsh-knowledge-wiki` from the package's
   `cordis.patch.yml`.
 
 - Existing catalog entry `dsh-knowledge-base` belongs to a different owner
-  (`htcqp802/dsh-knowledge-base`); this one is `135642-163/dsh-knowledge-base`.
+  (`htcqp802/dsh-knowledge-base`); this one is `135642-163/dsh-knowledge-base`
+  and uses a distinct package name / loader id.
 
 ## Checklist
 

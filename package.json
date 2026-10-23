@@ -1,6 +1,6 @@
 {
-  "name": "dsh-knowledge-base",
-  "version": "0.16.0",
+  "name": "dsh-knowledge-wiki",
+  "version": "0.17.0",
   "description": "DeepSeek Harness 插件：把 Word/PPT/PDF（文字版与扫描版）资料整理为适合大模型阅读的知识库，支持检索、精读、修订、导出",
   "type": "module",
   "main": "lib/index.js",
@@ -28,7 +28,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "node --test test/chunks.test.mjs test/dedup.test.mjs test/docx-omml.test.mjs test/edit-index.test.mjs test/export-chunks.test.mjs test/export-redaction.test.mjs test/history.test.mjs test/import-hash.test.mjs test/import-heartbeat.test.mjs test/import-name-collision.test.mjs test/kb-import-background.test.mjs test/kb-import-similar.test.mjs test/kb-list-pagination.test.mjs test/kb-query-cross-kb.test.mjs test/kb-read-outline.test.mjs test/lock-recovery.test.mjs test/manifest-migration.test.mjs test/ocr-frame.test.mjs test/ocr-models.test.mjs test/omml.test.mjs test/ocr-tessdata.test.mjs test/parts-index.test.mjs test/pdf-columns.test.mjs test/query-ranking.test.mjs test/query.test.mjs test/query-deleted.test.mjs test/report.test.mjs test/reparse.test.mjs test/soft-delete.test.mjs test/text-layer-quality.test.mjs test/worker-reparse.test.mjs test/worker-report.test.mjs test/xlsx.test.mjs test/zip-stream.test.mjs test/manifest-v3.test.mjs test/note-wiki.test.mjs test/wiki-layer.test.mjs test/lint.test.mjs test/query-normalize.test.mjs test/titles-retitle.test.mjs test/edit-batch.test.mjs test/snapshot.test.mjs test/vault-export.test.mjs test/describe-auto.test.mjs test/trust.test.mjs"
+    "test": "node --test test/chunks.test.mjs test/dedup.test.mjs test/docx-omml.test.mjs test/edit-index.test.mjs test/export-chunks.test.mjs test/export-redaction.test.mjs test/history.test.mjs test/import-hash.test.mjs test/import-heartbeat.test.mjs test/import-name-collision.test.mjs test/kb-import-background.test.mjs test/kb-import-similar.test.mjs test/kb-list-pagination.test.mjs test/kb-query-cross-kb.test.mjs test/kb-read-outline.test.mjs test/lock-recovery.test.mjs test/manifest-migration.test.mjs test/ocr-frame.test.mjs test/ocr-models.test.mjs test/omml.test.mjs test/ocr-tessdata.test.mjs test/parts-index.test.mjs test/pdf-columns.test.mjs test/query-ranking.test.mjs test/query.test.mjs test/query-deleted.test.mjs test/report.test.mjs test/reparse.test.mjs test/soft-delete.test.mjs test/text-layer-quality.test.mjs test/worker-reparse.test.mjs test/worker-report.test.mjs test/xlsx.test.mjs test/zip-stream.test.mjs test/manifest-v3.test.mjs test/note-wiki.test.mjs test/wiki-layer.test.mjs test/lint.test.mjs test/query-normalize.test.mjs test/titles-retitle.test.mjs test/edit-batch.test.mjs test/snapshot.test.mjs test/vault-export.test.mjs test/describe-auto.test.mjs test/trust.test.mjs test/distribution.test.mjs"
   },
   "files": [
     "lib",
@@ -40,7 +40,8 @@
     "install-to-machine.sh",
     "install-to-machine.ps1",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "vendor"
   ],
   "dsh": {
     "bundle": {
@@ -48,7 +49,7 @@
     }
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh-tools": ">=0.1.0-rc.6 <0.2.0 || >=0.1.1-rc.2 <0.2.0 || >=0.1.2-alpha.2 <0.2.0"
+    "@deepseek-ai/dsh-tools": ">=0.1.0-rc.6 <0.3.0"
   },
   "dependencies": {
     "@deepseek-ai/schemastery": "^3.18.1",
@@ -58,8 +59,15 @@
     "jszip": "^3.10.1",
     "mammoth": "^1.8.0",
     "mupdf": "^1.5.1",
-    "tesseract.js": "^6.0.1",
     "turndown": "^7.2.0",
-    "turndown-plugin-gfm": "^1.0.2"
+    "turndown-plugin-gfm": "^1.0.2",
+    "bmp-js": "^0.1.0",
+    "idb-keyval": "^6.2.0",
+    "is-url": "^1.2.4",
+    "node-fetch": "^2.6.9",
+    "regenerator-runtime": "^0.13.3",
+    "tesseract.js-core": "^6.0.0",
+    "wasm-feature-detect": "^1.2.11",
+    "zlibjs": "^0.3.1"
   }
 }

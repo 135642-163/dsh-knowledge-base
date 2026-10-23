@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# dsh-knowledge-base 一键接入脚本（在目标电脑上运行）
+# dsh-knowledge-wiki 一键接入脚本（在目标电脑上运行）
 #
 # 用法:
 #   ./install-to-machine.sh [插件目录] [知识库根目录]
@@ -10,7 +10,7 @@
 #       web profile（dsh web 后退出即可，用于生成 profiles/node_modules）。
 #
 # 脚本做三件事:
-#   1. 建立软链 ~/.dsh/profiles/node_modules/dsh-knowledge-base -> 插件目录
+#   1. 建立软链 ~/.dsh/profiles/node_modules/dsh-knowledge-wiki -> 插件目录
 #   2. 把插件注册行写入 ~/.dsh/profiles/web/cordis.patch.yml（保留已有内容）
 #   3. （可选）启用 HMR 监视插件源码，编辑代码即热重载
 # 完成后重启 dsh web 即可。
@@ -29,26 +29,26 @@ if ! command -v dsh >/dev/null 2>&1; then
 fi
 
 if [ ! -d "$PLUGIN_DIR/lib" ] || [ ! -f "$PLUGIN_DIR/package.json" ]; then
-  echo "错误: $PLUGIN_DIR 不是 dsh-knowledge-base 插件目录" >&2
+  echo "错误: $PLUGIN_DIR 不是 dsh-knowledge-wiki 插件目录" >&2
   exit 1
 fi
 
 mkdir -p "$MODULES_DIR" "$PROFILE_DIR"
-ln -sfn "$PLUGIN_DIR" "$MODULES_DIR/dsh-knowledge-base"
+ln -sfn "$PLUGIN_DIR" "$MODULES_DIR/dsh-knowledge-wiki"
 
 if [ ! -f "$PATCH_FILE" ]; then
   echo "[]" > "$PATCH_FILE"
 fi
 
-if grep -q "id: knowledge-base" "$PATCH_FILE"; then
-  echo "cordis.patch.yml 已包含 knowledge-base 注册行，跳过写入（如路径变化请手动修改）"
+if grep -q "id: knowledge-wiki" "$PATCH_FILE"; then
+  echo "cordis.patch.yml 已包含 knowledge-wiki 注册行，跳过写入（如路径变化请手动修改）"
 else
   {
     echo ""
-    echo "# dsh-knowledge-base 知识库插件（由 install-to-machine.sh 添加，路径: $PLUGIN_DIR）"
+    echo "# dsh-knowledge-wiki 知识库插件（由 install-to-machine.sh 添加，路径: $PLUGIN_DIR）"
     echo "- insert:"
-    echo "    - id: knowledge-base"
-    echo "      name: dsh-knowledge-base"
+    echo "    - id: knowledge-wiki"
+    echo "      name: dsh-knowledge-wiki"
     echo "      config:"
     echo "        kbRoot: $KB_ROOT"
     echo "        defaultKb: default"
@@ -71,7 +71,7 @@ cat <<EOF
 安装完成:
   插件目录:   $PLUGIN_DIR
   知识库根:   $KB_ROOT
-  软链:       $MODULES_DIR/dsh-knowledge-base -> $PLUGIN_DIR
+  软链:       $MODULES_DIR/dsh-knowledge-wiki -> $PLUGIN_DIR
   注册配置:   $PATCH_FILE
 
 下一步:

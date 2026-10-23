@@ -1,4 +1,4 @@
-# dsh-knowledge-base — DeepSeek Harness 知识库插件
+# dsh-knowledge-wiki — DeepSeek Harness 知识库插件
 
 把 Word / PPT / Excel / PDF（文字版与扫描版）等资料整理成**适合大模型阅读、学习的形式**，
 存放在**固定、可命名、可导出、可持续修订**的知识库中；deepseek 通过一组 `kb_*` 工具
@@ -113,6 +113,18 @@ exports/                   导出产物
   `GBT 11032`、`GB∕T 11032`、`GB_T 11032` 都能命中 `GB/T 11032-2020`；
   年份分隔符 `- — – ~ ～` 等价；`GB 11032` 不会误命中 `GB/T 11032`。
   显式正则（含 `\d`、括号等元字符）原样执行，输出里会标 `expandedPattern` 说明已扩展。
+
+## 分发与安装（0.17.0）
+
+- **包名/loader id 改名**：`dsh-knowledge-wiki` / `knowledge-wiki`，避免与已收录的
+  `htcqp802/dsh-knowledge-base` 撞名；仓库名仍是 `135642-163/dsh-knowledge-base`。
+- **兼容 DSH 0.2.x**：`peerDependencies` 放宽到 `>=0.1.0-rc.6 <0.3.0`；
+  已用 `dsh-tools@0.2.1-rc.2` 跑完整测试。
+- **免 build script 安装**：`tesseract.js` 的 postinstall（OpenCollective 提示）会触发
+  pnpm 的 build 审批、导致一键安装失败；改为把其 `src/` vendored 到 `vendor/tesseract`
+  （Apache-2.0，保留 LICENSE），依赖只剩无 postinstall 的 `tesseract.js-core` 等。
+  用全新 `DSH_HOME` 执行 `dsh plugin add file:...` 已无 `allowBuilds` 阻塞。
+- 旧名安装迁移与市场状态见 [docs/distribution.md](docs/distribution.md)。
 
 ## 可信度标签（0.16.0）
 
@@ -348,7 +360,7 @@ done
 ## 测试
 
 ```bash
-npm test          # node:test（139 个用例）；覆盖查重精度、同名文件保护、后台失败统计、检索截断/单文档上限、
+npm test          # node:test（141 个用例）；覆盖查重精度、同名文件保护、后台失败统计、检索截断/单文档上限、
                   # 相似导入提示、OCR 模型检查、流式 zip、心跳与锁回收、
                   # 清单 v1→v2→v3 迁移与备份、内容哈希跳过、kb_reparse、分块索引/页码锚点、
                   # kb_list 分页/过滤/kind、检索排序、跨库检索、文字层质量启发式、
@@ -408,7 +420,7 @@ dsh plugin --profile web add github:135642-163/dsh-knowledge-base
 市场（dsh-market）上架后也可一键安装。更新只需 `git push origin main`：
 市场对 GitHub 安装比较已安装 commit 与远端 HEAD，不需要 tag/Release。
 
-> 当前 npm 上的 `dsh-knowledge-base` 是另一位作者的包，因此暂不发布 npm；
+> 本插件包名已改为 `dsh-knowledge-wiki`、loader id 为 `knowledge-wiki`，避免与另一位作者的 `dsh-knowledge-base` 撞名；npm 暂未发布（未登录 npm），当前走 GitHub 安装。
 > 分发策略、旧脚本安装迁移与 catalog 提交见 [docs/distribution.md](docs/distribution.md)。
 
 ### 从源码安装（Git 仓库，通用）
@@ -433,8 +445,8 @@ npm install          # 安装依赖（生成 node_modules/）
    ```powershell
    powershell -ExecutionPolicy Bypass -File C:\Users\Moon\.dsh\plugins\dsh-knowledge-base\install-to-machine.ps1
    ```
-   脚本做三件事：建立目录联接 `~/.dsh/profiles/node_modules/dsh-knowledge-base`、
-   把注册行写入 `~/.dsh/profiles/web/cordis.patch.yml`、启用 HMR 监视插件源码。
+   脚本做三件事：建立目录联接 `~/.dsh/profiles/node_modules/dsh-knowledge-wiki`、
+   把注册行（id `knowledge-wiki`）写入 `~/.dsh/profiles/web/cordis.patch.yml`、启用 HMR 监视插件源码。
    也可手工执行等价操作（`cmd /c mklink /J <目标> <插件目录>` + 编辑 cordis.patch.yml）。
 3. 正在运行的 `dsh web` 会**热应用** cordis.patch.yml 的变更——知识库根目录
    （`~/.dsh/knowledge`）下出现 `.plugin-load.log` 即加载成功；否则重启 `dsh web`。

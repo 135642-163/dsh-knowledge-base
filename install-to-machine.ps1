@@ -1,11 +1,11 @@
-# dsh-knowledge-base 一键接入脚本（Windows 版）
+# dsh-knowledge-wiki 一键接入脚本（Windows 版）
 #
 # 用法:
 #   powershell -ExecutionPolicy Bypass -File install-to-machine.ps1 [-PluginDir <目录>] [-KbRoot <目录>] [-DefaultKb <名称>]
 #
 # 前提: 已安装 DeepSeek Harness 且至少启动过一次 web profile（生成 profiles/ 目录）。
 # 脚本做三件事:
-#   1. 建立目录联接 profiles\node_modules\dsh-knowledge-base -> 插件目录（无需管理员权限）
+#   1. 建立目录联接 profiles\node_modules\dsh-knowledge-wiki -> 插件目录（无需管理员权限）
 #   2. 把插件注册行写入 profiles\web\cordis.patch.yml（保留已有内容）
 #   3. 启用 HMR 监视插件源码，编辑代码热重载
 # 完成后重启 dsh web（若正在运行，cordis.patch.yml 的变更也会被热应用）。
@@ -25,12 +25,12 @@ if (-not $PluginDir) { $PluginDir = Split-Path -Parent $MyInvocation.MyCommand.P
 if (-not $KbRoot) { $KbRoot = Join-Path $DshHome "knowledge" }
 
 if (-not (Test-Path (Join-Path $PluginDir "lib\index.js"))) {
-  throw "$PluginDir 不是 dsh-knowledge-base 插件目录"
+  throw "$PluginDir 不是 dsh-knowledge-wiki 插件目录"
 }
 
 New-Item -ItemType Directory -Path $ProfileDir, $ModulesDir -Force | Out-Null
 
-$link = Join-Path $ModulesDir "dsh-knowledge-base"
+$link = Join-Path $ModulesDir "dsh-knowledge-wiki"
 if (Test-Path $link) {
   Write-Host "目录联接已存在: $link（跳过）"
 } else {
@@ -39,15 +39,15 @@ if (Test-Path $link) {
   Write-Host "已创建目录联接: $link -> $PluginDir"
 }
 
-$needInsert = -not (Test-Path $PatchFile) -or -not (Select-String -Path $PatchFile -Pattern "id: knowledge-base" -Quiet)
+$needInsert = -not (Test-Path $PatchFile) -or -not (Select-String -Path $PatchFile -Pattern "id: knowledge-wiki" -Quiet)
 if ($needInsert) {
   $forward = $PluginDir.Replace("\", "/")
   $insertText = @"
 
-# dsh-knowledge-base 知识库插件（由 install-to-machine.ps1 添加，路径: $forward）
+# dsh-knowledge-wiki 知识库插件（由 install-to-machine.ps1 添加，路径: $forward）
 - insert:
-    - id: knowledge-base
-      name: dsh-knowledge-base
+    - id: knowledge-wiki
+      name: dsh-knowledge-wiki
       config:
         kbRoot: $($KbRoot.Replace("\", "/"))
         defaultKb: $DefaultKb
@@ -67,7 +67,7 @@ if ($needInsert) {
   [System.IO.File]::AppendAllText($PatchFile, $insertText, (New-Object System.Text.UTF8Encoding($false)))
   Write-Host "已写入注册配置: $PatchFile"
 } else {
-  Write-Host "cordis.patch.yml 已包含 knowledge-base 注册行（跳过写入）"
+  Write-Host "cordis.patch.yml 已包含 knowledge-wiki 注册行（跳过写入）"
 }
 
 Write-Host @"
