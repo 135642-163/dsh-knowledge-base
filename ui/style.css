@@ -143,3 +143,8 @@ code { background: var(--panel-2); border-radius: 4px; padding: 1px 4px; }
 .right { text-align: right; }
 .side-foot a + a { margin-left: 10px; }
 .trash .empty-card { margin-top: 10px; }
+
+/* 嵌入 DSH 弹窗时隐藏工作台品牌文字，只保留图标作为回总览入口 */
+body.embed .topbar { height: 44px; padding: 0 12px; }
+body.embed .topbar .brand span { display: none; }
+body.embed .topbar-actions { margin-left: auto; }

@@ -7,6 +7,8 @@ import { renderTrash } from "./views/trash.js";
 import { openCreateModal, openDocModal, openRestoreModal } from "./views/modals.js";
 
 const app = document.querySelector("#app");
+const EMBED = new URLSearchParams(window.location.search).has("embed");
+if (EMBED) document.body.classList.add("embed");
 
 const state = {
   kbs: [],
