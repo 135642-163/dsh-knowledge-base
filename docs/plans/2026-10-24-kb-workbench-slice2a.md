@@ -104,14 +104,42 @@ package.json / lib/version.js / README.md 改：0.20.0、配置、说明
 
 - [ ] **Step 1.0: 让 `npm test` 自动发现新的测试文件**
 
-`package.json` 的 `scripts.test` 目前逐条列出 55 个测试文件；本计划要新增 9 个，逐条维护容易漏。把它改成目录发现（Node 20+ 支持目录参数，Windows/macOS 一致，且当前 `test/` 下只有 `*.test.mjs`）：
+`package.json` 的 `scripts.test` 目前逐条列出 55 个测试文件；本计划要新增 9 个，逐条维护容易漏。
+
+**实现修正（已批准）**：`node --test test/` 在 Node 26 会把目录当模块路径（MODULE_NOT_FOUND），裸 `node --test` 又会误跑 `dev/*-test.mjs` 探针脚本，带引号 glob 需要 Node ≥22 而 `engines` 是 ≥20。最终方案是新增跨平台 runner 脚本：
+
+```js
+// scripts/run-tests.mjs
+import { spawnSync } from "node:child_process";
+import { readdirSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const root = dirname(dirname(fileURLToPath(import.meta.url)));
+let files;
+try {
+  files = readdirSync(join(root, "test"))
+    .filter((name) => name.endsWith(".test.mjs"))
+    .sort()
+    .map((name) => join("test", name));
+} catch {
+  console.error("test/ 不可读");
+  process.exit(1);
+}
+if (files.length === 0) {
+  console.error("no test files found under test/");
+  process.exit(1);
+}
+const result = spawnSync(process.execPath, ["--test", ...process.argv.slice(2), ...files], { cwd: root, stdio: "inherit" });
+process.exit(result.status ?? 1);
+```
 
 ```json
-"test": "node scripts/build-client.mjs --check && node --test test/"
+"test": "node scripts/build-client.mjs --check && node scripts/run-tests.mjs"
 ```
 
 Run: `npm test`
-Expected: 仍然 186/186 通过（文件集合不变，只是发现方式变了）。
+Expected: 仍然 186/186 通过（文件集合不变，只是发现方式变了；`dev/` 不参与）。
 
 - [ ] **Step 1.1: 写失败测试**
 
@@ -399,9 +427,23 @@ Expected: 新测试 3/3 通过；`npm test` 189/189（186 + 3）。
 - [ ] **Step 1.6: Commit**
 
 ```bash
-git add lib/import-job.js test/import-job.test.mjs lib/index.js
+git add lib/import-job.js test/import-job.test.mjs lib/index.js scripts/run-tests.mjs package.json
 git commit -m "refactor(import): extract worker launch core for tool and workbench paths"
 ```
+
+### Task 1 实现修正记录（2026-10-24，已执行）
+
+代码质量审查后落在 `lib/import-job.js` 的最终契约（后续 Task 5/7 按此实现，不要回退到计划正文里的旧片段）：
+
+1. **测试入口**：`scripts/run-tests.mjs` 枚举 `test/*.test.mjs` 并转发额外 CLI 参数；`npm test` = `node scripts/build-client.mjs --check && node scripts/run-tests.mjs`；`dev/*-test.mjs` 不参与。
+2. **runner 结果契约**：`run().done` resolve `{ status, detail, report, cancelled, exitCode, signal }`，`status` 仍是 `completed|failed|cancelled`（工具路径兼容）。工作台任务用 `cancelled !== true && exitCode === 0` 判定 `succeeded`（部分文件失败由 `report.fail` 表达）；进程崩溃/被取消 → `failed`。
+3. **清理时序**：`done` 在删除 args 文件与报告文件之后才 resolve（`.finally` 里 await）；`reportFile` 只删一次，`undefined` 不传给 `rm`。
+4. **取消语义**：`cancelled` 在 `run()` 内（每次运行独立）；`cancel()` 幂等，`terminate()` 的 rejection 被吞掉。
+5. **失败诊断**：stderr 取尾部 200 字符；退出描述用 `exitCode`，无退出码时用 `signal`，不再伪造 0。
+6. **异常清理**：`jobs.start` 抛错时删除已写好的 args 文件后重新抛出。
+7. 测试补充：cancel、stdout `KB:OK/KB:FAIL/KB:SKIP` 兜底、失败路径 cleanup/report 断言；每个用例 `try/finally` 清理临时目录。
+
+> 未做（记录为已知遗留，不影响 2A）：`refreshKbIndex` 暂留在 `lib/import-job.js`，`lib/index.js` 的 17 处非导入调用仍从该模块 import；若后续继续扩散再抽到中性模块。
 
 ---
 
@@ -1782,8 +1824,11 @@ export async function importBatch({
       job.setHandle(handle);
       const outcome = await handle.done;
       const report = outcome.report ?? { ok: 0, fail: 0, skip: 0, files: [] };
+      // 工作台任务状态只看 worker 是否跑完：逐文件部分失败仍是 succeeded（由 result.fail 表达），
+      // 进程崩溃或被取消才是 failed。outcome 契约见 Task 1 的实现修正记录。
+      const crashed = outcome.cancelled === true || (outcome.exitCode ?? 1) !== 0;
       return {
-        status: outcome.status === "failed" ? "failed" : "succeeded",
+        status: crashed ? "failed" : "succeeded",
         detail: outcome.detail,
         result: {
           fileCount: kept.length,
