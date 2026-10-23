@@ -101,18 +101,18 @@ React 由宿主通过 `require("react")` 提供，不能打进第二份 React。
 - `aria-label="知识库工作台"`，`title="知识库工作台"`
 - 不挤压设置入口；`sidebar.footer.action` 的 list 顺序由 `order` 控制（建议 10）
 
-### 4.2 点击行为
+### 4.2 点击行为（弹窗）
 
-入口使用真实锚点 `<a href="/kb/">`：
+入口是普通按钮；点击打开一个 portal 到 `document.body` 的弹窗：
 
-- 普通浏览器：`target="_blank"` + `rel="noopener noreferrer"`，新标签打开
-- Electron 桌面端：`target="_self"`，在当前 DSH 窗口打开 `/kb/`
-  - 原因：DSH 主窗口的 `setWindowOpenHandler` 对 `http(s)` 只调用
-    `shell.openExternal` 并 `deny` 应用内新窗口；`window.open(..., "noopener")`
-    在部分 Electron/Chromium 组合下会先拿到 `about:blank`，导致点击无响应
-  - 工作台顶栏在 `history.length > 1` 时显示「返回」按钮，可回到 DSH 会话
-- 使用相对路径 `/kb/`，端口变化也能正确打开
-- 不做静默当前页跳转；锚点天然不受弹窗拦截影响
+- 弹窗用 iframe 承载 `/kb/?embed=1`；父页面（DSH）保持挂载，不导航、不新开标签
+- 弹窗头部有标题与关闭按钮；点 ×、按 Esc、点遮罩均可关闭
+- 关闭后恢复 DSH 页面与状态，不丢失当前会话
+- 弹窗内工作台隐藏顶部品牌文字、保留图标（回总览）与「新建知识库」按钮
+- 入口在弹窗打开时加 `dsh-kb-entry-active` 底色，与 DSH 侧栏 panel 按钮一致
+- 不使用 `window.open`/整页导航：桌面端窗口是 `dsh-app://app`，
+  `window.open` 会被 Electron 的 `setWindowOpenHandler` 拒绝；
+  整页导航会覆盖 DSH 且返回按钮受 iframe/历史影响
 
 ## 5. 架构与文件
 
@@ -395,5 +395,7 @@ Slice 2 计划只需在此基础上增加组件与状态，不再从零搭客户
 - [x] `npm run check:client` / `npm run typecheck` / `npm test`（186 tests / 0 fail）
 - [x] `lib/client.js` 按 boot graph 注册 `dsh-knowledge-base`（当前 profile），也兼容 `dsh-knowledge-wiki`
 - [x] 临时 `dsh web --port 55930`（真实宿主）+ WebKit：侧栏底部「知识库」入口可见
-- [x] 入口为真实锚点：浏览器 `target="_blank"`，Electron `target="_self"`；工作台顶栏有「返回」
-- [ ] 桌面端重启/刷新后点击确认（点击应进入 `/kb/`，不再无响应）
+- [x] 入口点击打开 DSH 内弹窗（portal + iframe `/kb/?embed=1`），不再整页覆盖 DSH
+- [x] × / Esc / 遮罩关闭；打开时入口有 `dsh-kb-entry-active` 底色
+- [x] 入口字体 14px、高度/圆角/间距与侧栏 panel 按钮一致
+- [ ] 桌面端 Cmd+R 后点击确认（客户端 bundle 需重新加载）
