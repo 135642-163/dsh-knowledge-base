@@ -1,15 +1,18 @@
 /**
- * 标准更新：状态推导、结果裁剪、任务校验（无 cookie / 并发 / 非法 action）。
+ * 标准更新：状态推导、结果裁剪、任务校验（无 cookie / 并发 / 非法 action）、
+ * 失败去重、导入失败提示与路径净化。
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { handleApi } from "../lib/web/api.js";
 import { createKb } from "../lib/kbmeta.js";
 import { createJobRegistry } from "../lib/web/jobs.js";
 import { buildStdEntries, buildStdResult, readStdStatus } from "../lib/web/std.js";
+
+const KB_API = "/kb/api/kbs/%E6%A0%87%E5%87%86";
 
 function makeRes() {
   return {
@@ -38,7 +41,15 @@ async function call(opts, req) {
   return { res, json: res.body ? JSON.parse(res.body) : null };
 }
 
-async function setup({ configured = true, runStdCheck } = {}) {
+function postStd(opts, body) {
+  return call(opts, makeReq({ method: "POST", url: `${KB_API}/std-check`, body }));
+}
+
+function getStd(opts) {
+  return call(opts, makeReq({ method: "GET", url: `${KB_API}/std` }));
+}
+
+async function setup({ configured = true, runStdCheck, importDownloadedImpl } = {}) {
   const kbRoot = join(await mkdtemp(join(tmpdir(), "kb-std-")), "kb");
   await createKb(kbRoot, { name: "标准" });
   const jobs = createJobRegistry();
@@ -54,9 +65,10 @@ async function setup({ configured = true, runStdCheck } = {}) {
       maxAgeDays: 7,
       importConfig: {},
       ...(runStdCheck ? { runStdCheck } : {}),
+      ...(importDownloadedImpl ? { importDownloadedImpl } : {}),
     },
   };
-  return { kbRoot, opts, jobs };
+  return { kbRoot, kbDir: join(kbRoot, "标准"), opts, jobs };
 }
 
 async function waitFor(check, { attempts = 100, delay = 10 } = {}) {
@@ -68,7 +80,14 @@ async function waitFor(check, { attempts = 100, delay = 10 } = {}) {
   throw new Error("waitFor timeout");
 }
 
-function fakeReport() {
+async function waitJob(jobs, id) {
+  return waitFor(async () => {
+    const job = await jobs.get(id);
+    return job && job.status !== "running" ? job : null;
+  });
+}
+
+function fakeReport(overrides = {}) {
   return {
     totalDocs: 3,
     stdGroups: 2,
@@ -83,6 +102,7 @@ function fakeReport() {
     downloaded: [{ stdNo: "GB/T 111", file: "GB_T 111.pdf", bytes: 10 }],
     downloadFailed: [],
     authOk: true,
+    ...overrides,
   };
 }
 
@@ -96,7 +116,7 @@ test("readStdStatus 推导 lastCheckAt/pending/valid 且不含 cookie", async ()
         k1: { status: "update", checkedAt: now - 3 * 86400000, siteNo: "GB/T 1" },
         k2: { status: "released", checkedAt: now - 10 * 86400000, siteNo: "GB/T 2" },
         k3: { status: "update", checkedAt: now - 12 * 86400000, downloadedAt: "2026-10-14T00:00:00.000Z" },
-        k4: { status: "current", checkedAt: now - 11 * 86400000 },
+        k4: { status: "current", checkedAt: now - 86400000 },
       },
     }),
     "utf8"
@@ -106,8 +126,10 @@ test("readStdStatus 推导 lastCheckAt/pending/valid 且不含 cookie", async ()
   assert.equal(status.pending.update, 1);
   assert.equal(status.pending.released, 1);
   assert.equal(status.pending.downloadable, 2);
+  // 最新时间来自 current 条目（now - 1d），不是 update 条目：max over all。
+  assert.equal(status.cache.lastCheckAt, new Date(now - 86400000).toISOString());
+  assert.equal(status.cache.ageDays, 1);
   assert.equal(status.cache.valid, true);
-  assert.ok(status.cache.ageDays >= 2.9);
   assert.equal(JSON.stringify(status).includes("cookie"), false);
 });
 
@@ -125,9 +147,51 @@ test("buildStdEntries 映射状态、合并下载/导入结果并按上限截断
   assert.equal(result.counts.currents, 300);
 });
 
+test("下载失败的更新/草案合并为一条失败条目，未命中的失败单独保留", () => {
+  const report = fakeReport({
+    updates: [{ number: "GB/T 111", siteNo: "GB/T 111", siteTitle: "新版", siteYear: "2024", docs: [{ year: "2015" }] }],
+    draftsReleased: [{ number: "GB/T 333", siteNo: "GB/T 333", siteTitle: "转正版", siteYear: "2024" }],
+    currents: [],
+    downloaded: [],
+    downloadFailed: [
+      { stdNo: "GB/T 111", reason: "金币不足" },
+      { stdNo: "GB/T 333", reason: "未登录" },
+    ],
+  });
+  const entries = buildStdEntries(report, []);
+  assert.equal(entries.length, 2, JSON.stringify(entries));
+  const update = entries.find((e) => e.number === "GB/T 111");
+  assert.equal(update?.status, "failed");
+  assert.equal(update?.title, "新版");
+  assert.equal(update?.message, "金币不足");
+  const draft = entries.find((e) => e.number === "GB/T 333");
+  assert.equal(draft?.status, "failed");
+  assert.equal(draft?.title, "转正版");
+  assert.equal(draft?.message, "未登录");
+
+  const standalone = buildStdEntries(
+    fakeReport({ updates: [], draftsReleased: [], currents: [], downloaded: [], downloadFailed: [{ stdNo: "GB/T 999", reason: "网络错误" }] }),
+    []
+  );
+  assert.equal(standalone.length, 1);
+  assert.equal(standalone[0].status, "failed");
+  assert.equal(standalone[0].number, "GB/T 999");
+});
+
+test("导入失败计入 counts、映射条目并追加 hint", () => {
+  const imported = [{ stdNo: "GB/T 111", file: "GB_T 111.pdf", error: "EACCES: /private/x" }];
+  const result = buildStdResult({ report: fakeReport(), imported });
+  assert.equal(result.counts.importFailed, 1);
+  assert.equal(result.counts.imported, 0);
+  const entry = result.entries.find((e) => e.number === "GB/T 111");
+  assert.equal(entry?.status, "importFailed");
+  assert.equal(entry?.message, "EACCES: /private/x");
+  assert.match(result.hint, /有 1 份下载文件导入失败：EACCES: \/private\/x/);
+});
+
 test("GET /kbs/:name/std 返回状态与 activeJobId", async () => {
   const { opts } = await setup();
-  const { res, json } = await call(opts, makeReq({ method: "GET", url: "/kb/api/kbs/%E6%A0%87%E5%87%86/std" }));
+  const { res, json } = await getStd(opts);
   assert.equal(res.status, 200);
   assert.equal(json.kb, "标准");
   assert.equal(json.configured, true);
@@ -144,15 +208,15 @@ test("std-check 校验 action 与 cookie", async () => {
       return { report: fakeReport(), cache: { items: {} } };
     },
   });
-  const bad = await call(opts, makeReq({ method: "POST", url: "/kb/api/kbs/%E6%A0%87%E5%87%86/std-check", body: { action: "nope" } }));
+  const bad = await postStd(opts, { action: "nope" });
   assert.equal(bad.res.status, 400);
   assert.equal(bad.json.error.code, "STD_ACTION_INVALID");
 
-  const noCookie = await call(opts, makeReq({ method: "POST", url: "/kb/api/kbs/%E6%A0%87%E5%87%86/std-check", body: { action: "check-download" } }));
+  const noCookie = await postStd(opts, { action: "check-download" });
   assert.equal(noCookie.res.status, 400);
   assert.equal(noCookie.json.error.code, "STD_NO_COOKIE");
 
-  const check = await call(opts, makeReq({ method: "POST", url: "/kb/api/kbs/%E6%A0%87%E5%87%86/std-check", body: { action: "check" } }));
+  const check = await postStd(opts, { action: "check" });
   assert.equal(check.res.status, 202);
   assert.ok(check.json.jobId);
 });
@@ -160,24 +224,192 @@ test("std-check 校验 action 与 cookie", async () => {
 test("同一库已有运行中标准任务时 409；完成后结果可读", async () => {
   let release;
   const gate = new Promise((resolve) => { release = resolve; });
-  const { opts } = await setup({
+  const { opts, jobs } = await setup({
     runStdCheck: async ({ onProgress }) => {
       onProgress({ phase: "check", done: 1, total: 1 });
       await gate;
       return { report: fakeReport(), cache: { items: {} } };
     },
   });
-  const first = await call(opts, makeReq({ method: "POST", url: "/kb/api/kbs/%E6%A0%87%E5%87%86/std-check", body: { action: "check" } }));
+  const first = await postStd(opts, { action: "check" });
   assert.equal(first.res.status, 202);
-  const second = await call(opts, makeReq({ method: "POST", url: "/kb/api/kbs/%E6%A0%87%E5%87%86/std-check", body: { action: "check" } }));
+  const second = await postStd(opts, { action: "check" });
   assert.equal(second.res.status, 409);
   assert.equal(second.json.error.code, "STD_JOB_RUNNING");
+  assert.equal(second.json.error.details.jobId, first.json.jobId);
   release();
-  const settled = await waitFor(async () => {
-    const job = await opts.jobs.get(first.json.jobId);
-    return job && job.status !== "running" ? job : null;
-  });
+  const settled = await waitJob(jobs, first.json.jobId);
   assert.equal(settled.status, "succeeded");
   assert.equal(settled.result.counts.currents, 1);
   assert.equal(settled.result.entries.length, 2);
+});
+
+test("并发 std-check 只启动一个任务，409 带运行中 jobId", async () => {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const { opts, jobs } = await setup({
+    runStdCheck: async () => {
+      await gate;
+      return { report: fakeReport(), cache: { items: {} } };
+    },
+  });
+  const [first, second] = await Promise.all([postStd(opts, { action: "check" }), postStd(opts, { action: "check" })]);
+  const accepted = [first, second].filter((result) => result.res.status === 202);
+  const rejected = [first, second].filter((result) => result.res.status === 409);
+  assert.equal(accepted.length, 1, `accepted=${accepted.length}`);
+  assert.equal(rejected.length, 1, `rejected=${rejected.length}`);
+  assert.equal(rejected[0].json.error.code, "STD_JOB_RUNNING");
+  assert.equal(rejected[0].json.error.details.jobId, accepted[0].json.jobId);
+  const running = await jobs.list({ kb: "标准", kind: "kb-std" });
+  assert.equal(running.filter((job) => job.status === "running").length, 1);
+  release();
+  const settled = await waitJob(jobs, accepted[0].json.jobId);
+  assert.equal(settled.status, "succeeded");
+  const after = await jobs.list({ kb: "标准", kind: "kb-std" });
+  assert.equal(after.filter((job) => job.status === "running").length, 0);
+});
+
+test("std-check 把 force/limit/action/dryRun 转发给 runStdCheck", async () => {
+  let captured;
+  const { opts, jobs } = await setup({
+    runStdCheck: async (params) => {
+      captured = params;
+      return { report: fakeReport(), cache: { items: {} } };
+    },
+  });
+  const started = await postStd(opts, { action: "check", force: true, limit: 3, dryRun: true });
+  assert.equal(started.res.status, 202);
+  const settled = await waitJob(jobs, started.json.jobId);
+  assert.equal(settled.status, "succeeded");
+  assert.equal(captured.force, true);
+  assert.equal(captured.limit, 3);
+  assert.equal(captured.action, "check");
+  assert.equal(captured.dryRun, true);
+});
+
+test("GET std 运行中返回 activeJobId，结算后返回 lastJob", async () => {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const { opts, jobs } = await setup({
+    runStdCheck: async () => {
+      await gate;
+      return { report: fakeReport(), cache: { items: {} } };
+    },
+  });
+  const started = await postStd(opts, { action: "check" });
+  assert.equal(started.res.status, 202);
+  const running = await getStd(opts);
+  assert.equal(running.res.status, 200);
+  assert.equal(running.json.activeJobId, started.json.jobId);
+  assert.equal(running.json.lastJob, null);
+  release();
+  const settled = await waitJob(jobs, started.json.jobId);
+  assert.equal(settled.status, "succeeded");
+  const after = await getStd(opts);
+  assert.equal(after.json.activeJobId, null);
+  assert.equal(after.json.lastJob.id, started.json.jobId);
+  assert.equal(after.json.lastJob.status, "succeeded");
+  assert.equal(after.json.lastJob.summary.currents, 1);
+});
+
+test("未配置 cookie 时 dryRun 下载仍可启动", async () => {
+  const { opts } = await setup({
+    configured: false,
+    runStdCheck: async () => ({ report: fakeReport(), cache: { items: {} } }),
+  });
+  const started = await postStd(opts, { action: "check-download", dryRun: true });
+  assert.equal(started.res.status, 202);
+  assert.ok(started.json.jobId);
+});
+
+test("导入进度覆盖跳过文件（done 达到 total，skipped/processed 正确）", async () => {
+  const srcDir = await mkdtemp(join(tmpdir(), "kb-std-import-"));
+  await writeFile(join(srcDir, "old.txt"), "旧文件内容\n", "utf8");
+  await writeFile(join(srcDir, "new.txt"), "新文件内容\n", "utf8");
+  const { kbRoot, opts, jobs } = await setup({
+    runStdCheck: async () => ({
+      report: fakeReport({ downloaded: [{ stdNo: "GB/T 1", file: "old.txt" }, { stdNo: "GB/T 2", file: "new.txt" }] }),
+      cache: { items: { k1: { downloadedFile: "old.txt" }, k2: { downloadedFile: "new.txt" } } },
+    }),
+    importDownloadedImpl: async (_kbDir, _cache, importFile) => {
+      const out = [];
+      for (const [file, stdNo] of [["old.txt", "GB/T 1"], ["new.txt", "GB/T 2"]]) {
+        const result = await importFile(join(srcDir, file), stdNo, {});
+        out.push({ stdNo, file, ...(result?.docId ? { docId: result.docId } : {}), ...(result?.skipped ? { skipped: true } : {}) });
+      }
+      return out;
+    },
+  });
+  const kbDir = join(kbRoot, "标准");
+  const manifest = JSON.parse(await readFile(join(kbDir, "kb.json"), "utf8"));
+  manifest.docs = [{ id: "old-doc", title: "旧标准", sourceFile: "old.txt", status: "ready" }];
+  await writeFile(join(kbDir, "kb.json"), JSON.stringify(manifest), "utf8");
+
+  const started = await postStd(opts, { action: "check-download" });
+  assert.equal(started.res.status, 202);
+  const settled = await waitJob(jobs, started.json.jobId);
+  assert.equal(settled.status, "succeeded");
+  assert.equal(settled.result.counts.imported, 1);
+  assert.equal(settled.result.counts.importFailed, 0);
+  assert.equal(settled.progress.phase, "import");
+  assert.equal(settled.progress.done, 2);
+  assert.equal(settled.progress.total, 2);
+  assert.equal(settled.progress.processed, 2);
+  assert.equal(settled.progress.skipped, 1);
+  assert.equal(settled.progress.imported, 1);
+});
+
+test("导入失败映射条目与 hint，任务结果不含绝对路径", async () => {
+  let kbDirRef = "";
+  const { kbRoot, opts, jobs } = await setup({
+    runStdCheck: async () => ({ report: fakeReport(), cache: { items: { k1: { downloadedFile: "GB_T 111.pdf" } } } }),
+    importDownloadedImpl: async () => [
+      { stdNo: "GB/T 111", file: "GB_T 111.pdf", error: `EACCES: ${kbDirRef}/GB_T 111.pdf` },
+    ],
+  });
+  kbDirRef = join(kbRoot, "标准");
+  const started = await postStd(opts, { action: "check-download" });
+  assert.equal(started.res.status, 202);
+  const settled = await waitJob(jobs, started.json.jobId);
+  assert.equal(settled.status, "succeeded");
+  assert.equal(settled.result.counts.importFailed, 1);
+  assert.equal(settled.result.counts.imported, 0);
+  const entry = settled.result.entries.find((e) => e.number === "GB/T 111");
+  assert.equal(entry?.status, "importFailed");
+  assert.match(entry?.message ?? "", /EACCES: <path>/);
+  assert.match(settled.result.hint, /有 1 份下载文件导入失败：EACCES: <path>/);
+  const serialized = JSON.stringify(settled);
+  assert.equal(serialized.includes(kbDirRef), false);
+  assert.equal(serialized.includes(kbRoot), false);
+});
+
+test("检查抛错时任务详情净化绝对路径", async () => {
+  let kbDirRef = "";
+  const { kbRoot, opts, jobs } = await setup({
+    runStdCheck: async () => {
+      throw new Error(`站点请求失败 ${kbDirRef}/.std-check.json`);
+    },
+  });
+  kbDirRef = join(kbRoot, "标准");
+  const started = await postStd(opts, { action: "check" });
+  assert.equal(started.res.status, 202);
+  const settled = await waitJob(jobs, started.json.jobId);
+  assert.equal(settled.status, "failed");
+  assert.equal(settled.detail.includes(kbDirRef), false);
+  assert.equal(settled.detail.includes(kbRoot), false);
+  assert.match(settled.detail, /<path>/);
+});
+
+test("limit 顺延时 result.hint 明确尚未查完", async () => {
+  const { opts, jobs } = await setup({
+    runStdCheck: async () => ({ report: fakeReport({ deferred: 2, downloaded: [] }), cache: { items: {} } }),
+  });
+  const started = await postStd(opts, { action: "check" });
+  assert.equal(started.res.status, 202);
+  const settled = await waitJob(jobs, started.json.jobId);
+  assert.equal(settled.status, "succeeded");
+  assert.equal(settled.result.counts.deferred, 2);
+  assert.match(settled.result.hint, /本轮达 limit 上限/);
+  assert.match(settled.result.hint, /尚有 2 组未检查/);
+  assert.match(settled.result.hint, /请再次检查续查/);
 });
