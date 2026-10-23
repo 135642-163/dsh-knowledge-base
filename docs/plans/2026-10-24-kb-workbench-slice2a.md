@@ -3175,7 +3175,7 @@ git commit -m "feat(ui): add pure upload helpers (validation, queue, labels)"
 - Modify: `ui/api.js`
 - Create: `test/ui-api.test.mjs`
 
-- [ ] **Step 10.1: 写失败测试**
+- [x] **Step 10.1: 写失败测试**
 
 创建 `test/ui-api.test.mjs`：
 
@@ -3258,12 +3258,12 @@ test("错误响应映射成 ApiError", async () => {
 
 > 注意：第三个用例替换了全局 fetch（后续不再调用 fetch），所以它必须是该文件最后一个用例（node:test 顺序执行）。fake XHR 通过构造函数把实例挂到 `globalThis.__lastXhr`，测试读它，避免在实现里留测试专用字段。
 
-- [ ] **Step 10.2: 运行确认失败**
+- [x] **Step 10.2: 运行确认失败**
 
 Run: `node --test test/ui-api.test.mjs`
 Expected: FAIL（`api.createBatch` 不是函数）。
 
-- [ ] **Step 10.3: 实现 `ui/api.js` 扩展**
+- [x] **Step 10.3: 实现 `ui/api.js` 扩展**
 
 在 `request` 之后加一个 XHR 上传函数：
 
@@ -3325,12 +3325,18 @@ function uploadFile(batchId, item, { onProgress, signal } = {}) {
 Run: `node --test test/ui-api.test.mjs`
 Expected: 3/3 通过。
 
-- [ ] **Step 10.5: Commit**
+- [x] **Step 10.5: Commit**
 
 ```bash
 git add ui/api.js test/ui-api.test.mjs
 git commit -m "feat(ui): add upload, job and std API client methods"
 ```
+
+### Task 10 实现修正记录（2026-10-24，已执行）
+
+1. `uploadFile` 的所有 settle 路径（成功/HTTP 错/网络错/abort/预中止）统一走 `settle()`：移除共享 AbortController 上的 abort listener、清空 `onload/onerror/onabort`，`finished` 防重复 settle；预中止在 `send` 前直接 reject。
+2. 客户端方法路径/封装：`job` 解包 `.job`、`jobs` 解包 `.jobs`；`stdStatus` 直返；`stdCheck` POST 带 body；其余与路由对齐。
+3. 测试 8 条：路径表、上传 URL/头/进度、预中止、运行中 abort（listener 归零、handler 清空、stale onload 被吞）、网络错误、job/jobs 解包、错误映射。
 
 ---
 
