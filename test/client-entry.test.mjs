@@ -135,3 +135,10 @@ test("injects the sidebar CSS once", () => {
   assert.equal(styles.length, 1);
   assert.match(styles[0].textContent, /\.dsh-kb-entry/);
 });
+
+test("bundle registers the loader entry id used by the profile", () => {
+  const boot = (ids) => ({ __DSH_BOOT__: { entries: ids.map((id) => ({ id })) } });
+  assert.equal(loadClient({ window: boot(["dsh-knowledge-base"]) }).entry.id, "dsh-knowledge-base");
+  assert.equal(loadClient({ window: boot(["dsh-knowledge-wiki"]) }).entry.id, "dsh-knowledge-wiki");
+  assert.equal(loadClient().entry.id, "dsh-knowledge-base");
+});

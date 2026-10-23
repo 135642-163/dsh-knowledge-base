@@ -37,17 +37,24 @@ const result = await build({
 });
 
 const body = result.outputFiles[0].text.trimEnd();
-const wrapped = `${banner}window.__ModuleLoader__.load({
-  id: "dsh-knowledge-wiki",
-  factory: (require) => {
-    var module = { exports: {} };
-    var exports = module.exports;
-    (function (module, exports, require) {
-${indentLines(body, 6)}
-    })(module, exports, require);
-    return module.exports;
-  }
-});
+const wrapped = `${banner}(() => {
+  const KB_CLIENT_IDS = ["dsh-knowledge-base", "dsh-knowledge-wiki"];
+  const boot = typeof window !== "undefined" ? window.__DSH_BOOT__ : undefined;
+  const rows = boot && Array.isArray(boot.entries) ? boot.entries : [];
+  const known = new Set(rows.map((row) => row && row.id));
+  const id = KB_CLIENT_IDS.find((candidate) => known.has(candidate)) || KB_CLIENT_IDS[0];
+  window.__ModuleLoader__.load({
+    id,
+    factory: (require) => {
+      var module = { exports: {} };
+      var exports = module.exports;
+      (function (module, exports, require) {
+${indentLines(body, 8)}
+      })(module, exports, require);
+      return module.exports;
+    }
+  });
+})();
 `;
 
 if (check) {
