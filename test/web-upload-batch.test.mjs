@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { handleApi } from "../lib/web/api.js";
 import { createKb } from "../lib/kbmeta.js";
 import { createJobRegistry } from "../lib/web/jobs.js";
-import { markBatchImporting, sweepOldBatches } from "../lib/web/upload.js";
+import { markBatchImporting, normalizeLimits, sweepOldBatches } from "../lib/web/upload.js";
 
 const LIMITS = { maxUploadBytes: 1024, maxBatchFiles: 2, extensions: [".md", ".pdf"] };
 
@@ -233,6 +233,20 @@ test("缺省 limits 时使用 2 GiB / 1000 个文件默认值", async () => {
   const put = await call(opts, makeReq({ method: "PUT", url: `/kb/api/upload-batches/${id}/files?path=big.md`, body: threeMiB }));
   assert.equal(put.res.status, 200);
   assert.equal(put.json.size, 3 * 1024 * 1024);
+});
+
+test("normalizeLimits 对 0 / 负数 / NaN / Infinity / 0.4 回退默认值", () => {
+  for (const limits of [
+    { maxUploadBytes: 0, maxBatchFiles: 0 },
+    { maxUploadBytes: -1, maxBatchFiles: -1 },
+    { maxUploadBytes: NaN, maxBatchFiles: NaN },
+    { maxUploadBytes: Infinity, maxBatchFiles: Infinity },
+    { maxUploadBytes: 0.4, maxBatchFiles: 0.4 },
+  ]) {
+    const normalized = normalizeLimits(limits);
+    assert.equal(normalized.maxUploadBytes, 2 * 1024 ** 3, `maxUploadBytes=${limits.maxUploadBytes}`);
+    assert.equal(normalized.maxBatchFiles, 1000, `maxBatchFiles=${limits.maxBatchFiles}`);
+  }
 });
 
 test("markBatchImporting 并发只成功一次，锁定后丢弃返回 409", async () => {

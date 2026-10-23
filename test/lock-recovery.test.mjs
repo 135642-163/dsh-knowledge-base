@@ -101,3 +101,25 @@ test("sweepStaging removes stale temp files and keeps recent ones", async () => 
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("sweepStaging keeps ui-batches while removing other stale temp files", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "kb-sweep-batches-"));
+  try {
+    const tmp = join(dir, "import-tmp");
+    const batchDir = join(tmp, "ui-batches", "b-000000000000");
+    await mkdir(batchDir, { recursive: true });
+    const staleFile = join(tmp, "worker-old.json");
+    await writeFile(staleFile, "{}", "utf8");
+    const twoDaysAgo = new Date(Date.now() - 2 * 24 * 3600 * 1000);
+    await utimes(staleFile, twoDaysAgo, twoDaysAgo);
+    await utimes(batchDir, twoDaysAgo, twoDaysAgo);
+
+    await sweepStaging(dir);
+
+    await assert.rejects(access(staleFile), "stale temp file should be removed");
+    // ui-batches 批次目录由 sweepOldBatches 负责，不能被 sweepStaging 删掉
+    await access(batchDir);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

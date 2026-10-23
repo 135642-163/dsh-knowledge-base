@@ -112,7 +112,7 @@ test("registerKbWeb 注入 jobs/limits 并注册任务清单与 dispose", async 
     inject(names, fn) {
       fn({
         webServer: { register(route) { registered.push(route); return () => {}; } },
-        effect(fn, label) { effects.push(label); },
+        effect(fn, label) { effects.push({ label, fn }); },
         get: () => undefined,
       });
     },
@@ -121,7 +121,15 @@ test("registerKbWeb 注入 jobs/limits 并注册任务清单与 dispose", async 
   registerKbWeb(ctx, {
     kbRoot,
     limits: { maxUploadBytes: 1024, maxBatchFiles: 2, extensions: [".md"] },
-    std: { configured: false, baseUrl: "https://example.invalid", rateMs: 1, maxAgeDays: 7, importConfig: {} },
+    // 用与默认值不同的 ttl/configured：漏接 opts.std 时会退回 false/7，测试才有区分度。
+    std: {
+      configured: true,
+      baseUrl: "https://example.invalid",
+      cookie: "test-cookie",
+      rateMs: 1,
+      maxAgeDays: 2,
+      importConfig: {},
+    },
     importConfig: () => ({}),
   });
 
@@ -146,7 +154,14 @@ test("registerKbWeb 注入 jobs/limits 并注册任务清单与 dispose", async 
   const stdRes = makeRes();
   await route.handler(makeReq({ method: "GET", url: "/kb/api/kbs/%E6%A0%87%E5%87%86/std" }), stdRes);
   assert.equal(stdRes.status, 200);
-  assert.equal(JSON.parse(stdRes.body).configured, false);
+  const std = JSON.parse(stdRes.body);
+  assert.equal(std.configured, true);
+  assert.equal(std.cache.ttlDays, 2);
+  assert.ok(!stdRes.body.includes("test-cookie"), "cookie 不能出现在响应里");
 
-  assert.ok(effects.includes("kb-web: jobs-dispose"));
+  const jobsEffect = effects.find((item) => item.label === "kb-web: jobs-dispose");
+  assert.ok(jobsEffect, "应注册 jobs dispose effect");
+  const dispose = jobsEffect.fn();
+  assert.equal(typeof dispose, "function");
+  assert.doesNotThrow(() => dispose(), "dispose 应调用 cancelAll 且不抛错");
 });
