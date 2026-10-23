@@ -102,7 +102,7 @@ package.json / lib/version.js / README.md 改：0.20.0、配置、说明
 - Create: `test/import-job.test.mjs`
 - Modify: `lib/index.js:481-565`（`startImportJob`）与 `lib/index.js:443-451`（删除本地 `refreshKbIndex`，改 import）
 
-- [ ] **Step 1.0: 让 `npm test` 自动发现新的测试文件**
+- [x] **Step 1.0: 让 `npm test` 自动发现新的测试文件**
 
 `package.json` 的 `scripts.test` 目前逐条列出 55 个测试文件；本计划要新增 9 个，逐条维护容易漏。
 
@@ -116,21 +116,29 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-let files;
+
+let names;
 try {
-  files = readdirSync(join(root, "test"))
-    .filter((name) => name.endsWith(".test.mjs"))
-    .sort()
-    .map((name) => join("test", name));
-} catch {
-  console.error("test/ 不可读");
+  names = readdirSync(join(root, "test"));
+} catch (error) {
+  console.error(`cannot read test directory: ${String(error?.message ?? error)}`);
   process.exit(1);
 }
+
+const files = names
+  .filter((name) => name.endsWith(".test.mjs"))
+  .sort()
+  .map((name) => join("test", name));
+
 if (files.length === 0) {
   console.error("no test files found under test/");
   process.exit(1);
 }
-const result = spawnSync(process.execPath, ["--test", ...process.argv.slice(2), ...files], { cwd: root, stdio: "inherit" });
+
+const result = spawnSync(process.execPath, ["--test", ...process.argv.slice(2), ...files], {
+  cwd: root,
+  stdio: "inherit",
+});
 process.exit(result.status ?? 1);
 ```
 
@@ -141,7 +149,7 @@ process.exit(result.status ?? 1);
 Run: `npm test`
 Expected: 仍然 186/186 通过（文件集合不变，只是发现方式变了；`dev/` 不参与）。
 
-- [ ] **Step 1.1: 写失败测试**
+- [x] **Step 1.1: 写失败测试**
 
 创建 `test/import-job.test.mjs`：
 
@@ -235,12 +243,12 @@ test("runner 在进程异常退出时返回 failed 并带已完成计数", async
 });
 ```
 
-- [ ] **Step 1.2: 运行测试确认失败**
+- [x] **Step 1.2: 运行测试确认失败**
 
 Run: `node --test test/import-job.test.mjs`
 Expected: FAIL，`Cannot find module '../lib/import-job.js'`。
 
-- [ ] **Step 1.3: 实现 `lib/import-job.js`**
+- [x] **Step 1.3: 实现 `lib/import-job.js`**
 
 ```js
 /**
@@ -375,7 +383,7 @@ export function createImportWorkerRunner({ spawn, dir, argsFile, reportFile, fil
 }
 ```
 
-- [ ] **Step 1.4: 改 `lib/index.js` 使用新内核**
+- [x] **Step 1.4: 改 `lib/index.js` 使用新内核**
 
 顶部 import 增加：
 
@@ -415,16 +423,16 @@ async function startImportJob(
 
 同时把 import 行改为 `import { createImportWorkerRunner, prepareImportArgs, refreshKbIndex, tempReportFile } from "./import-job.js";`（别漏 `tempReportFile`）。
 
-- [ ] **Step 1.5: 跑新测试与全套回归**
+- [x] **Step 1.5: 跑新测试与全套回归**
 
 Run:
 ```bash
 node --test test/import-job.test.mjs
 npm test
 ```
-Expected: 新测试 3/3 通过；`npm test` 189/189（186 + 3）。
+Expected: 新测试 5/5 通过；`npm test` 191/191（186 + 5）。
 
-- [ ] **Step 1.6: Commit**
+- [x] **Step 1.6: Commit**
 
 ```bash
 git add lib/import-job.js test/import-job.test.mjs lib/index.js scripts/run-tests.mjs package.json
@@ -436,7 +444,7 @@ git commit -m "refactor(import): extract worker launch core for tool and workben
 代码质量审查后落在 `lib/import-job.js` 的最终契约（后续 Task 5/7 按此实现，不要回退到计划正文里的旧片段）：
 
 1. **测试入口**：`scripts/run-tests.mjs` 枚举 `test/*.test.mjs` 并转发额外 CLI 参数；`npm test` = `node scripts/build-client.mjs --check && node scripts/run-tests.mjs`；`dev/*-test.mjs` 不参与。
-2. **runner 结果契约**：`run().done` resolve `{ status, detail, report, cancelled, exitCode, signal }`，`status` 仍是 `completed|failed|cancelled`（工具路径兼容）。工作台任务用 `cancelled !== true && exitCode === 0` 判定 `succeeded`（部分文件失败由 `report.fail` 表达）；进程崩溃/被取消 → `failed`。
+2. **runner 结果契约**：`run().done` resolve `{ status, detail, report, cancelled, exitCode, signal }`，`status` 仍是 `completed|failed|cancelled`（工具路径兼容）。工作台任务用 `cancelled !== true && exitCode === 0` 判定 `succeeded`（部分文件失败由 `report.fail` 表达）；进程崩溃/被取消 → `failed`。worker 在「全部文件失败」时以 1 退出（`ok===0 && fail>0`），工作台任务按 `failed` 处理（一个都没导入成功）；只有部分失败时退出 0 → `succeeded`。
 3. **清理时序**：`done` 在删除 args 文件与报告文件之后才 resolve（`.finally` 里 await）；`reportFile` 只删一次，`undefined` 不传给 `rm`。
 4. **取消语义**：`cancelled` 在 `run()` 内（每次运行独立）；`cancel()` 幂等，`terminate()` 的 rejection 被吞掉。
 5. **失败诊断**：stderr 取尾部 200 字符；退出描述用 `exitCode`，无退出码时用 `signal`，不再伪造 0。
@@ -1825,7 +1833,7 @@ export async function importBatch({
       const outcome = await handle.done;
       const report = outcome.report ?? { ok: 0, fail: 0, skip: 0, files: [] };
       // 工作台任务状态只看 worker 是否跑完：逐文件部分失败仍是 succeeded（由 result.fail 表达），
-      // 进程崩溃或被取消才是 failed。outcome 契约见 Task 1 的实现修正记录。
+      // 进程崩溃/被取消/全部文件失败（worker 退出码 1）才是 failed。契约见 Task 1 修正记录。
       const crashed = outcome.cancelled === true || (outcome.exitCode ?? 1) !== 0;
       return {
         status: crashed ? "failed" : "succeeded",
