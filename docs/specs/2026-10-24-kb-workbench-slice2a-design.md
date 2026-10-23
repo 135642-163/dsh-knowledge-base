@@ -225,8 +225,8 @@ createJobRegistry({ retentionMs = 3600_000, maxJobs = 200, now = Date.now })
 {
   "counts": { "totalDocs": 0, "stdGroups": 0, "checked": 0, "fresh": 0, "deferred": 0,
               "updates": 0, "draftsReleased": 0, "currents": 0, "notFound": 0, "newerInKb": 0,
-              "downloaded": 0, "downloadFailed": 0, "imported": 0, "authOk": null },
-  "entries": [ { "number": "GB/T 1234", "title": "…", "status": "current | update | released | downloaded | imported | failed | notfound | newer",
+              "downloaded": 0, "downloadFailed": 0, "imported": 0, "importFailed": 0, "authOk": null },
+  "entries": [ { "number": "GB/T 1234", "title": "…", "status": "current | update | released | downloaded | imported | failed | importFailed | notfound | newer",
                  "fromYear": "2015", "toYear": "2024", "message": "" } ],
   "truncated": false,
   "hint": ""
@@ -235,7 +235,8 @@ createJobRegistry({ retentionMs = 3600_000, maxJobs = 200, now = Date.now })
 
 - `entries` 上限 200 条（`currents` 可能有 900+ 条），按「有变化 → 失败 → 未找到 → 已是最新」排序后截断，`truncated` 标记。
 - `failed` 保留站点原文到 `message`；UI 映射「认证失败 / 金币不足 / 下载失败」。
-- `hint` 复用工具路径的提示：`limit` 顺延未查完、`bzCookie` 缺失等。
+- `importFailed`：下载成功但导入失败（`importDownloaded` 返回 `error`），`message` 为净化后的错误；`counts.importFailed` 计数并追加到 `hint`。
+- `hint` 至少包含：`limit` 顺延未查完（`deferred > 0`）、下载文件导入失败数；`bzCookie` 缺失在下载类动作上已被 400 拦截。
 - 已下载未导入的条目会在下次任务重新走导入（`importDownloaded` 的 `importedDocId` 只存在内存，2A 不改变这个现状）。
 
 ## 6. HTTP API
