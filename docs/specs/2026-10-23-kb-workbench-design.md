@@ -1263,19 +1263,28 @@ README.md               修改：工作台、配置、限制
 - [x] `/kb/` 总览 9 个库（`标准` 有效文档 935 = 就绪 934 + 失败 1，43,094 页，80,950,464 字；全部库合计 1,590 篇有效文档、10 篇笔记、21.2 万页、约 2.69 亿字）
 - [x] 新建 / 简介与标签 / 重命名 / 归档（含非空库）/ 归档确认名输错被拦截 / 回收站恢复
 - [x] 资料分页（50 篇/页，第 1 页 1–50、第 2 页 51–100）、文档详情弹窗、下载原件（HTTP 200，`content-disposition: attachment`，PDF 完整）
-- [x] `npm test` 全通过（178 tests / 0 fail）
+- [x] `npm test` 全通过（180 tests / 0 fail）
 - [x] 真实浏览器（WebKit/Safari 引擎）1280×900 深色模式与 800×900 窄屏布局均正常
 - [x] 回归：`kb_list` 仍返回 9 个库；`kb_read(kb="标准", doc="schema")` 正常
+- [x] 已安装进 `~/.dsh/plugins/dsh-knowledge-base`，并用同 profile 的临时 `dsh web --port 55930` 实例做真实宿主复核：
+  - `GET /kb/api/status` 200（version `0.19.0-alpha.1`，features.ui=true）
+  - `GET /kb/api/kbs` 返回 9 个库；`标准` 934 ready + 1 failed、43,094 页
+  - `/kb/`、`/kb/app.js`、`/kb/api.js`、`/kb/style.css` 均为 200
+  - `标准` 资料分页 total=935；原件下载 200 + `attachment`
 - [ ] 上传/合并/标准/范围（Slice 2/3）
 
-验收说明：本切片尚未安装进 `~/.dsh/plugins/dsh-knowledge-base`（执行会话沙箱为 workspace-write），
-验收使用 `.acceptance/` 下的只读镜像（kb.json 复制、sources/markdown 符号链接）挂载同一套
-`lib/web/*` 路由，真实知识库根目录未被写入（无测试库、无 `.trash/`）。安装补丁见
-`kb-workbench-slice1.patch`，安装后需重启 `dsh web` 再用真实端口复核一次。
+验收说明：功能写流程在 `.acceptance/` 只读镜像上验证（kb.json 复制、sources/markdown 符号链接），
+真实知识库根目录未被写入（无测试库、无 `.trash/`）；安装后在真实 DSH 宿主上只做只读复核。
+主端口 55929 的 `dsh web` 进程启动于 2026-09-14，Node ESM 模块缓存不会热加载新增的
+`lib/web/*` 代码，因此主端口需要在安装后重启一次 `dsh web`；临时 55930 实例已证明安装后的
+代码本身可用。安装补丁见 `kb-workbench-slice1.patch`。
 
-验收中发现并修复两处问题：
+验收中发现并修复三处问题：
 
-1. `/kb/api` 前缀会把静态文件 `/kb/api.js` 抢进 JSON API（模块加载失败）；改为 `exact:/kb/api`
-   + `prefix:/kb/api/`，并加回归测试。
-2. 工作台 toast 原本放在 `#app` 内，任何一次 `render()` 都会把它清掉；改为挂在 `body` 上，
-   保存简介/重命名/恢复的提示才能稳定显示。
+1. **DSH 的 prefix 语义**：`prefix: p` 只命中 `p` 或 `p/<anything>`，最长前缀优先；
+   原计划的 `prefix: "/kb/"` 只能命中 `/kb/`，静态资源与 API 都 404。改为 `prefix: "/kb"`
+   （静态壳）与 `prefix: "/kb/api"`（JSON API），并加回归测试。
+2. **挂载前缀归一化**：宿主可能传完整 URL，也可能传剥掉前缀的 URL；`relativeUiPath` /
+   `relativeApiPath` 统一两种形式，避免静态文件被截成 `js`、API 被当成根路径。
+3. **toast 生命周期**：toast 原本在 `#app` 内，任何一次 `render()` 都会清掉；改为挂在
+   `body` 上，保存简介/重命名/恢复的提示才能稳定显示。
