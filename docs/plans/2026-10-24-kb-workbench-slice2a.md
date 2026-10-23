@@ -2968,7 +2968,7 @@ git commit -m "feat(web): wire job registry, upload limits and std config into t
 - Create: `ui/upload-core.js`
 - Create: `test/upload-core.test.mjs`
 
-- [ ] **Step 9.1: 写失败测试**
+- [x] **Step 9.1: 写失败测试**
 
 创建 `test/upload-core.test.mjs`：
 
@@ -3033,12 +3033,12 @@ test("formatBytes 人类可读", () => {
 });
 ```
 
-- [ ] **Step 9.2: 运行确认失败**
+- [x] **Step 9.2: 运行确认失败**
 
 Run: `node --test test/upload-core.test.mjs`
 Expected: FAIL，`Cannot find module '../ui/upload-core.js'`。
 
-- [ ] **Step 9.3: 实现 `ui/upload-core.js`**
+- [x] **Step 9.3: 实现 `ui/upload-core.js`**
 
 ```js
 /**
@@ -3149,17 +3149,23 @@ export function summarizeResults(result) {
 }
 ```
 
-- [ ] **Step 9.4: 跑测试**
+- [x] **Step 9.4: 跑测试**
 
 Run: `node --test test/upload-core.test.mjs`
 Expected: 5/5 通过。
 
-- [ ] **Step 9.5: Commit**
+- [x] **Step 9.5: Commit**
 
 ```bash
 git add ui/upload-core.js test/upload-core.test.mjs
 git commit -m "feat(ui): add pure upload helpers (validation, queue, labels)"
 ```
+
+### Task 9 实现修正记录（2026-10-24，已执行）
+
+1. **`extOf` 与服务端对齐**：先取 basename，再 `index > 0`——dotfile（`.md`/`.gitignore`）与无扩展名（`v1.2/README`）返回 `""`，点号目录不再误判；大写扩展仍小写化。
+2. **测试 9 条**（计划 5 条 + 4 条补强）：真实 NFD→NFC（name 与 webkitRelativePath）、extOf 直测、classifyFiles 的 dotfile/无扩展名拒绝、createQueue 的 FIFO 启动顺序与“拒绝后继续排空”。
+3. 队列计数器在 job promise settle 后的微任务里更新；测试用 mactrotask flush 后断言 `active/pending === 0`（实现未改）。
 
 ---
 
