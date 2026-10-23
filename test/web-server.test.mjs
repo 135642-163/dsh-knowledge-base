@@ -43,7 +43,8 @@ test("registerKbWeb registers /kb, /kb/api and /kb/ routes", () => {
   registerKbWeb(ctx, { kbRoot: "/tmp/none", uiEnabled: true });
   assert.deepEqual(routes.map((route) => `${route.kind}:${route.path}`), [
     "exact:/kb",
-    "prefix:/kb/api",
+    "exact:/kb/api",
+    "prefix:/kb/api/",
     "prefix:/kb/",
   ]);
 });
@@ -58,5 +59,22 @@ test("kbRoot option is accepted (no filesystem access at registration)", async (
   const root = await mkdtemp(join(tmpdir(), "kb-web-server-"));
   const { ctx, routes } = fakeCtx();
   registerKbWeb(ctx, { kbRoot: root, uiEnabled: true });
-  assert.equal(routes.length, 3);
+  assert.equal(routes.length, 4);
+});
+
+test("static /kb/api.js is not captured by the JSON API route", () => {
+  const { ctx, routes } = fakeCtx();
+  registerKbWeb(ctx, { kbRoot: "/tmp/none", uiEnabled: true });
+  const match = (path) => {
+    const exact = routes.find((route) => route.kind === "exact" && route.path === path);
+    if (exact) return exact.path;
+    const prefixes = routes
+      .filter((route) => route.kind === "prefix" && path.startsWith(route.path))
+      .sort((a, b) => b.path.length - a.path.length);
+    return prefixes[0]?.path ?? null;
+  };
+  assert.equal(match("/kb/api"), "/kb/api");
+  assert.equal(match("/kb/api/kbs"), "/kb/api/");
+  assert.equal(match("/kb/api.js"), "/kb/");
+  assert.equal(match("/kb/app.js"), "/kb/");
 });
