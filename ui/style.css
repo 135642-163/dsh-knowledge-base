@@ -148,3 +148,4 @@ code { background: var(--panel-2); border-radius: 4px; padding: 1px 4px; }
 body.embed .topbar { height: 44px; padding: 0 12px; }
 body.embed .topbar .brand span { display: none; }
 body.embed .topbar-actions { margin-left: auto; }
+body.embed .side-foot a[target="_blank"] { display: none; }
