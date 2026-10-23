@@ -139,6 +139,28 @@ function bind() {
           window.location.hash = hrefForOverview();
         },
       });
+    } else if (action === "save-meta") {
+      const description = app.querySelector("#kb-description")?.value ?? "";
+      const tags = String(app.querySelector("#kb-tags")?.value ?? "").split(/[,，]/).map((tag) => tag.trim()).filter(Boolean);
+      try {
+        await api.patchKb(target.dataset.name, { description, tags });
+        showToast("简介与标签已保存");
+        const current = route();
+        await loadDetail(current.name, current.tab);
+      } catch (error) {
+        showToast(error instanceof ApiError ? error.message : String(error?.message ?? error), "error");
+      }
+    } else if (action === "rename-kb") {
+      const next = app.querySelector("#kb-rename")?.value?.trim() ?? "";
+      if (next === "" || next === target.dataset.name) return;
+      try {
+        const result = await api.patchKb(target.dataset.name, { name: next });
+        showToast("已重命名");
+        await loadKbs();
+        window.location.hash = hrefForKb(result.kb.name, "settings");
+      } catch (error) {
+        showToast(error instanceof ApiError ? error.message : String(error?.message ?? error), "error");
+      }
     } else if (action === "toast-close") {
       hideToast();
     }
