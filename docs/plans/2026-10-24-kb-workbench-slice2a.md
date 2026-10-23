@@ -970,7 +970,7 @@ git commit -m "feat(web): add in-plugin job registry for workbench tasks"
 - Create: `test/web-upload-batch.test.mjs`
 - Modify: `test/web-api-read.test.mjs`（features/limits）
 
-- [ ] **Step 4.1: 写失败测试**
+- [x] **Step 4.1: 写失败测试**
 
 创建 `test/web-upload-batch.test.mjs`：
 
@@ -1154,12 +1154,12 @@ test("GET /status returns feature flags", async () => {
 });
 ```
 
-- [ ] **Step 4.2: 运行测试确认失败**
+- [x] **Step 4.2: 运行测试确认失败**
 
 Run: `node --test test/web-upload-batch.test.mjs`
 Expected: FAIL（路由 404 `NOT_FOUND`、`readRawToFile` 不存在）。
 
-- [ ] **Step 4.3: 在 `lib/web/http.js` 增加 `WebError` 与 `readRawToFile`**
+- [x] **Step 4.3: 在 `lib/web/http.js` 增加 `WebError` 与 `readRawToFile`**
 
 顶部 import 改为：
 
@@ -1215,7 +1215,7 @@ export async function readRawToFile(source, dest, { maxBytes = 0 } = {}) {
 }
 ```
 
-- [ ] **Step 4.4: 实现 `lib/web/upload.js`（本任务只含批次部分）**
+- [x] **Step 4.4: 实现 `lib/web/upload.js`（本任务只含批次部分）**
 
 ```js
 /**
@@ -1430,7 +1430,7 @@ export async function sweepOldBatches({ kbDir, maxAgeMs = OLD_BATCH_MS, now = Da
 }
 ```
 
-- [ ] **Step 4.5: 在 `lib/web/api.js` 接上批次路由**
+- [x] **Step 4.5: 在 `lib/web/api.js` 接上批次路由**
 
 顶部 import 改为：
 
@@ -1518,7 +1518,7 @@ catch 分支的 `sendError` 调用补 details：
     }
 ```
 
-- [ ] **Step 4.6: 跑测试**
+- [x] **Step 4.6: 跑测试**
 
 Run:
 ```bash
@@ -1865,12 +1865,8 @@ export async function importBatch({
   if (kept.length === 0) return { jobId: null, status: "empty", duplicates, similar };
 
   // 锁定 open → importing：与 PUT/DELETE 互斥；expectedFiles 防止 dedup 期间又上传了新文件。
-  try {
-    await markBatchImporting(kbDir, batchId, { expectedFiles: batch.files });
-  } catch (error) {
-    if (error instanceof WebError) throw error;
-    throw new WebError("BATCH_LOCKED", 409, "批次状态已变化，请重试");
-  }
+  // 只让 markBatchImporting 的 WebError 透传；非 WebError（如 batch.json 写失败）交给 api 层净化成 500。
+  await markBatchImporting(kbDir, batchId, { expectedFiles: batch.files });
 
   const dir = batchDirFor(kbDir, batchId);
   const progressFile = join(dir, "progress.json");
