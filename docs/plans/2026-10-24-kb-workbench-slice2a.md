@@ -661,7 +661,7 @@ git commit -m "feat(worker): write per-file progress for workbench imports"
 - Create: `lib/web/jobs.js`
 - Create: `test/web-jobs.test.mjs`
 
-- [ ] **Step 3.1: 写失败测试**
+- [x] **Step 3.1: 写失败测试**
 
 创建 `test/web-jobs.test.mjs`：
 
@@ -790,12 +790,12 @@ test("cancelAll 取消运行中的 handle", async () => {
 });
 ```
 
-- [ ] **Step 3.2: 运行测试确认失败**
+- [x] **Step 3.2: 运行测试确认失败**
 
 Run: `node --test test/web-jobs.test.mjs`
 Expected: FAIL，`Cannot find module '../lib/web/jobs.js'`。
 
-- [ ] **Step 3.3: 实现 `lib/web/jobs.js`**
+- [x] **Step 3.3: 实现 `lib/web/jobs.js`**
 
 ```js
 /**
@@ -936,7 +936,7 @@ export function createJobRegistry({ retentionMs = DEFAULT_RETENTION_MS, maxJobs 
 }
 ```
 
-- [ ] **Step 3.4: 跑测试**
+- [x] **Step 3.4: 跑测试**
 
 Run: `node --test test/web-jobs.test.mjs`
 Expected: 6/6 通过。
@@ -958,7 +958,7 @@ git commit -m "feat(web): add in-plugin job registry for workbench tasks"
 4. **进度读取加固**：只接受普通对象，`{ ...parsed, kind: "import" }` 覆盖文件里的 kind，读/解析失败回退上次缓存。
 5. **取消**：`cancelAll` 单个 handle 抛错不影响其他任务；无 handle 的 running 记录置 `cancelRequested`，`setHandle` 时立即取消；新增 `hasRunning({ kb, kind })` 供 Task 7 使用（不要再用 `list(limit:50)` 扫描）。
 6. **结算后清内部引用**：`handle`、`onSettle`、`progressFile`、`cancelRequested` 清空；`result` 保留。
-7. **净化责任**：注册表只做顶层 key 白名单；`detail`/`result` 由调用方负责组成“可下发”的内容。Task 5 必须把批次绝对路径从 `detail` 与 `files[].error` 里替换掉（见 Task 5 修正）。
+7. **净化责任**：注册表只做顶层 key 白名单；`detail`/`result` 由调用方负责组成“可下发”的内容。Task 5 必须把批次绝对路径从 `detail` 与 `files[].error` 里替换掉（见 Task 5 Step 5.3 的 `redactPaths`）。
 
 ---
 
@@ -1719,6 +1719,18 @@ test("进程级失败：任务 failed、批次保留", async () => {
   assert.equal(batch.status, "failed");
 });
 
+test("启动进程失败时任务 failed 且响应里没有绝对路径", async () => {
+  const { kbRoot, opts } = await setup();
+  opts.spawn = () => { throw new Error(`spawn 失败：${kbRoot}/标准/import-tmp/x.json 不存在`); };
+  const id = await createBatch(opts, { "a.md": "# a\n" });
+  const { json } = await call(opts, makeReq({ method: "POST", url: `/kb/api/upload-batches/${id}/import`, body: "{}" }));
+  const job = await waitJob(opts, json.jobId);
+  assert.equal(job.status, "failed");
+  assert.match(job.detail, /启动导入进程失败/);
+  assert.equal(job.detail.includes(kbRoot), false);
+  assert.equal(JSON.stringify(job.result).includes(kbRoot), false);
+});
+
 test("全部重复：jobId 为 null、批次保持 open", async () => {
   const { kbRoot, opts } = await setup();
   const src = join(await mkdtemp(join(tmpdir(), "kb-dup-")), "a.md");
@@ -1846,17 +1858,46 @@ export async function importBatch({
     label: `导入 ${kb}: ${kept.length} 个文件`,
     run: async (job) => {
       job.setProgressFile(progressFile);
-      const runner = createImportWorkerRunner({ spawn, dir: kbDir, argsFile, reportFile, fileCount: kept.length, kb });
-      const handle = runner.run();
+      // 内容净化：注册表只做 key 白名单，绝对路径由这里统一替换（kbDir 覆盖 batchDir/argsFile）。
+      const redactPrefixes = [kbDir, kbRoot, tmpdir()];
+      const failedResult = (detail, report) => ({
+        status: "failed",
+        detail: redactPaths(detail, redactPrefixes),
+        result: {
+          fileCount: kept.length,
+          ok: report?.ok ?? 0,
+          fail: report?.fail ?? 0,
+          skip: report?.skip ?? 0,
+          files: (report?.files ?? []).map((file) => ({
+            title: file.title,
+            status: file.status,
+            ...(file.error ? { error: redactPaths(file.error, redactPrefixes) } : {}),
+          })),
+          duplicates,
+          similar,
+        },
+      });
+      let handle;
+      try {
+        const runner = createImportWorkerRunner({ spawn, dir: kbDir, argsFile, reportFile, fileCount: kept.length, kb });
+        handle = runner.run();
+      } catch (error) {
+        return failedResult(`启动导入进程失败：${String(error?.message ?? error)}`, null);
+      }
       job.setHandle(handle);
-      const outcome = await handle.done;
+      let outcome;
+      try {
+        outcome = await handle.done;
+      } catch (error) {
+        return failedResult(`导入任务异常：${String(error?.message ?? error)}`, null);
+      }
       const report = outcome.report ?? { ok: 0, fail: 0, skip: 0, files: [] };
       // 工作台任务状态只看 worker 是否跑完：逐文件部分失败仍是 succeeded（由 result.fail 表达），
       // 进程崩溃/被取消/全部文件失败（worker 退出码 1）才是 failed。契约见 Task 1 修正记录。
       const crashed = outcome.cancelled === true || (outcome.exitCode ?? 1) !== 0;
       return {
         status: crashed ? "failed" : "succeeded",
-        detail: redactPaths(outcome.detail, [dir, tmpdir()]),
+        detail: redactPaths(outcome.detail, redactPrefixes),
         result: {
           fileCount: kept.length,
           ok: report.ok ?? 0,
@@ -1865,7 +1906,7 @@ export async function importBatch({
           files: (report.files ?? []).map((file) => ({
             title: file.title,
             status: file.status,
-            ...(file.error ? { error: redactPaths(file.error, [dir, tmpdir()]) } : {}),
+            ...(file.error ? { error: redactPaths(file.error, redactPrefixes) } : {}),
           })),
           duplicates,
           similar,
@@ -1874,12 +1915,17 @@ export async function importBatch({
     },
     onSettle: async ({ status, result }) => {
       const fail = result?.fail ?? 0;
-      if (status === "succeeded" && fail === 0) {
-        await removeUploadBatch(kbDir, batchId);
-      } else {
-        batch.status = "failed";
-        batch.updatedAt = new Date().toISOString();
-        await writeBatch(kbDir, batchId, batch).catch(() => {});
+      try {
+        if (status === "succeeded" && fail === 0) {
+          await removeUploadBatch(kbDir, batchId);
+        } else {
+          batch.status = "failed";
+          batch.updatedAt = new Date().toISOString();
+          await writeBatch(kbDir, batchId, batch).catch(() => {});
+        }
+      } catch (error) {
+        // 抛出的消息会进入 job.detail；先净化再抛，避免把批次绝对路径带给客户端。
+        throw new Error(redactPaths(String(error?.message ?? error), [kbDir, kbRoot, tmpdir()]));
       }
     },
   });
