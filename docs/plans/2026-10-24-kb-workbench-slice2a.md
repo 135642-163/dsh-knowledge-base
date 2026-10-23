@@ -1995,10 +1995,12 @@ git commit -m "feat(web): import uploaded batches as workbench jobs with dedup a
 
 1. **全部重复测试修正**：`lib/dedup.js` 对同一 `relKey` 视为原位更新、且标题核心匹配有 6 字符下限，计划原测试（`a.md` + 标题 `a`）无法触发 duplicates。最终用例：先把 `旧/电气设备安装说明.md`（标题 `电气设备安装说明`）导入库，再上传 `电气设备安装说明.md`；断言 `jobId === null`、`status === "empty"`、`duplicates.length >= 1`、批次仍 `open`。
 2. **duplicates/similar 下发形状**：新增内部 `publicMatches()`，把 dedup 的 `{title, sourcePath, scope, matched}` 映射为 `{ title, scope, matched }`，避免 `sourcePath`（批次绝对路径）进入 HTTP 响应与 `job.result`。
-3. **导入锁与快照**：调用 `markBatchImporting(kbDir, batchId, { expectedFiles: batch.files })`，不额外 try/catch（非 WebError 由 api 层净化成 500 `UPLOAD_FAILED`）。
-4. **初始进度 best-effort**：`writeProgressFile(progressFile, createProgress(kept)).catch(() => {})`，进度文件位于 `<batchDir>/progress.json`（与 sweep 的 importing 判龄约定一致）。
-5. **run/onSettle**：`runner.run()` 与 `handle.done` 各自 try/catch 返回净化后的失败 outcome；`onSettle({status,result})` 仅在 `succeeded && fail===0` 删除批次，否则写 `failed`；抛错消息先 `redactPaths`。
-6. 测试 8 条（成功、部分失败、进程级失败、spawn 失败净化、全部重复、已锁定 409、并发 202/409、空批次 400），并断言响应/job JSON 不含 `kbRoot` 绝对路径。
+3. **导入锁与快照**：`markBatchImporting(kbDir, batchId, { expectedFiles: batch.files })`；`markBatchImporting` 之后的启动阶段整体 try/catch：失败时删 args 文件、在批次锁内 `markBatchFailed`（`failed`+`updatedAt`），再抛出。锁前错误（BATCH_LOCKED/BATCH_CHANGED）不改批次。
+4. **KB 名以目录为准**：`kbName = basename(kbDir)` 用于 dedup `targetKb`、`job.kb`、label、worker args 与 runner；API 不再传 `kb`，避免改名后导入落到旧名下。
+5. **初始进度 best-effort**：`writeProgressFile(progressFile, createProgress(kept)).catch(() => {})`，位于 `<batchDir>/progress.json`（与 sweep 的 importing 判龄约定一致）。
+6. **run/onSettle**：`runner.run()`/`handle.done`/report 缺失各自 try/catch 返回净化后的失败 outcome；`result.files[]` 恒为 `{path,title,status,error?}`（kept 顺序，失败路径按 kept 合成），`path` 是批次内相对路径，供 Task 11 重试匹配。`onSettle({status,result})` 仅当 `succeeded && fail===0 && skip===0` 删批次；否则 `markBatchFailed`，抛错先 `redactPaths`（前缀含 `kbDir/kbRoot/PLUGIN_ROOT/tmpdir`）。
+7. **进度错误净化**：worker 写 `progress.files[].error` 前把 `sourcePath` 换成相对路径、去掉 `kbDir`/`pluginRoot`，截 200 字。
+8. 测试 15 条（成功、部分失败含真实路径净化、进程级失败、spawn 失败、报告缺失、skip 保留、全部重复、已锁定 409、并发 202/409、BATCH_CHANGED、全部失败 exit 1、空批次、初始进度、改名落点、KB 名权威），并断言响应/job JSON/progress 不含绝对路径。
 
 ---
 
@@ -2007,6 +2009,8 @@ git commit -m "feat(web): import uploaded batches as workbench jobs with dedup a
 **Files:**
 - Modify: `lib/web/api.js`
 - Extend: `test/web-jobs.test.mjs`（HTTP 层两条用例）
+
+> **Task 6 约束（来自 Task 5 复审）**：`GET /jobs` 列表必须**省略 `result`**（最多 50 条、单条 result 可达 1000 文件），只返回 `id/kind/kb/label/status/detail/startedAt/finishedAt/progress`；`GET /jobs/:id` 才返回完整 `result`。
 
 - [ ] **Step 6.1: 追加失败测试**
 
@@ -3298,6 +3302,11 @@ git commit -m "feat(ui): add upload, job and std API client methods"
 - Modify: `ui/views/modals.js`（`openConfirmModal`）
 - Modify: `ui/style.css`
 - （不动 `ui/icons.js`：`icons.upload` 已存在）
+
+> **Task 11 约束（来自 Task 5 复审）**：
+> 1. 重试匹配用 `job.result.files[].path`（批次内相对路径），不要用 title/basename。
+> 2. `similar` 列表必须在报告里显示（低置信相似文件照常导入了，不能静默）。
+> 3. `skip > 0` 的批次会被保留但不属于 `failed`；报告里要把 skipped 行标为可重试（或明确说明“文档正在导入中，稍后重试”）。
 
 - [ ] **Step 11.1: 写 DOM 无关的失败测试**
 
