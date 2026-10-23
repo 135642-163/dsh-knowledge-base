@@ -1271,13 +1271,15 @@ README.md               修改：工作台、配置、限制
   - `GET /kb/api/kbs` 返回 9 个库；`标准` 934 ready + 1 failed、43,094 页
   - `/kb/`、`/kb/app.js`、`/kb/api.js`、`/kb/style.css` 均为 200
   - `标准` 资料分页 total=935；原件下载 200 + `attachment`
+- [x] 桌面端重启后在真实端口 `64276` 复核：status 200、9 个库、静态资源 200、资料 total=935；
+  WebKit 渲染 9 张卡片、无 JS 错误
 - [ ] 上传/合并/标准/范围（Slice 2/3）
 
 验收说明：功能写流程在 `.acceptance/` 只读镜像上验证（kb.json 复制、sources/markdown 符号链接），
 真实知识库根目录未被写入（无测试库、无 `.trash/`）；安装后在真实 DSH 宿主上只做只读复核。
-主端口 55929 的 `dsh web` 进程启动于 2026-09-14，Node ESM 模块缓存不会热加载新增的
-`lib/web/*` 代码，因此主端口需要在安装后重启一次 `dsh web`；临时 55930 实例已证明安装后的
-代码本身可用。安装补丁见 `kb-workbench-slice1.patch`。
+安装前的旧 Web 进程启动于 2026-09-14，Node ESM 模块缓存不会热加载新增的 `lib/web/*` 代码；
+桌面端重启后由新进程在 `64276` 提供服务，`/kb/` 已按最终代码正常工作。旧端口 55929 已不再监听。
+安装补丁见 `kb-workbench-slice1.patch`。
 
 验收中发现并修复三处问题：
 
