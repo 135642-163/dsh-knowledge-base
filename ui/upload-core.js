@@ -17,9 +17,9 @@ export function formatBytes(bytes) {
 }
 
 export function extOf(path) {
-  const name = String(path ?? "").toLowerCase();
+  const name = String(path ?? "").split("/").pop().toLowerCase();
   const index = name.lastIndexOf(".");
-  return index >= 0 ? name.slice(index) : "";
+  return index > 0 ? name.slice(index) : "";
 }
 
 export function classifyFiles(entries, limits = {}) {

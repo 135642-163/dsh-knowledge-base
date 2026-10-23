@@ -3,13 +3,23 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { classifyFiles, createQueue, formatBytes, relPathFor, statusLabel, summarizeResults } from "../ui/upload-core.js";
+import { classifyFiles, createQueue, extOf, formatBytes, relPathFor, statusLabel, summarizeResults } from "../ui/upload-core.js";
 
 const LIMITS = { maxBytes: 10, maxFiles: 2, extensions: [".md", ".pdf"] };
 
 test("relPathFor 优先 webkitRelativePath 并做 NFC 归一", () => {
   assert.equal(relPathFor({ name: "a.md" }), "a.md");
   assert.equal(relPathFor({ name: "a.md", webkitRelativePath: "资料/a.md" }), "资料/a.md");
+  assert.equal(relPathFor({ name: "e\u0301.md" }), "é.md");
+  assert.equal(relPathFor({ name: "fallback.md", webkitRelativePath: "cafe\u0301/é.md" }), "café/é.md");
+});
+
+test("extOf 与 server path.extname 语义对齐", () => {
+  assert.equal(extOf(".gitignore"), "");
+  assert.equal(extOf(".md"), "");
+  assert.equal(extOf("v1.2/README"), "");
+  assert.equal(extOf("v1.2/a.MD"), ".md");
+  assert.equal(extOf("A.PDF"), ".pdf");
 });
 
 test("classifyFiles 拒绝非法扩展名/超大小/超数量并给出原因", () => {
@@ -27,6 +37,18 @@ test("classifyFiles 拒绝非法扩展名/超大小/超数量并给出原因", (
   assert.match(rejected.find((item) => item.path === "d.pdf").reason, /文件数/);
 });
 
+test("classifyFiles 把点文件与无扩展名路径判为不支持", () => {
+  const files = [
+    { name: ".md", size: 5 },
+    { name: "README", size: 5, webkitRelativePath: "v1.2/README" },
+  ];
+  const { accepted, rejected } = classifyFiles(files, { ...LIMITS, maxFiles: 10 });
+  assert.deepEqual(accepted, []);
+  assert.equal(rejected.length, 2);
+  assert.match(rejected.find((item) => item.path === ".md").reason, /无扩展名/);
+  assert.match(rejected.find((item) => item.path === "v1.2/README").reason, /无扩展名/);
+});
+
 test("createQueue 并发不超过上限且全部完成", async () => {
   const queue = createQueue(2);
   let running = 0;
@@ -40,6 +62,32 @@ test("createQueue 并发不超过上限且全部完成", async () => {
   }));
   assert.deepEqual(await Promise.all(tasks), [0, 1, 2, 3, 4]);
   assert.equal(peak, 2);
+});
+
+test("createQueue 并发 1 时按 FIFO 启动", async () => {
+  const queue = createQueue(1);
+  const started = [];
+  const tasks = ["a", "b", "c"].map((name) => queue.run(async () => {
+    started.push(name);
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    return name;
+  }));
+  assert.deepEqual(await Promise.all(tasks), ["a", "b", "c"]);
+  assert.deepEqual(started, ["a", "b", "c"]);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(queue.active, 0);
+  assert.equal(queue.pending, 0);
+});
+
+test("createQueue 单个任务失败不阻塞后续任务并排空", async () => {
+  const queue = createQueue(1);
+  const first = queue.run(async () => { throw new Error("boom"); });
+  const second = queue.run(async () => "ok");
+  await assert.rejects(first, /boom/);
+  assert.equal(await second, "ok");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(queue.active, 0);
+  assert.equal(queue.pending, 0);
 });
 
 test("statusLabel 与 summarizeResults", () => {
