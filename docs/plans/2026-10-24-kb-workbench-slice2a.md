@@ -461,7 +461,7 @@ git commit -m "refactor(import): extract worker launch core for tool and workben
 - Create: `test/worker-progress.test.mjs`
 - Modify: `worker/import-worker.mjs:1-114`
 
-- [ ] **Step 2.1: 写失败测试**
+- [x] **Step 2.1: 写失败测试**
 
 创建 `test/worker-progress.test.mjs`：
 
@@ -548,12 +548,12 @@ test("worker 写 progress.json：逐文件状态、原子写无残留临时文�
 });
 ```
 
-- [ ] **Step 2.2: 运行测试确认失败**
+- [x] **Step 2.2: 运行测试确认失败**
 
 Run: `node --test test/worker-progress.test.mjs`
 Expected: FAIL，`progress.json` 不存在（`ENOENT`）。
 
-- [ ] **Step 2.3: 改 worker**
+- [x] **Step 2.3: 改 worker**
 
 `worker/import-worker.mjs`：
 
@@ -628,7 +628,7 @@ skip 分支（`skip += 1; results.push(...); process.stdout.write(...)` 之后�
     await writeProgress();
 ```
 
-- [ ] **Step 2.4: 跑测试**
+- [x] **Step 2.4: 跑测试**
 
 Run:
 ```bash
@@ -651,7 +651,7 @@ git commit -m "feat(worker): write per-file progress for workbench imports"
 2. **共享原子写模块** `lib/progress.js`：`createProgress(files)` 与 `writeProgressFile(file, progress)`（唯一 tmp 后缀 `<file>.<8hex>.tmp` → `rename` 覆盖，不再先 `rm`；失败时清理 tmp 后抛出）。worker 用 best-effort 包装：首次失败向 stderr 打一行 `worker: 进度文件写入失败（忽略）: …`，其余吞掉，导入不受影响。Task 5 的 `lib/web/upload.js` 必须 import 这两个函数，不要复制。
 3. **收尾清空 `current`**：循环结束后 `progress.current = null` 再写一次，消费者用 job 状态而不是 `current` 判断结束。
 4. **worker 头部注释**记录真实 args 契约（`sourcePath/sourceFile/relKey/title/docId?`、`reportFile?`、`progressFile?`）。
-5. 测试扩展到 4 条：混合失败、skip（用 `markImporting` 预置 importing 行复现）、进度写失败仍 best-effort、stdout/report 断言。
+5. 测试 3 条（覆盖 4 种行为）：混合失败（含 stdout/report 断言）、skip（用 `markImporting` 预置 importing 行复现）、进度写失败仍 best-effort。
 
 ---
 
@@ -1810,7 +1810,7 @@ export async function importBatch({
   const dir = batchDirFor(kbDir, batchId);
   const progressFile = join(dir, "progress.json");
   const config = importConfig({ ocrModel: body?.ocrModel === "fast" ? "fast" : "best" });
-  await writeProgressFile(progressFile, createProgress(kept));
+  await writeProgressFile(progressFile, createProgress(kept)).catch(() => {});
   batch.status = "importing";
   batch.updatedAt = new Date().toISOString();
   await writeBatch(kbDir, batchId, batch);
