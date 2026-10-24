@@ -18,9 +18,10 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createKb } from "../lib/kbmeta.js";
-import { readManifest, writeManifestAtomic } from "../lib/store.js";
+import { readManifest, touchDoc, writeManifestAtomic } from "../lib/store.js";
 import {
   MAX_MOVE_BYTES,
+  discardAttempt,
   moveDocs,
   preflightMove,
   sweepTransfers,
@@ -264,10 +265,12 @@ test("move copies files, writes target entry, soft-deletes source and keeps file
     assert.equal(targetDoc.status, "ready");
     assert.equal(targetDoc.title, "电压偏差");
     assert.equal(targetDoc.sourceFile, "d1.pdf");
+    assert.equal(targetDoc.version, 1, "目标条目从源文档版本开始");
     assert.equal(targetDoc.transferId, result.transferId);
     assert.deepEqual(
-      { kb: targetDoc.movedFrom.kb, docId: targetDoc.movedFrom.docId },
-      { kb: SRC, docId: "d1" }
+      { kb: targetDoc.movedFrom.kb, docId: targetDoc.movedFrom.docId, version: targetDoc.movedFrom.version },
+      { kb: SRC, docId: "d1", version: 1 },
+      "movedFrom 记录移动时的源文档版本"
     );
     assert.equal(targetDoc.deletedAt, undefined);
     assert.equal(targetDoc.deletedFromStatus, undefined);
@@ -480,7 +483,76 @@ test("undo restores the source and soft-deletes the target copy, keeping both fi
   }
 });
 
-test("undo refuses when the target copy was edited or deleted", async () => {
+test("undo accepts a target that started at a source version above 1", async () => {
+  const env = await makeEnv();
+  try {
+    await addDoc(env.sourceDir, { id: "v3", title: "第三个版本", extra: { version: 3 } });
+    const moved = await move(env, ["v3"]);
+    assert.equal(moved.moved, 1);
+
+    const targetDoc = await docOf(env.targetDir, "v3");
+    assert.equal(targetDoc.version, 3);
+    assert.equal(targetDoc.movedFrom.version, 3);
+
+    const result = await undoMove({ kbRoot: env.kbRoot, sourceKb: SRC, targetKb: TGT, sourceDocId: "v3" });
+    assert.equal(result.source.status, "ready");
+    assert.equal(result.target.status, "deleted");
+  } finally {
+    await rm(env.root, { recursive: true, force: true });
+  }
+});
+
+test("undo refuses when the target copy was edited after the move", async () => {
+  const env = await makeEnv();
+  try {
+    await addDoc(env.sourceDir, { id: "d1", title: "目标被修订" });
+    await addDoc(env.sourceDir, { id: "d2", title: "目标版本变了" });
+    await move(env, ["d1", "d2"]);
+
+    // kb_edit 的写法：真的改正文并递增版本（edited=true）。
+    await writeFile(
+      join(env.targetDir, "markdown", "d1", "d1.md"),
+      "# 目标被修订\n\n目标库里的新正文\n",
+      "utf8"
+    );
+    await touchDoc(env.targetDir, "d1", { edited: true });
+    const edited = await docOf(env.targetDir, "d1");
+    assert.equal(edited.edited, true);
+    assert.equal(edited.version, 2);
+
+    await assert.rejects(
+      undoMove({ kbRoot: env.kbRoot, sourceKb: SRC, targetKb: TGT, sourceDocId: "d1" }),
+      (error) => {
+        assert.equal(error?.code, "TRANSFER_UNDO_UNAVAILABLE");
+        assert.match(error.message, /目标副本已被修改，无法撤销移动/);
+        return true;
+      }
+    );
+    // 源文档保持已删除，目标副本与两边文件都还在。
+    assert.equal((await docOf(env.sourceDir, "d1")).status, "deleted");
+    assert.equal(existsSync(join(env.targetDir, "markdown", "d1", "d1.md")), true);
+    assert.match(await readFile(join(env.targetDir, "markdown", "d1", "d1.md"), "utf8"), /目标库里的新正文/);
+
+    // 只递增 version（如描述/元数据修订）同样拒绝：目标条目必须仍是移动时的版本。
+    await touchDoc(env.targetDir, "d2", { chars: 999 });
+    const bumped = await docOf(env.targetDir, "d2");
+    assert.notEqual(bumped.edited, true);
+    assert.equal(bumped.version, 2);
+    await assert.rejects(
+      undoMove({ kbRoot: env.kbRoot, sourceKb: SRC, targetKb: TGT, sourceDocId: "d2" }),
+      (error) => {
+        assert.equal(error?.code, "TRANSFER_UNDO_UNAVAILABLE");
+        assert.match(error.message, /目标副本已被修改，无法撤销移动/);
+        return true;
+      }
+    );
+    assert.equal((await docOf(env.sourceDir, "d2")).status, "deleted");
+  } finally {
+    await rm(env.root, { recursive: true, force: true });
+  }
+});
+
+test("undo refuses when the target copy is not ready or already deleted", async () => {
   const env = await makeEnv();
   try {
     await addDoc(env.sourceDir, { id: "d1", title: "目标被改动" });
@@ -504,6 +576,145 @@ test("undo refuses when the target copy was edited or deleted", async () => {
     // 源文档保持已删除状态，用户仍可手工恢复。
     const sourceDoc = await docOf(env.sourceDir, "d1");
     assert.equal(sourceDoc.status, "deleted");
+  } finally {
+    await rm(env.root, { recursive: true, force: true });
+  }
+});
+
+test("commit-time skip cleanup keeps a pre-existing target doc's files", async () => {
+  const env = await makeEnv();
+  try {
+    const existing = await addDoc(env.targetDir, {
+      id: "dup",
+      title: "目标库已有",
+      sourceBytes: 24,
+      markdown: true,
+    });
+    const targetSource = join(env.targetDir, "sources", "dup.pdf");
+    const targetMarkdown = join(env.targetDir, "markdown", "dup", "dup.md");
+    const sourceBytes = await readFile(targetSource);
+    const markdownBefore = await readFile(targetMarkdown, "utf8");
+
+    // 模拟：源文档 id 与目标既有文档相同，commit 阶段才判出 id 冲突并走 skip。
+    const transferId = "aaaaaaaaaaaaaaaa";
+    const journal = {
+      version: 1,
+      transferId,
+      sourceKb: SRC,
+      targetKb: TGT,
+      docId: "dup",
+      sourceTitle: "同名来源",
+      newId: "dup",
+      title: "同名来源",
+      sourceFile: "dup.pdf",
+      newSourceName: "dup.pdf",
+      ext: ".pdf",
+      stage: "staged",
+      // commit 前（尚未 mount）失败：目标路径属于既有文档，绝不能删。
+      mounted: false,
+      files: {
+        stagedSource: `.transfer/${transferId}/sources/dup.pdf`,
+        stagedMarkdown: `.transfer/${transferId}/markdown/dup`,
+        targetSource: "sources/dup.pdf",
+        targetMarkdown: "markdown/dup",
+      },
+      at: "2026-01-01T00:00:00.000Z",
+    };
+    await writeJournalFile(env.kbRoot, journal);
+    await mkdir(join(env.targetDir, ".transfer", transferId, "sources"), { recursive: true });
+    await writeFile(join(env.targetDir, ".transfer", transferId, "sources", "dup.pdf"), "staged");
+
+    await discardAttempt(env.kbRoot, env.targetDir, journal);
+    assert.deepEqual(await readFile(targetSource), sourceBytes, "既有原件未被删除");
+    assert.equal(await readFile(targetMarkdown, "utf8"), markdownBefore, "既有正文未被删除");
+    assert.equal((await docOf(env.targetDir, "dup")).id, existing.id);
+    assert.deepEqual(await journalsIn(env.kbRoot), []);
+    assert.deepEqual(await stagingIn(env.targetDir), []);
+
+    // mounted=false 表示文件尚未落位：即使目标清单暂时没有该 id，目标路径上的既有文件也不归本次移动。
+    const unownedId = "keepme001";
+    const unownedSource = join(env.targetDir, "sources", `${unownedId}.pdf`);
+    const unownedMarkdown = join(env.targetDir, "markdown", unownedId, `${unownedId}.md`);
+    await writeFile(unownedSource, "pre-existing", "utf8");
+    await mkdir(join(env.targetDir, "markdown", unownedId), { recursive: true });
+    await writeFile(unownedMarkdown, "# pre-existing", "utf8");
+    const unmountedTransferId = "dddddddddddddd01";
+    const unmountedJournal = {
+      ...journal,
+      transferId: unmountedTransferId,
+      newId: unownedId,
+      newSourceName: `${unownedId}.pdf`,
+      mounted: false,
+      files: {
+        stagedSource: `.transfer/${unmountedTransferId}/sources/${unownedId}.pdf`,
+        stagedMarkdown: `.transfer/${unmountedTransferId}/markdown/${unownedId}`,
+        targetSource: `sources/${unownedId}.pdf`,
+        targetMarkdown: `markdown/${unownedId}`,
+      },
+    };
+    await writeJournalFile(env.kbRoot, unmountedJournal);
+    await discardAttempt(env.kbRoot, env.targetDir, unmountedJournal);
+    assert.equal(await readFile(unownedSource, "utf8"), "pre-existing", "未落位文件不能被删除");
+    assert.equal(await readFile(unownedMarkdown, "utf8"), "# pre-existing", "未落位正文不能被删除");
+    assert.deepEqual(await journalsIn(env.kbRoot), []);
+
+    // 即使 journal 误标 mounted，目标清单已有同 id 文档时也必须保留。
+    const mountedJournal = { ...journal, transferId: "bbbbbbbbbbbbbbbb", mounted: true };
+    await writeJournalFile(env.kbRoot, mountedJournal);
+    await discardAttempt(env.kbRoot, env.targetDir, mountedJournal);
+    assert.deepEqual(await readFile(targetSource), sourceBytes, "冲突文档的文件仍未被删除");
+    assert.equal((await docOf(env.targetDir, "dup")).id, existing.id);
+    assert.deepEqual(await journalsIn(env.kbRoot), []);
+
+    // sweep 同样要保留（没有 mounted 标记的旧 journal 也走同一条冲突复核）。
+    const sweepJournal = { ...journal, transferId: "cccccccccccccccc", mounted: false };
+    await writeJournalFile(env.kbRoot, sweepJournal);
+    await sweepTransfers(env.kbRoot);
+    assert.deepEqual(await readFile(targetSource), sourceBytes);
+    assert.equal(await readFile(targetMarkdown, "utf8"), markdownBefore);
+    assert.deepEqual(await journalsIn(env.kbRoot), []);
+  } finally {
+    await rm(env.root, { recursive: true, force: true });
+  }
+});
+
+test("discardAttempt removes target files only for its own mounted copies", async () => {
+  const env = await makeEnv();
+  try {
+    const transferId = "dddddddddddddddd";
+    const journal = {
+      version: 1,
+      transferId,
+      sourceKb: SRC,
+      targetKb: TGT,
+      docId: "s1",
+      sourceTitle: "自己的副本",
+      newId: "fresh001",
+      title: "自己的副本",
+      sourceFile: "s1.pdf",
+      newSourceName: "fresh001.pdf",
+      ext: ".pdf",
+      stage: "staged",
+      mounted: true,
+      files: {
+        stagedSource: `.transfer/${transferId}/sources/fresh001.pdf`,
+        stagedMarkdown: `.transfer/${transferId}/markdown/fresh001`,
+        targetSource: "sources/fresh001.pdf",
+        targetMarkdown: "markdown/fresh001",
+      },
+      at: "2026-01-01T00:00:00.000Z",
+    };
+    await writeJournalFile(env.kbRoot, journal);
+    await mkdir(join(env.targetDir, "sources"), { recursive: true });
+    await writeFile(join(env.targetDir, "sources", "fresh001.pdf"), "mounted");
+    await mkdir(join(env.targetDir, "markdown", "fresh001"), { recursive: true });
+    await writeFile(join(env.targetDir, "markdown", "fresh001", "fresh001.md"), "# mounted");
+
+    await discardAttempt(env.kbRoot, env.targetDir, journal);
+    assert.equal(existsSync(join(env.targetDir, "sources", "fresh001.pdf")), false);
+    assert.equal(existsSync(join(env.targetDir, "markdown", "fresh001")), false);
+    assert.deepEqual(await journalsIn(env.kbRoot), []);
+    assert.deepEqual(await stagingIn(env.targetDir), []);
   } finally {
     await rm(env.root, { recursive: true, force: true });
   }
@@ -595,6 +806,63 @@ test("preflight sweeps stale journals before checking conflicts", async () => {
     assert.equal(result.docs[0].conflict, null);
     assert.deepEqual(await journalsIn(env.kbRoot), []);
     assert.deepEqual(await stagingIn(env.targetDir), []);
+  } finally {
+    await rm(env.root, { recursive: true, force: true });
+  }
+});
+
+test("sweep and discard ignore journal paths outside sources/ and markdown/", async () => {
+  const env = await makeEnv();
+  try {
+    await mkdir(join(env.targetDir, "markdownish"), { recursive: true });
+    await writeFile(join(env.targetDir, "markdownish", "keep.txt"), "keep", "utf8");
+    await mkdir(join(env.targetDir, "markdown"), { recursive: true });
+    await writeFile(join(env.targetDir, "markdown", "keep.txt"), "keep", "utf8");
+    const manifestBefore = await readFile(join(env.targetDir, "kb.json"), "utf8");
+
+    const transferId = "eeeeeeeeeeeeeeee";
+    const unsafeJournal = {
+      version: 1,
+      transferId,
+      sourceKb: SRC,
+      targetKb: TGT,
+      docId: "s1",
+      sourceTitle: "越界路径",
+      newId: "evil001",
+      title: "越界路径",
+      stage: "staged",
+      mounted: false,
+      files: {
+        stagedSource: `.transfer/${transferId}/sources/evil001.pdf`,
+        stagedMarkdown: `.transfer/${transferId}/markdown/evil001`,
+        // 伪造 journal：指向库清单与普通目录，sweep 不得删除。
+        targetSource: "kb.json",
+        targetMarkdown: "markdownish",
+      },
+      at: "2026-01-01T00:00:00.000Z",
+    };
+    await writeJournalFile(env.kbRoot, unsafeJournal);
+    await sweepTransfers(env.kbRoot);
+    assert.equal(await readFile(join(env.targetDir, "kb.json"), "utf8"), manifestBefore);
+    assert.equal(existsSync(join(env.targetDir, "markdownish", "keep.txt")), true);
+    assert.deepEqual(await journalsIn(env.kbRoot), []);
+
+    // discardAttempt 的 mounted 清理同样只能碰 sources/ 与 markdown/。
+    const discardJournal = {
+      ...unsafeJournal,
+      transferId: "ffffffffffffffff",
+      mounted: true,
+      files: {
+        ...unsafeJournal.files,
+        targetSource: "kb.json",
+        targetMarkdown: "markdown",
+      },
+    };
+    await writeJournalFile(env.kbRoot, discardJournal);
+    await discardAttempt(env.kbRoot, env.targetDir, discardJournal);
+    assert.equal(await readFile(join(env.targetDir, "kb.json"), "utf8"), manifestBefore);
+    assert.equal(await readFile(join(env.targetDir, "markdown", "keep.txt"), "utf8"), "keep");
+    assert.deepEqual(await journalsIn(env.kbRoot), []);
   } finally {
     await rm(env.root, { recursive: true, force: true });
   }

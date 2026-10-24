@@ -10,7 +10,7 @@ import {
 } from "../ui/views/detail.js";
 import {
   conflictGroups, deleteConfirmBody, deleteConfirmCheck, moveConfirmState,
-  renderDocModalBody, renderMoveResult, renderMoveSummary, retryFailedDoc, waitForJob,
+  moveTargetChange, renderDocModalBody, renderMoveResult, renderMoveSummary, retryFailedDoc, waitForJob,
 } from "../ui/views/modals.js";
 
 const icons = { upload: "", archive: "", search: "", chevron: "", database: "" };
@@ -260,6 +260,22 @@ test("moveConfirmState 在目标/预检/勾选/忙碌之间正确禁用", () => 
   assert.match(moveConfirmState({ ...ready, loading: true }).reason, /预检/);
   assert.match(moveConfirmState({ ...ready, busy: true }).reason, /移动/);
   assert.match(moveConfirmState({ ...ready, error: "目标库已合并" }).reason, /预检失败/);
+});
+
+test("切换移动目标会重置确认勾选", () => {
+  assert.deepEqual(
+    moveTargetChange({ target: "乙库", previousTarget: "甲库", ack: true }),
+    { target: "乙库", ack: false }
+  );
+  assert.deepEqual(
+    moveTargetChange({ target: "甲库", previousTarget: "甲库", ack: true }),
+    { target: "甲库", ack: true },
+    "目标未变时保留勾选"
+  );
+  assert.deepEqual(
+    moveTargetChange({ target: "", previousTarget: "甲库", ack: true }),
+    { target: "", ack: false }
+  );
 });
 
 test("renderMoveSummary 显示篇数、大小与目标，并转义错误", () => {

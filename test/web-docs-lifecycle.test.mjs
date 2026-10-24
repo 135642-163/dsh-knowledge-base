@@ -113,6 +113,7 @@ async function setup() {
       status: "importing",
       sourceFile: "doc3.pdf",
       version: 0,
+      updatedAt: new Date().toISOString(),
     },
     {
       id: "doc4",
@@ -122,6 +123,15 @@ async function setup() {
       sourceFile: "doc4.pdf",
       error: "原件读取失败",
       version: 0,
+    },
+    {
+      id: "doc6",
+      title: "卡死导入中",
+      type: "pdf-text",
+      status: "importing",
+      sourceFile: "doc6.pdf",
+      version: 0,
+      updatedAt: new Date(Date.now() - 31 * 60_000).toISOString(),
     }
   );
   await writeManifestAtomic(dir, manifest);
@@ -271,6 +281,22 @@ test("delete/restore map conflicts and missing docs to 404/409", async () => {
 test("permanent delete requires the exact trimmed title and removes all artifacts", async () => {
   const { kbRoot, dir } = await setup();
 
+  // 未删除（回收站外）的资料不能彻底删除——即使标题确认正确。
+  const live = await call({ kbRoot }, makeReq({
+    method: "POST",
+    url: docUrl("doc1", "delete"),
+    body: { permanent: true, confirm: "电压偏差" },
+  }));
+  assert.equal(live.res.status, 409);
+  assert.equal(live.json.error.code, "DOC_NOT_DELETED");
+  assert.equal(live.json.error.message, "彻底删除只能从回收站发起");
+  assert.ok(await docOf(dir, "doc1"));
+
+  // 先软删除，再验证逐字标题确认。
+  const soft = await call({ kbRoot }, makeReq({ method: "POST", url: docUrl("doc1", "delete"), body: {} }));
+  assert.equal(soft.res.status, 200);
+  assert.equal(soft.json.soft, true);
+
   const wrong = await call({ kbRoot }, makeReq({
     method: "POST",
     url: docUrl("doc1", "delete"),
@@ -314,6 +340,68 @@ test("permanent delete requires the exact trimmed title and removes all artifact
   // 其他文档不受影响。
   assert.ok(await docOf(dir, "doc2"));
   assert.equal(existsSync(join(dir, "sources", "doc2.txt")), true);
+});
+
+test("stale importing docs are the only live docs that can be permanently deleted", async () => {
+  const { kbRoot, dir } = await setup();
+
+  // 新导入中：软删与永久删都 409。
+  for (const body of [{}, { permanent: true, confirm: "导入中" }]) {
+    const fresh = await call({ kbRoot }, makeReq({
+      method: "POST",
+      url: docUrl("doc3", "delete"),
+      body,
+    }));
+    assert.equal(fresh.res.status, 409, JSON.stringify(body));
+    assert.equal(fresh.json.error.code, "DOC_IMPORTING");
+  }
+  assert.ok(await docOf(dir, "doc3"));
+
+  // 31 分钟没有更新的导入中：永久删的逃生口，但仍需标题逐字确认。
+  const staleWrong = await call({ kbRoot }, makeReq({
+    method: "POST",
+    url: docUrl("doc6", "delete"),
+    body: { permanent: true, confirm: "错误标题" },
+  }));
+  assert.equal(staleWrong.res.status, 400);
+  assert.equal(staleWrong.json.error.code, "CONFIRM_REQUIRED");
+  assert.ok(await docOf(dir, "doc6"));
+
+  const staleSoft = await call({ kbRoot }, makeReq({ method: "POST", url: docUrl("doc6", "delete"), body: {} }));
+  assert.equal(staleSoft.res.status, 409);
+  assert.equal(staleSoft.json.error.code, "DOC_IMPORTING");
+
+  const staleOk = await call({ kbRoot }, makeReq({
+    method: "POST",
+    url: docUrl("doc6", "delete"),
+    body: { permanent: true, confirm: "卡死导入中" },
+  }));
+  assert.equal(staleOk.res.status, 200);
+  assert.equal(staleOk.json.removed, true);
+  assert.equal(await docOf(dir, "doc6"), null);
+});
+
+test("reparse default impl reports a path-free retry failure", async () => {
+  const { kbRoot, dir } = await setup();
+  await writeFile(join(dir, "sources", "doc5.xyz"), "not a supported document", "utf8");
+  const manifest = await readManifest(dir);
+  manifest.docs.push({
+    id: "doc5",
+    title: "坏格式资料",
+    type: "pdf-text",
+    status: "failed",
+    sourceFile: "doc5.xyz",
+    version: 0,
+  });
+  await writeManifestAtomic(dir, manifest);
+
+  const jobs = createJobRegistry();
+  const result = await call({ kbRoot, jobs }, makeReq({ method: "POST", url: docUrl("doc5", "reparse") }));
+  assert.equal(result.res.status, 202);
+  const job = await waitSettled(jobs, result.json.jobId);
+  assert.equal(job.status, "failed");
+  assert.equal(job.detail, "重试失败：坏格式资料");
+  assert.equal(job.detail.includes(kbRoot), false);
 });
 
 test("reparse starts a kb-reparse job with the doc and stored source", async () => {

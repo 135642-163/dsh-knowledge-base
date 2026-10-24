@@ -367,7 +367,7 @@ ctx.systemPrompt.section({
 
 ## 15. 测试计划
 
-### 15.1 自动化（`node:test`；0.21.0 新增 188 例，312 → **500**；0.21.1 复审后 **508**；0.22.0 **620**；0.23.0 **722**——见 §15.3、§15.4 与 §21.8、§22.7）
+### 15.1 自动化（`node:test`；0.21.0 新增 188 例，312 → **500**；0.21.1 复审后 **508**；0.22.0 **620**；0.23.0 **730**——见 §15.3、§15.4 与 §21.8、§22.7）
 
 - `scope-store.test.mjs`（17）：**文件层**——缺失文件读空、原子写 + `0600`、进程内串行队列（20 并发）、mutator 返回 falsy 时不写盘、同步视图 mtime+size 缓存与冻结视图、损坏/超限文件（读空、拒写 `SCOPE_UNUSABLE`）、清理回写只在变化时发生、`removeScopeKb`/`renameScopeKb` 库名同步、未知条目字段保留。sessionId 校验、mode/kbs 结构校验、50 上限、TTL 过期与失效库 prune、归档/合并判定由 `scope.test.mjs` / `scope-api.test.mjs` 覆盖。
 - `scope.test.mjs`（37）：条目归一化/50 上限/非法 sessionId、子会话快照 + `inheritedFrom`、父无条目 → all、父变化不回溯、只读解析（GET）不落快照、写失败降级为只读解析、`setScope` 严格校验（不存在/归档/合并）、`resolveSingleKb`/`resolveDocTarget` 单测（含软删除与虚拟文档）。
@@ -412,14 +412,15 @@ ctx.systemPrompt.section({
   `web-http.test.mjs` 5 → 6（`serveFile` 读流错误销毁响应）。
 - 全部用例使用临时目录，不依赖本机知识库；`check:client` / `check-ui` 为独立门禁，不计入用例数。
 
-### 15.4 0.23.0 新增与变更用例（`npm test` 722/722）
+### 15.4 0.23.0 新增与变更用例（`npm test` 730/730）
 
-- 0.22.0（`afe344d`）基线 **620**；0.23.0 净增 **102** 例：新增文件 88 例，现有文件 +14 例。
+- 0.22.0（`afe344d`）基线 **620**；0.23.0 净增 **110** 例：新增文件 88 例，现有文件 +22 例
+  （含发布前终审补的 8 例）。
 - 新增文件：
-  - `web-docs-lifecycle.test.mjs`（9）：delete 默认软删、`permanent` 需 `confirm` 精确匹配标题（400）、导入中 409、不存在 404；restore 回到 `deletedFromStatus`（failed 保持 failed）；reparse 仅 failed（409）、原件缺失 409、202 + `kb-reparse` 任务；列表/详情 `error`/`sourceFile`/`errorAt`/`movedTo` 投影；POST 的 `x-kb-ui` 与同源校验。
-  - `transfer.test.mjs`（14）：预检去重/大小/三类冲突；同库、不存在、已合并目标、非 ready/已删除、原件缺失拒绝；`MAX_MOVE_DOCS=50` 与 `MAX_MOVE_BYTES=500 MB` 上限；move 复制文件、写目标清单、软删源文档且保留文件；skip 默认（两边不动）与 rename（标题/同 ID 让路、同内容仍跳过）；单篇失败不影响批次；undo 恢复源库并软删目标副本、目标副本被改/删时拒绝；sweep 处理「目标已提交/未提交/伪造 transferId/损坏 journal」与预检前清理。
+  - `web-docs-lifecycle.test.mjs`（11）：delete 默认软删、`permanent` 需 `confirm` 精确匹配标题（400）且只能在回收站发起（409 `DOC_NOT_DELETED`）、导入中软删 409、31 分钟卡死导入可用永久删逃生口、不存在 404；默认重试实现失败只报「重试失败：<标题>」；restore 回到 `deletedFromStatus`（failed 保持 failed）；reparse 仅 failed（409）、原件缺失 409、202 + `kb-reparse` 任务；列表/详情 `error`/`sourceFile`/`errorAt`/`movedTo` 投影；POST 的 `x-kb-ui` 与同源校验。
+  - `transfer.test.mjs`（19）：预检去重/大小/三类冲突；同库、不存在、已合并目标、非 ready/已删除、原件缺失拒绝；`MAX_MOVE_DOCS=50` 与 `MAX_MOVE_BYTES=500 MB` 上限；move 复制文件、写目标清单、软删源文档且保留文件；skip 默认（两边不动）与 rename（标题/同 ID 让路、同内容仍跳过）；单篇失败不影响批次；undo 恢复源库并软删目标副本、目标副本被 edited/version 改过或状态变化时拒绝；commit-skip 不删既有目标文件、mounted 清理语义；sweep 处理「目标已提交/未提交/伪造 transferId/损坏 journal/越界路径」与预检前清理。
   - `web-docs-move.test.mjs`（4）：preflight/move/undo 三条路由的往返；`TransferError` → 404/409/413 映射；50 篇上限的 HTTP 413；POST 的 `x-kb-ui` 与同源校验且不回传 `kbRoot`。
-  - `ui-docs-actions.test.mjs`（25）：仅 ready/failed 可勾选、全选/补齐/取消、已删除行无复选框、工具条三操作与 busy 禁用、`已删除` 筛选与空状态、行内操作矩阵（失败=重试+移除、就绪=移除、已删除=恢复/撤销移动+彻底删除）、彻底删除逐字比较与空标题拒绝、冲突分组、移动确认状态、预检摘要、结果分组与转义、失败弹窗 error/warnings/重试、`waitForJob` 轮询/立即结算/超时 `REPARSE_TIMEOUT`、`retryFailedDoc` 通知与缺 jobId。
+  - `ui-docs-actions.test.mjs`（26）：仅 ready/failed 可勾选、全选/补齐/取消、已删除行无复选框、工具条三操作与 busy 禁用、`已删除` 筛选与空状态、行内操作矩阵（失败=重试+移除、就绪=移除、已删除=恢复/撤销移动+彻底删除）、彻底删除逐字比较与空标题拒绝、冲突分组、移动确认状态、切换目标重置确认、预检摘要、结果分组与转义、失败弹窗 error/warnings/重试、`waitForJob` 轮询/立即结算/超时 `REPARSE_TIMEOUT`、`retryFailedDoc` 通知与缺 jobId。
   - `ui-overview.test.mjs`（12）：每卡只有一条类型条、不再有可信度比例条；分段只为非零类型、宽度合计 100%；低饱和配色与未知类型回落；类型条 title/aria-label；可信度圆点只渲染非零项、颜色与完整 title；全零不占位；空库占位条；名称转义与样式约定。
   - `office-install.test.mjs`（16）：平台→引擎包映射与未知平台；安装目录默认 `~/.dsh/tools/libreoffice-kit` 与 `DSH_OFFICE_KIT_HOME`；工具链探测（DSH 自带 pnpm → `DSH_PNPM` → PATH）；`buildInstallPlan` 锁定 `0.2.2`；写 package.json + `add --ignore-scripts` + `capabilities` 校验；缺包管理器/非零退出/超时杀进程组/校验失败的错误码与固定文案；并发单飞；状态缓存 5 秒与 `running`；`DSH_OFFICE_KIT_HOME` 影响 `resolveOfficeCli`/status。
   - `web-office-api.test.mjs`（8）：`GET /office/status` 注入状态；`POST /office/install` 必须显式 `confirm`；202 + `office-install` 任务成功/失败；已安装短路 200 `alreadyInstalled`；并发安装 409；缺 Node/npm 409；UI 头与同源校验。
@@ -666,7 +667,7 @@ ctx.systemPrompt.section({
 
 ## 22. 0.23.0 资料治理与失败处理
 
-> 版本 0.23.0（基线 0.22.0 / `npm test` 620；本版 **722**，见 §15.4、§22.7）。
+> 版本 0.23.0（基线 0.22.0 / `npm test` 620；本版 **730**，见 §15.4、§22.7）。
 > 本轮补齐工作台的资料生命周期（软删除/恢复/彻底删除）、同根目录内的跨库安全移动与撤销、
 > 失败资料重试；总览卡片改为「单条类型条 + 可信度圆点」方案 B；Office 原件预览增加一键安装
 > LibreOfficeKit 转换引擎（需用户显式同意）。
@@ -679,17 +680,21 @@ ctx.systemPrompt.section({
 
 | 方法 / 路由 | 请求体 | 成功响应 | 主要错误 |
 |---|---|---|---|
-| `POST /kb/api/kbs/:name/docs/:id/delete` | `{permanent?: boolean, confirm?: string}` | 软删 `200 {docId, deletedAt, soft: true}`；永久删 `200 {docId, removed: true}` | `404 DOC_NOT_FOUND`、`409 DOC_IMPORTING`、`409 DOC_DELETED`、`400 CONFIRM_REQUIRED` |
+| `POST /kb/api/kbs/:name/docs/:id/delete` | `{permanent?: boolean, confirm?: string}` | 软删 `200 {docId, deletedAt, soft: true}`；永久删 `200 {docId, removed: true}` | `404 DOC_NOT_FOUND`、`409 DOC_IMPORTING`、`409 DOC_NOT_DELETED`、`409 DOC_DELETED`、`400 CONFIRM_REQUIRED` |
 | `POST /kb/api/kbs/:name/docs/:id/restore` | — | `200 {doc}`（`readDoc` 投影） | `404 DOC_NOT_FOUND`、`409 DOC_NOT_DELETED`、`409 DOC_CONTENT_MISSING` |
 | `POST /kb/api/kbs/:name/docs/:id/reparse` | — | `202 {jobId}` | `404 DOC_NOT_FOUND`、`409 DOC_NOT_FAILED`、`409 SOURCE_MISSING` |
 
 - **删除**：`permanent !== true` 即软删除，走 `store.softDeleteDoc`——只把清单项改为 `status: "deleted"`，
   记 `deletedAt` 与 `deletedFromStatus`，原件、`markdown/<id>/`、`history/<id>/` 全部保留；`error` 字段
   也原样保留。允许 `ready` 与 `failed`，拒绝 `importing`（避免半成品进回收站）与已删除。接口在调用前
-  再判一次 `importing`（`409 DOC_IMPORTING`，文案「文档正在导入，暂不能删除」）。
+  再判一次 `importing`（`409 DOC_IMPORTING`，文案「文档正在导入，暂不能删除」）；**软删除始终拒绝导入中**。
 - **彻底删除**：必须 `body.permanent === true`，且 `String(confirm).trim()` 与 `doc.title.trim()` 逐字相等，
   否则 `400 CONFIRM_REQUIRED`（附标题）。`store.removeDoc` 删除清单项 + `markdown/<id>/` + `history/<id>/`
-  + `sources/<id>*`；不可恢复。
+  + `sources/<id>*`；不可恢复。**只允许从回收站发起**：非导入中且 `isDeleted(doc) === false` 时
+  `409 DOC_NOT_DELETED`（文案「彻底删除只能从回收站发起」）。
+  唯一例外是卡死的导入中任务：`status === "importing"` 且 `Date.now() - Date.parse(updatedAt) > 30 分钟`
+  （或 `updatedAt` 缺失/非法）时允许永久删除，作为清理半成品的逃生口；未满 30 分钟仍
+  `409 DOC_IMPORTING`，且同样需要标题逐字确认。
 - **恢复**：要求 `markdown/<id>/` 仍存在（否则 `409 DOC_CONTENT_MISSING`）；状态回到
   `deletedFromStatus === "failed" ? "failed" : "ready"`（旧清单没有该字段时按 `ready`，兼容 0.9.0 以来的
   软删除），清掉 `deletedAt` / `deletedFromStatus`。
@@ -698,7 +703,8 @@ ctx.systemPrompt.section({
   `label: "重试 <库>: <标题>"`，`202 {jobId}`；任务里调用 `importFileInto({sourcePath, relKey, title,
   docId, sourceFile, storedSourcePath, forceReparse: true})` 从已存原件重跑完整解析，`finally` 刷新
   `index.md`，成功返回 `{status: "succeeded", detail: "重试完成：<标题>", result}`。任务进度仍用既有
-  `GET /kb/api/jobs/:id` 轮询。
+  `GET /kb/api/jobs/:id` 轮询。默认实现失败时任务详情固定为 `重试失败：<标题>`（不带任何绝对路径），
+  且 `index.md` 刷新失败不会把一个已成功的重试改判为失败。
 - **日志与索引**：软删 / 永久删各写一条 `remove`（detail「软删除」/「永久删除」），恢复写 `restore`；
   三种操作之后都 `refreshKbIndex`（重试由导入收尾刷新）。
 - **投影**：`listDocs` 增加 `error`、`sourceFile`、`movedTo`（无移动为 `null`）与既有 `deleted`；
@@ -759,10 +765,13 @@ ctx.systemPrompt.section({
    `newId`、标题、源文件名、暂存与目标相对路径、`stage`（`staging` → `staged` → `target-done` →
    `source-done`）；写入用临时文件 + rename 原子落盘。
 3. **目标提交**（持目标库清单锁）：重新判 ID → 同内容 → 同标题；必要时把暂存文件改到新 id；
-   改暂存合并版 markdown 的标题行与文件名（`<docId>.md` → `<newId>.md`）；`mountStaged` 把暂存
-   文件 rename 到正式 `sources/` / `markdown/`；把条目 push 进目标清单（`status: "ready"`，
-   带 `sourceFile`、`storedSourcePath`、`transferId`、`movedFrom`，**删除 `history` 字段**），
-   最后才 `writeManifestAtomic`——写成功即视为目标侧已提交。
+   改暂存合并版 markdown 的标题行与文件名（`<docId>.md` → `<newId>.md`）；**落位前先把
+   `journal.mounted = true` 写盘**，再由 `mountStaged` 把暂存文件 rename 到正式 `sources/` /
+   `markdown/`；把条目 push 进目标清单（`status: "ready"`，带 `sourceFile`、`storedSourcePath`、
+   `transferId`、`movedFrom`（含移动时的源文档 `version`；目标条目从该版本开始）与条目自身的
+   `version`，**删除 `history` 字段**），最后才 `writeManifestAtomic`——写成功即视为目标侧已提交。
+   落位前任何失败都只清暂存；`discardAttempt` 只有在 `mounted === true` 且目标清单没有同 id 文档时
+   才删除 journal 记录的目标路径，因此 commit 阶段才判出的 id 冲突（skip）不会误删既有文档。
 4. **源库收尾**（持源库清单锁）：文档仍需 `ready`（否则回滚目标条目与文件并抛
    `TRANSFER_SOURCE_CHANGED`）；写 `status: "deleted"`、`deletedAt`、`deletedFromStatus`、
    `movedTo: {kb: target, docId: newId, transferId, at}`，原子写清单。
@@ -772,16 +781,20 @@ ctx.systemPrompt.section({
   - 目标清单里已有该 `transferId`：幂等补齐源文档的 `deleted` + `movedTo`（仅在源文档仍存在时），
     清暂存目录与 journal，写一条「崩溃恢复」日志；
   - 目标清单没有：删除 journal 记录过的目标路径（若目标库没有占用该 `newId`）与暂存目录，再删 journal；
-  - 损坏的 journal 不猜、跳过；`transferId` 必须是 `^[0-9a-f]{8,64}$`，文件路径必须是相对路径且不含
-    `..`，避免伪造 journal 越界删文件。
+  - 损坏的 journal 不猜、跳过；`transferId` 必须是 `^[0-9a-f]{8,64}$`，`targetSource` 必须位于
+    `sources/` 下、`targetMarkdown` 必须位于 `markdown/` 下（相对路径、不含 `..`、不能是目录根本身），
+    避免伪造 journal 越界删文件；不满足的路径直接忽略，只清暂存与 journal。
 - **并发**：同一 `kbRoot` 的 move/undo 用进程内根锁串行；每个库的清单写入另有 `withManifestLock`。
   不同 `kbRoot` 互不影响。
 
 #### 22.2.5 撤销移动
 
 - 前置：源文档存在且已删除、`movedTo.kb === target`；目标副本存在、未删除、`status === "ready"` 且
-  `transferId` 与 `movedTo.transferId` 一致；任一不满足 → `409 TRANSFER_UNDO_UNAVAILABLE`（目标副本
-  被改/删就拒绝，避免覆盖用户在目标库里的新内容）。
+  `transferId` 与 `movedTo.transferId` 一致；目标副本还不能被改过——`targetDoc.edited === true` 或
+  `targetDoc.version !== movedFrom.version`（移动提交时记录源文档版本，默认 1；目标条目从该版本开始，
+  任何 `kb_edit`/`touchDoc` 都会递增 version）同样拒绝。任一不满足 → `409 TRANSFER_UNDO_UNAVAILABLE`
+  （被改/删就拒绝，避免覆盖用户在目标库里的新内容；version 被改时的文案为「目标副本已被修改，无法
+  撤销移动」）。
 - 顺序：**先**把目标副本软删除（`deletedFromStatus: "ready"`、`movedFromUndo: true`），**再**恢复源文档
   （`failed` 则回 `failed`，否则 `ready`；删除 `deletedAt` / `deletedFromStatus` / `movedTo`）。源库恢复
   失败时把目标副本回滚为原状态，避免两边都被删。
@@ -814,10 +827,10 @@ ctx.systemPrompt.section({
 - `ui/views/overview.js` 的 `typeBar(types)`：**只渲染一条** `.bar`，按非零类型篇数分段（宽度百分比、
   颜色见 `TYPE_COLORS`，未知类型回落灰色），`role="img"`，`title`/`aria-label` 为
   「类型 pdf-text 3 · docx 1」；全部为零时渲染 `.bar.empty` 的中性空条。旧的可信度比例条删除。
-- `trustDots(trust)`：一行 `.trust-dots`，行首 `<span class="trust-label muted">可信度</span>`（`6446e83`
-  补入），随后按高/中/低/未知顺序只渲染非零档的 `● N`；圆点颜色 `TRUST_COLORS`，单项
-  `title`/`aria-label`「高 3」，整行 `title`/`aria-label` 给四档完整计数「可信度：高 3 · 中 2 · 低 1 ·
-  未知 0」；四档全为零时整行不渲染。
+- `trustDots(trust)`：一行 `.trust-dots`（`role="group"`，行级 `aria-label` 给完整计数），行首
+  `<span class="trust-label muted">可信度</span>`（`6446e83` 补入），随后按高/中/低/未知顺序只渲染
+  非零档的 `● N`；圆点颜色 `TRUST_COLORS`，单项 `role="img"`，`title`/`aria-label`「高 3」，整行
+  `title`/`aria-label` 给四档完整计数「可信度：高 3 · 中 2 · 低 1 · 未知 0」；四档全为零时整行不渲染。
 - 样式：`.bar` / `.bar i`（胶囊分段）、`.trust-dots`、`.trust-label`、`.trust-dot`、`.trust-dot-mark`；
   不再有第二条可信度比例条。
 
@@ -874,7 +887,8 @@ ctx.systemPrompt.section({
 - 移动弹窗：目标下拉排除当前库与已合并库；选择目标立即预检（请求代号丢弃晚到的旧响应）；显示
   「将移动 N 篇（约 X MB）到「目标」」+ 冲突分组（同 ID / 同内容 / 同标题）；有冲突时才启用
   「跳过 / 重命名为副本」；必须勾选「我已了解：移动=复制到目标库并软删除源库文档，可在源库回收站
-  撤销」才能点「开始移动」；结果页分组显示已移动 / 已跳过（原因）/ 失败（原因），并提供「撤销全部
+  撤销」才能点「开始移动」，**切换目标库会重置该勾选并重新预检**；结果页分组显示已移动 / 已跳过
+  （原因）/ 失败（原因），并提供「撤销全部
   已移动」（逐篇撤销、显示进度与失败清单）。
 - 失败重试：行内“重试中…”与弹窗“正在重新解析，最长等待约 2 分钟…”两个入口共用同一轮询逻辑；
   结算后刷新库列表、详情与计数。
@@ -883,17 +897,22 @@ ctx.systemPrompt.section({
 
 ### 22.7 测试
 
-- `npm test`：**722/722** 通过（0.22.0 基线 620，净增 102：新增文件 88 例、现有文件 +14 例），
-  含 `check:client` 与 `check-ui`；逐文件明细见 §15.4。
+- `npm test`：**730/730** 通过（0.22.0 基线 620，净增 110：新增文件 88 例、现有文件 +22 例，
+  其中发布前终审补 8 例），含 `check:client` 与 `check-ui`；逐文件明细见 §15.4。
 - `npm run typecheck`、`npm run check:client`、`node scripts/check-ui.mjs` 全绿。
-- 重点覆盖：软删/恢复原状态/彻底删除标题确认/导入中拒绝、reparse 任务与失败投影、跨库预检与三类
-  冲突、skip/rename（同内容始终跳过）、50 篇/500 MB 上限、逐篇事务与部分失败、撤销（目标副本被改
-  时拒绝）、journal 崩溃恢复与不可信 journal、删除/移动/重试 UI、类型条 + 可信度圆点、Office 状态与
+- 重点覆盖：软删/恢复原状态/彻底删除标题确认（含「只能从回收站发起」409 与 31 分钟卡死导入的
+  永久删逃生口）、reparse 任务与失败投影（默认实现失败文案不含路径）、跨库预检与三类冲突、
+  skip/rename（同内容始终跳过）、commit 阶段 id 冲突不误删既有文档、50 篇/500 MB 上限、
+  逐篇事务与部分失败、撤销（目标副本被 edited/version 改过时拒绝）、journal 崩溃恢复与不可信
+  journal（含路径白名单）、删除/移动/重试 UI、类型条 + 可信度圆点（group/img 语义）、Office 状态与
   一键安装（同意/已装/缺工具链/后台任务/capabilities 校验/超时杀进程）。
+- 发布前终审补 8 例：`transfer.test.mjs` +5（commit-skip 保留既有文件、mounted 清理、edited/version
+  撤销拒绝、journal 越界路径、源文档 version>1 的撤销往返）、`web-docs-lifecycle.test.mjs` +2
+  （回收站外 409 / 卡死导入逃生口、重试失败文案）、`ui-docs-actions.test.mjs` +1（切换目标重置确认）。
 
 ### 22.8 验收记录（2026-10-25）
 
-- [x] 自动化：`npm test` **722/722**（含 `check:client`、`check-ui`）；`npm run typecheck`、
+- [x] 自动化：`npm test` **730/730**（含 `check:client`、`check-ui`）；`npm run typecheck`、
   `npm run check:client`、`node scripts/check-ui.mjs` 均通过。
 - [x] 真实宿主（临时 `dsh --profile web --port 55942` + 临时 `kbRoot` + WKWebView 脚本）：
   - 跨库移动：资料 tab 勾选「移动测试文档」→「移动到…」→ 目标「乙库」→ 预检 → 确认 → 结果
@@ -916,13 +935,14 @@ ctx.systemPrompt.section({
   - `screenshot-23-overview-bars.png` 拍摄于 `6446e83` 之前：截图中类型条与可信度圆点已渲染，行首
     「可信度」标签由 `6446e83` 补入，标签渲染经 `renderOverview` 模板检查（输出含
     `<span class="trust-label muted">可信度</span>`）确认；未重新截图。
-- 与 §15 的对应：本轮用例总数在 §15.1 更新为 **722**，逐文件明细补在 §15.4。
+- 与 §15 的对应：本轮用例总数在 §15.1 更新为 **730**，逐文件明细补在 §15.4。
 
 ### 22.9 已知限制与跟进
 
 - 移动仅限同一 `kbRoot`；跨根迁移没有入口。
-- 单批 50 篇 / 500 MB；批量只软删除，彻底删除只能逐篇确认标题。
-- 笔记（无原件）不可移动；历史版本不复制；撤销仅在目标副本仍可用时成立。
+- 单批 50 篇 / 500 MB；批量只软删除，彻底删除只能逐篇确认标题，且只从回收站发起
+  （唯一例外是 `updatedAt` 超过 30 分钟未更新的卡死 importing 文档）。
+- 笔记（无原件）不可移动；历史版本不复制；撤销仅在目标副本仍可用、未被 edited/version 改过时成立。
 - Office 一键安装未做真实下载验收（本机已装引擎）；安装包约 300 MB，弱网/代理环境需人工抽检。
 - 真实浏览器自动化（Playwright）仍未接入；本轮 UI 验收是一次性 WKWebView 脚本。
 - 后续可做：批量彻底删除、笔记移动（需设计无原件语义）、移动时复制历史、跨根迁移、Playwright

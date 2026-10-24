@@ -909,6 +909,15 @@ export function moveConfirmState({ target = "", ack = false, loading = false, bu
   return { disabled: false, reason: "" };
 }
 
+/**
+ * 切换目标库后返回新的表单状态：目标变了必须重新勾选确认（ack=false），
+ * 避免把对甲库的确认沿用到乙库。纯函数，便于单测。
+ */
+export function moveTargetChange({ target = "", previousTarget = "", ack = false } = {}) {
+  const nextTarget = String(target ?? "");
+  return { target: nextTarget, ack: nextTarget !== String(previousTarget ?? "") ? false : ack === true };
+}
+
 /** 预检摘要：将移动 N 篇（约 X MB）到「目标」。 */
 export function renderMoveSummary({ target = "", ids = [], loading = false, error = "", preflight = null } = {}) {
   if (!target) return `<p class="muted move-summary">请选择目标知识库</p>`;
@@ -1099,7 +1108,13 @@ export function openMoveModal({ name, ids = [], kbs = [], notify = () => {}, onD
     const select = node.querySelector("select[name='target']");
     select?.addEventListener("change", () => {
       if (state.busy) return;
-      state.target = select.value;
+      const next = moveTargetChange({
+        target: select.value,
+        previousTarget: state.target,
+        ack: state.ack,
+      });
+      state.target = next.target;
+      state.ack = next.ack;
       state.preflight = null;
       state.error = "";
       void loadPreflight();

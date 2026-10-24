@@ -118,11 +118,11 @@ function trustDots(trust = {}) {
   const entries = TRUST_LEVELS.map((level) => [level, Math.max(0, Number(trust[level]) || 0)]);
   if (entries.every(([, value]) => value === 0)) return "";
   const title = `可信度：${entries.map(([level, value]) => `${TRUST_LABELS[level]} ${value}`).join(" · ")}`;
-  return `<div class="trust-dots" title="${escapeAttr(title)}" aria-label="${escapeAttr(title)}"><span class="trust-label muted">可信度</span>${entries
+  return `<div class="trust-dots" role="group" title="${escapeAttr(title)}" aria-label="${escapeAttr(title)}"><span class="trust-label muted">可信度</span>${entries
     .filter(([, value]) => value > 0)
     .map(([level, value]) => {
       const label = `${TRUST_LABELS[level]} ${value}`;
-      return `<span class="trust-dot" title="${escapeAttr(label)}" aria-label="${escapeAttr(`可信度：${label}`)}"><span class="trust-dot-mark" style="color:${TRUST_COLORS[level]}" aria-hidden="true">●</span>${value}</span>`;
+      return `<span class="trust-dot" role="img" title="${escapeAttr(label)}" aria-label="${escapeAttr(`可信度：${label}`)}"><span class="trust-dot-mark" style="color:${TRUST_COLORS[level]}" aria-hidden="true">●</span>${value}</span>`;
     })
     .join("")}</div>`;
 }

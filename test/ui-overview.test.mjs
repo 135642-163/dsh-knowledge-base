@@ -41,7 +41,7 @@ function segments(html) {
 
 function trustDots(html) {
   return [...html.matchAll(
-    /<span class="trust-dot" title="([^"]+)" aria-label="([^"]+)"><span class="trust-dot-mark" style="color:(#[0-9a-f]{6})" aria-hidden="true">●<\/span>([\d]+)<\/span>/g,
+    /<span class="trust-dot" role="img" title="([^"]+)" aria-label="([^"]+)"><span class="trust-dot-mark" style="color:(#[0-9a-f]{6})" aria-hidden="true">●<\/span>([\d]+)<\/span>/g,
   )].map((match) => ({ title: match[1], ariaLabel: match[2], color: match[3], count: Number(match[4]) }));
 }
 
@@ -111,8 +111,10 @@ test("可信度圆点只渲染非零项，数量、颜色与完整 title 正确"
   assert.deepEqual(dots.map((dot) => dot.color), ["#4f9d69", "#c9a36a", "#b96a6a"]);
   assert.deepEqual(dots.map((dot) => dot.count), [3, 2, 1]);
   // 整行 title 保留全部四档（含零值），方便 hover 看完整拆分。
-  assert.match(html, /class="trust-dots" title="可信度：高 3 · 中 2 · 低 1 · 未知 0"/);
+  assert.match(html, /class="trust-dots" role="group" title="可信度：高 3 · 中 2 · 低 1 · 未知 0"/);
   assert.doesNotMatch(html, /title="未知 0"/);
+  // 圆点行是一个组合，单项是带 aria-label 的图像语义。
+  assert.equal((html.match(/class="trust-dot" role="img"/g) ?? []).length, 3);
 });
 
 test("未知可信度非零时使用灰色圆点", () => {
