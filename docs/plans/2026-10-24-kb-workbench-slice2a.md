@@ -3861,7 +3861,7 @@ git commit -m "feat(ui): add upload modal with per-file progress, retry and job 
 - Modify: `ui/app.js`（`state.std`、加载、动作、轮询清理）
 - Modify: `ui/style.css`
 
-- [ ] **Step 12.1: 写失败测试（渲染纯函数）**
+- [x] **Step 12.1: 写失败测试（渲染纯函数）**
 
 `ui/views/std.js` 的 `renderStdPanel` 依赖 DOM-free 字符串拼接，可在 node 里测。创建 `test/std-view.test.mjs`：
 
@@ -3899,12 +3899,12 @@ test("未配置 cookie 时下载按钮禁用", () => {
 });
 ```
 
-- [ ] **Step 12.2: 运行确认失败**
+- [x] **Step 12.2: 运行确认失败**
 
 Run: `node --test test/std-view.test.mjs`
 Expected: FAIL（`ui/views/std.js` 不存在）。
 
-- [ ] **Step 12.3: 实现 `ui/views/std.js`**
+- [x] **Step 12.3: 实现 `ui/views/std.js`**
 
 ```js
 /** 标准更新面板：纯渲染 + 动作分发（轮询由 app.js 的 state.std.timer 管理）。 */
@@ -3991,7 +3991,7 @@ function stdResultHtml(result, { escapeHtml }) {
 }
 ```
 
-- [ ] **Step 12.4: `ui/views/modals.js` 增加库选择框（确认框 Task 11 已有）**
+- [x] **Step 12.4: `ui/views/modals.js` 增加库选择框（确认框 Task 11 已有）**
 
 > Task 11 已添加 `openConfirmModal`（`body` 默认转义、支持 async onConfirm、requireCheckbox）。这里**不要重复添加**；只补 `openKbPickerModal`，并确认 `openConfirmModal` 的签名/文案满足本任务的金币确认需求。
 
@@ -4043,7 +4043,7 @@ export function openKbPickerModal({ kbs, onPick }) {
 }
 ```
 
-- [ ] **Step 12.5: `ui/views/detail.js` 增加 tab 与面板**
+- [x] **Step 12.5: `ui/views/detail.js` 增加 tab 与面板**
 
 顶部 import：
 
@@ -4065,7 +4065,7 @@ tab 内容区加：
 
 > `escapeHtml` 是本文件已有的局部函数，直接传。
 
-- [ ] **Step 12.6: `ui/views/overview.js` 加「标准更新」入口**
+- [x] **Step 12.6: `ui/views/overview.js` 加「标准更新」入口**
 
 `head-actions` 里加：
 
@@ -4073,7 +4073,7 @@ tab 内容区加：
           <button class="btn" data-action="std-open">标准更新</button>
 ```
 
-- [ ] **Step 12.7: `ui/app.js` 接 state.std 与动作**
+- [x] **Step 12.7: `ui/app.js` 接 state.std 与动作**
 
 1. import 改为：
 
@@ -4215,7 +4215,7 @@ async function startStd(mode) {
   });
 ```
 
-- [ ] **Step 12.8: 补样式**
+- [x] **Step 12.8: 补样式**
 
 ```css
 .std-panel { display: grid; gap: 14px; }
@@ -4225,7 +4225,7 @@ async function startStd(mode) {
 
 （若 `panel`/`panel-grid` 已有样式，复用即可，别重复定义冲突选择器。）
 
-- [ ] **Step 12.9: 跑测试**
+- [x] **Step 12.9: 跑测试**
 
 Run:
 ```bash
@@ -4234,12 +4234,19 @@ npm test
 ```
 Expected: 全通过。
 
-- [ ] **Step 12.10: Commit**
+- [x] **Step 12.10: Commit**
 
 ```bash
 git add ui/views/std.js ui/views/detail.js ui/views/overview.js ui/views/modals.js ui/app.js ui/style.css test/std-view.test.mjs
 git commit -m "feat(ui): add std update panel with coin confirmation and job polling"
 ```
+
+### Task 12 实现修正记录（2026-10-24，已执行）
+
+1. **面板**：`renderStdPanel` DOM-free；登录状态只显示已配置/未配置（含 bzCookie 指引，不显示值）、上次检查、缓存 items/ageDays/有效/TTL、有新版/草案转正/可补下载、仅检查/检查并下载/补下载（configured/running/downloadable 门控）、强制全查/本轮上限、阶段中文（收集/检查/下载/导入）、进度、错误、结果摘要（含 `importFailed`）、entries 表、truncated、`result.hint`、lastJob 本地化；stale-KB 显示加载中。
+2. **生命周期**：1s 轮询 + token + `inFlight(token:job)`；瞬时失败 2s 重试最多 2 次后报错+重试；404 清 key 并 `loadStd` 重同步；`loadStd` 首行 `isStdRoute` 守卫并在每个 await 后复查；settle 后 `refreshKbsQuiet()`（不设置 loading/render）+ 一次最终 render，避免详情页被卸载与 running 闪回；KB 切换清空旧 status/job；409 STD_JOB_RUNNING 提示并重同步。
+3. **确认框**：复用 Task 11 的 `openConfirmModal`（body 转义、requireCheckbox），仅把文案对齐「我已知晓」；新增 `openKbPickerModal`。
+4. **测试 13 条**：真实 escape helper、阶段中文/no collect、starting、downloadable=0、importFailed+hint+authOk+truncated、错误+重试+warning、无缓存、stale KB、恶意字符串转义、TTL/可补下载/lastJob、stdStatusLabel。
 
 ---
 
