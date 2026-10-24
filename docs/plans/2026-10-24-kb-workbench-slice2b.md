@@ -3618,11 +3618,11 @@ Expected: `--ff-only` 成功；HEAD 为 `chore: release 0.21.0 …`，其后还�
   真实一轮模型调用 `kb_list` 在 none 下返回「本会话未启用知识库…」，无库名泄漏。
   截图见 `/Users/littlesun/workspace/deepseek/project/知识库/.acceptance/screenshot-22-*.png`。
 - **验收后小修**：`427cc03`（笔记预览隐藏「下载原件」；Office iframe 载入后移除「正在转换」提示）。
-- **测试**：`npm test` **612/612**（0.21.1 基线 508，净增 104：原有文件 +24、新文件 +80）；
+- **测试**：`npm test` **620/620**（0.21.1 基线 508，净增 112：原有文件 +24、新文件 +80、复审跟进 +8）；
   `npm run typecheck`、`npm run check:client`、`node scripts/check-ui.mjs` 全绿。
   逐文件明细见 spec §15.3，本轮说明见 spec §21。
 - **发布**：版本 0.22.0（`package.json`、`package-lock.json` 根与 `packages[""]`、`lib/version.js`），
-  README 新增 `## 0.22.0 交互完善`，更新配置表（`officeKitCli`）与测试段（612）。
+  README 新增 `## 0.22.0 交互完善`，更新配置表（`officeKitCli`）与测试段（620）。
 - **已知跟进**：
   - 真实浏览器自动化（Playwright）尚未接入，本轮为一次性 WKWebView 脚本验收；
   - Office 预览仅单页 docx 人工验过，大表格/扫描件附件/字体替换与超大文件耗时建议抽检；
