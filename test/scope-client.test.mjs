@@ -4,11 +4,12 @@
  * 计划 Task 12 原来的 stub 用 hook 下标收集 useState/useEffect，但从不执行 effect，
  * 也不因 setState 重渲染——胶囊的加载、面板、应用、toast、Esc、锚定、卸载全都盖不到。
  * 这里按任务要求换成能真正跑 effect 的最小 React 运行时：
- *   - 每个组件实例有稳定的 hook 槽位（state / ref / effect）；
- *   - setState 同步触发重渲染，effect 在渲染提交后运行；
- *   - effect 重跑前、组件卸载时先跑 cleanup；
+ *   - 每个组件实例有稳定的 hook 槽位（state / ref / effect），函数子组件
+ *     （WorkbenchModal / DatabaseIcon）按树中位置拥有独立实例；
+ *   - setState 同步触发重渲染，effect 在整棵树渲染提交后运行；
+ *   - effect 重跑前、组件卸载时先跑 cleanup；一次挂载卸载后可以重新挂载新实例；
  *   - 渲染循环直到没有待处理更新，超过上限直接报错（防止死循环）；
- *   - fetch 用可逐条应答的队列，setTimeout 只记录回调，测试完全确定。
+ *   - fetch 用可逐条应答的队列，createPortal 记录容器，setTimeout 只记录回调。
  */
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -186,6 +187,7 @@ function loadCapsule() {
     focused: [],
     renderCount: 0,
     cleanupsRun: 0,
+    portals: [],
     document: docState.document,
     documentStyles: docState.styles,
     documentListeners: docState.listeners,
@@ -201,18 +203,11 @@ function loadCapsule() {
   };
 
   // ---- 最小 React 运行时：每个组件实例一套稳定 hook 槽位 -------------------
-  const instance = {
-    props: {},
-    hooks: [],
-    tree: null,
-    pending: false,
-    flushing: false,
-    rendering: false,
-    unmounted: false,
-  };
+  // 根组件和它渲染出的函数组件（WorkbenchModal / DatabaseIcon）各有独立实例，
+  // 实例按树中位置寻址；整棵树渲染完再统一提交 effect。
+  let activeInstance = null;
   let component = null;
-  let hookIndex = 0;
-  let pendingEffects = [];
+  let lastSession = null;
 
   function createNode(type, props, key = null) {
     const node = { type, props: props ?? {}, key };
@@ -225,6 +220,11 @@ function loadCapsule() {
     return node;
   }
 
+  function currentInstance() {
+    if (activeInstance === null) throw new Error("hook called outside of a component render");
+    return activeInstance;
+  }
+
   function sameDeps(previous, next) {
     if (previous === undefined || next === undefined) return false;
     if (previous.length !== next.length) return false;
@@ -232,19 +232,20 @@ function loadCapsule() {
   }
 
   function useState(initial) {
-    const index = hookIndex;
-    hookIndex += 1;
+    const instance = currentInstance();
+    const index = instance.hookIndex;
+    instance.hookIndex += 1;
     let slot = instance.hooks[index];
     if (slot === undefined) {
       const value = typeof initial === "function" ? initial() : initial;
       slot = { kind: "state", value };
       slot.setter = (next) => {
-        // React 18 语义：组件卸载后的更新被忽略。
-        if (instance.unmounted) return;
+        // React 18 语义：组件（或它所在的那次挂载）卸载后的更新被忽略。
+        if (instance.unmounted || instance.session.unmounted) return;
         const nextValue = typeof next === "function" ? next(slot.value) : next;
         if (Object.is(nextValue, slot.value)) return;
         slot.value = nextValue;
-        requestRender();
+        requestRender(instance.session);
       };
       instance.hooks[index] = slot;
     }
@@ -253,8 +254,9 @@ function loadCapsule() {
   }
 
   function useRef(initial) {
-    const index = hookIndex;
-    hookIndex += 1;
+    const instance = currentInstance();
+    const index = instance.hookIndex;
+    instance.hookIndex += 1;
     let slot = instance.hooks[index];
     if (slot === undefined) {
       slot = { kind: "ref", current: initial };
@@ -265,14 +267,12 @@ function loadCapsule() {
   }
 
   function useEffect(create, deps) {
-    const index = hookIndex;
-    hookIndex += 1;
-    pendingEffects.push({ index, create, deps });
+    const instance = currentInstance();
+    instance.pendingEffects.push({ index: instance.hookIndex, create, deps });
+    instance.hookIndex += 1;
   }
 
-  function commitEffects() {
-    const effects = pendingEffects;
-    pendingEffects = [];
+  function commitEffects(instance, effects) {
     for (const effect of effects) {
       let slot = instance.hooks[effect.index];
       if (slot === undefined) {
@@ -293,46 +293,8 @@ function loadCapsule() {
     }
   }
 
-  function renderOnce() {
-    runtime.renderCount += 1;
-    hookIndex = 0;
-    pendingEffects = [];
-    instance.rendering = true;
-    try {
-      instance.tree = component(instance.props);
-    } finally {
-      instance.rendering = false;
-    }
-    commitEffects();
-  }
-
-  function flushRenders() {
-    if (instance.flushing) return;
-    instance.flushing = true;
-    try {
-      let rounds = 0;
-      while (instance.pending) {
-        rounds += 1;
-        if (rounds > MAX_RENDER_ROUNDS) {
-          throw new Error(`render loop did not settle after ${MAX_RENDER_ROUNDS} rounds`);
-        }
-        instance.pending = false;
-        renderOnce();
-      }
-    } finally {
-      instance.flushing = false;
-    }
-  }
-
-  function requestRender() {
+  function unmountInstance(instance) {
     if (instance.unmounted) return;
-    instance.pending = true;
-    if (!instance.rendering && !instance.flushing) flushRenders();
-  }
-
-  function unmount() {
-    if (instance.unmounted) return;
-    instance.unmounted = true;
     for (const slot of instance.hooks) {
       if (slot?.kind === "effect" && typeof slot.cleanup === "function") {
         slot.cleanup();
@@ -340,6 +302,104 @@ function loadCapsule() {
         slot.cleanup = undefined;
       }
     }
+    instance.unmounted = true;
+  }
+
+  function instanceAt(session, path, type) {
+    const existing = session.instances.get(path);
+    if (existing && existing.component === type && !existing.unmounted) return existing;
+    if (existing) unmountInstance(existing);
+    const instance = {
+      session,
+      path,
+      component: type,
+      props: {},
+      hooks: [],
+      hookIndex: 0,
+      pendingEffects: [],
+      unmounted: false,
+    };
+    session.instances.set(path, instance);
+    return instance;
+  }
+
+  function renderInstance(instance, props) {
+    instance.props = props;
+    instance.hookIndex = 0;
+    instance.pendingEffects = [];
+    const previous = activeInstance;
+    activeInstance = instance;
+    let output;
+    try {
+      output = instance.component(instance.props);
+    } finally {
+      activeInstance = previous;
+    }
+    instance.session.visited.add(instance.path);
+    instance.session.effectQueue.push({ instance, effects: instance.pendingEffects });
+    return expand(instance.session, output, `${instance.path}.out`);
+  }
+
+  function expand(session, node, path) {
+    if (node === null || node === undefined) return node;
+    if (Array.isArray(node)) {
+      return node.map((child, index) => expand(session, child, `${path}[${index}]`));
+    }
+    if (typeof node !== "object") return node;
+    if (node.portal !== undefined) {
+      node.portal = expand(session, node.portal, `${path}.portal`);
+      return node;
+    }
+    if (typeof node.type === "function") {
+      const childPath = `${path}#${node.type.name || "anonymous"}`;
+      const child = instanceAt(session, childPath, node.type);
+      return renderInstance(child, node.props);
+    }
+    if (node.props && node.props.children !== undefined) {
+      node.props.children = expand(session, node.props.children, `${path}.children`);
+    }
+    return node;
+  }
+
+  function renderSessionOnce(session) {
+    runtime.renderCount += 1;
+    session.visited = new Set();
+    session.effectQueue = [];
+    session.rendering = true;
+    try {
+      session.tree = renderInstance(session.root, session.root.props);
+    } finally {
+      session.rendering = false;
+    }
+    for (const entry of session.effectQueue) commitEffects(entry.instance, entry.effects);
+    for (const [path, instance] of session.instances) {
+      if (!session.visited.has(path)) unmountInstance(instance);
+    }
+  }
+
+  function flushSession(session) {
+    if (session.flushing) return;
+    session.flushing = true;
+    try {
+      let rounds = 0;
+      while (session.pending) {
+        rounds += 1;
+        if (rounds > MAX_RENDER_ROUNDS) {
+          throw new Error(`render loop did not settle after ${MAX_RENDER_ROUNDS} rounds`);
+        }
+        session.pending = false;
+        renderSessionOnce(session);
+      }
+    } finally {
+      session.flushing = false;
+    }
+  }
+
+  function requestRender(session) {
+    if (session.unmounted) return;
+    session.pending = true;
+    if (session.rendering || session.flushing) return;
+    flushSession(session);
   }
 
   // ---- VM 环境与 bundle 加载 ---------------------------------------------
@@ -377,7 +437,13 @@ function loadCapsule() {
       return { jsx: createNode, jsxs: createNode, Fragment };
     }
     if (id === "react-dom") {
-      return { createPortal: (node, container) => ({ portal: node, container }) };
+      return {
+        createPortal(node, container) {
+          const portal = { portal: node, container };
+          runtime.portals.push(portal);
+          return portal;
+        },
+      };
     }
     throw new Error(`unexpected require: ${id}`);
   });
@@ -395,21 +461,49 @@ function loadCapsule() {
   assert.equal(typeof component, "function", "KbScopeCapsule was not registered");
 
   // ---- 挂载句柄 -----------------------------------------------------------
+  function snapshotOf(instance) {
+    return JSON.parse(JSON.stringify(
+      instance.hooks.filter((slot) => slot?.kind === "state").map((slot) => slot.value)
+    ));
+  }
+
   function mount(props = {}) {
-    instance.props = props;
-    instance.pending = true;
-    flushRenders();
+    const session = {
+      instances: new Map(),
+      tree: null,
+      root: null,
+      pending: false,
+      flushing: false,
+      rendering: false,
+      unmounted: false,
+      visited: new Set(),
+      effectQueue: [],
+    };
+    session.root = instanceAt(session, "root", component);
+    session.root.props = props;
+    lastSession = session;
+    session.pending = true;
+    flushSession(session);
     return {
       get tree() {
-        return instance.tree;
+        return session.tree;
       },
       rerender(nextProps) {
-        instance.props = nextProps === undefined ? instance.props : nextProps;
-        instance.pending = true;
-        flushRenders();
-        return instance.tree;
+        assert.equal(session.unmounted, false, "rerender() after unmount");
+        session.root.props = nextProps === undefined ? session.root.props : nextProps;
+        session.pending = true;
+        flushSession(session);
+        return session.tree;
       },
-      unmount,
+      unmount() {
+        if (session.unmounted) return;
+        session.unmounted = true;
+        session.pending = false;
+        for (const instance of session.instances.values()) unmountInstance(instance);
+      },
+      stateSnapshot() {
+        return snapshotOf(session.root);
+      },
     };
   }
 
@@ -511,9 +605,16 @@ function loadCapsule() {
   }
 
   function stateSnapshot() {
-    return JSON.parse(JSON.stringify(
-      instance.hooks.filter((slot) => slot?.kind === "state").map((slot) => slot.value)
-    ));
+    assert.ok(lastSession, "no mounted capsule");
+    return snapshotOf(lastSession.root);
+  }
+
+  function portalFor(className) {
+    let found = null;
+    for (const portal of runtime.portals) {
+      if (findByClass(portal.portal, className)) found = portal;
+    }
+    return found;
   }
 
   async function flush(turns = MAX_MICROTASK_TURNS) {
@@ -531,6 +632,7 @@ function loadCapsule() {
     text,
     emitDocument,
     stateSnapshot,
+    portalFor,
     findByClass,
     findAllByClass,
     findByType,
@@ -566,6 +668,27 @@ function buttonByText(rt, ui, label) {
   const button = rt.findAllByType(panel, "button").find((node) => rt.text(node) === label);
   assert.ok(button, `button "${label}" is missing`);
   return button;
+}
+
+function rowByName(rt, ui, name) {
+  const row = rowsOf(rt, ui).find(
+    (candidate) => rt.text(rt.findByClass(candidate, "dsh-kb-scope-name")) === name
+  );
+  assert.ok(row, `row "${name}" is missing`);
+  return row;
+}
+
+function draftOf(ui) {
+  // KbScopeCapsule 的 state hook 顺序：
+  // 0 phase / 1 panelPhase / 2 scope / 3 kbs / 4 open / 5 draft / 6 query /
+  // 7 saving / 8 toast / 9 retry / 10 workbenchOpen / 11 position
+  return ui.stateSnapshot()[5];
+}
+
+function portalContainerOf(rt, className) {
+  const portal = rt.portalFor(className);
+  assert.ok(portal, `portal containing .${className} is missing`);
+  return portal.container;
 }
 
 async function respondScopeData(rt, { scope, kbs }) {
@@ -724,7 +847,7 @@ test("chip shows — when the kbs request fails", async () => {
 });
 
 // ===========================================================================
-// 3. 打开面板：刷新完成前不渲染、行过滤、草稿播种、关闭不发请求
+// 3. 打开面板：刷新完成前不渲染、行过滤、草稿播种、关闭/取消/工作台与 a11y
 // ===========================================================================
 
 test("panel stays hidden until the open refresh resolves", async () => {
@@ -733,6 +856,8 @@ test("panel stays hidden until the open refresh resolves", async () => {
   assert.equal(panelOf(rt, ui), null);
 
   rt.click(chipOf(rt, ui));
+  // NOTE(a11y): aria-expanded 直接跟随 `open`，所以刷新在途、面板尚未挂载时仍是 true。
+  // 这是本次 review 报告的可访问性缺陷；按“只报告、不改源码”的要求，这里记录现状。
   assert.equal(chipOf(rt, ui).props["aria-expanded"], true);
   assert.equal(rt.text(chipOf(rt, ui)), "知识库：全部");
   assert.equal(panelOf(rt, ui), null, "panel must wait for the refresh");
@@ -743,6 +868,7 @@ test("panel stays hidden until the open refresh resolves", async () => {
 
   await respondScopeData(rt, { scope: { mode: "all", kbs: [] }, kbs });
   assert.ok(panelOf(rt, ui));
+  assert.equal(portalContainerOf(rt, "dsh-kb-scope-panel"), rt.document.body);
 });
 
 test("rows exclude merged knowledge bases and show live document counts", async () => {
@@ -766,16 +892,34 @@ test("rows exclude merged knowledge bases and show live document counts", async 
   );
 });
 
-test("draft is seeded from the fresh scope and drops archived names", async () => {
-  const kbs = [{ name: "Alpha" }, { name: "Beta" }, { name: "Gamma" }];
-  const { rt, ui } = await loadReady({ mode: "selected", kbs: ["Gamma"] }, kbs);
-  await openPanel(rt, ui, { scope: { mode: "selected", kbs: ["Beta", "Archived"] }, kbs });
+test("draft is seeded from the fresh scope and drops scope names missing from the live list", async () => {
+  // 服务端没 prune 掉的旧名字（Archived）只出现在 scope 里，/kbs 里没有。
+  const live = [{ name: "Alpha" }, { name: "Beta" }];
+  const { rt, ui } = await loadReady(
+    { mode: "selected", kbs: ["Gamma"] },
+    [{ name: "Alpha" }, { name: "Beta" }, { name: "Gamma" }]
+  );
+  await openPanel(rt, ui, {
+    scope: { mode: "selected", kbs: ["Alpha", "Archived"] },
+    kbs: live,
+  });
   const rows = rowsOf(rt, ui);
   assert.deepEqual(
     rows.map((row) => [rt.text(rt.findByClass(row, "dsh-kb-scope-name")), checkboxOf(rt, row).props.checked]),
-    [["Alpha", false], ["Beta", true], ["Gamma", false]]
+    [["Alpha", true], ["Beta", false]]
   );
+  // 草稿只保留 fresh scope ∩ fresh kbs；旧实现会把 scope.kbs 原样塞进去。
+  assert.deepEqual(draftOf(ui), ["Alpha"]);
   assert.doesNotMatch(rt.text(panelOf(rt, ui)), /Archived/);
+
+  const put = await applyAndRespond(rt, ui, {
+    body: { scope: { mode: "selected", kbs: ["Alpha"] } },
+  });
+  const payload = JSON.parse(put.init.body);
+  assert.deepEqual(payload, { session: "s1", mode: "selected", kbs: ["Alpha"] });
+  assert.equal(put.init.body.includes("Archived"), false, "archived name leaked into the PUT");
+  assert.equal(rt.text(chipOf(rt, ui)), "知识库：1 个");
+  assert.equal(rt.text(rt.findByClass(ui.tree, "dsh-kb-scope-toast")), "已限定为 1 个知识库");
 });
 
 test("the search box filters rows by name or description", async () => {
@@ -835,6 +979,74 @@ test("closing and reopening during a refresh reuses the single in-flight request
   await respondScopeData(rt, { scope: { mode: "all", kbs: [] }, kbs });
   assert.ok(panelOf(rt, ui), "panel should open from the shared refresh");
   assert.equal(rt.text(chipOf(rt, ui)), "知识库：全部");
+});
+
+test("empty /kbs renders 暂无知识库 and opens the workbench from 去工作台新建", async () => {
+  const { rt, ui } = await loadReady({ mode: "all", kbs: [] }, []);
+  await openPanel(rt, ui, { scope: { mode: "all", kbs: [] }, kbs: [] });
+  const panel = panelOf(rt, ui);
+  assert.match(rt.text(panel), /暂无知识库/);
+  assert.doesNotMatch(rt.text(panel), /没有匹配的知识库/);
+
+  const create = rt.findAllByType(panel, "button").find((button) => rt.text(button) === "去工作台新建");
+  assert.ok(create, "去工作台新建 button missing");
+  rt.click(create);
+  assert.equal(panelOf(rt, ui), null);
+  const iframe = rt.findByType(ui.tree, "iframe");
+  assert.ok(iframe, "workbench iframe missing");
+  assert.equal(iframe.props.src, "/kb/?embed=1");
+});
+
+test("打开知识库工作台 closes the panel and opens the workbench modal portal", async () => {
+  const kbs = [{ name: "Alpha" }];
+  const { rt, ui } = await loadReady({ mode: "all", kbs: [] }, kbs);
+  await openPanel(rt, ui, { scope: { mode: "all", kbs: [] }, kbs });
+  assert.equal(rt.findByType(ui.tree, "iframe"), null);
+
+  rt.click(buttonByText(rt, ui, "打开知识库工作台"));
+  assert.equal(panelOf(rt, ui), null);
+  assert.equal(chipOf(rt, ui).props["aria-expanded"], false);
+  assert.equal(rt.fetch.calls.filter((call) => call.method === "PUT").length, 0);
+
+  const iframe = rt.findByType(ui.tree, "iframe");
+  assert.ok(iframe, "workbench iframe missing");
+  assert.equal(iframe.props.src, "/kb/?embed=1");
+  assert.match(iframe.props.className, /dsh-kb-modal-frame/);
+  assert.equal(portalContainerOf(rt, "dsh-kb-modal"), rt.document.body);
+  assert.equal(rt.document.body.style.overflow, "hidden", "workbench effect did not lock scrolling");
+});
+
+test("取消 closes the panel without a PUT and restores focus to the chip", async () => {
+  const kbs = [{ name: "Alpha" }, { name: "Beta" }];
+  const { rt, ui } = await loadReady({ mode: "all", kbs: [] }, kbs);
+  await openPanel(rt, ui, { scope: { mode: "all", kbs: [] }, kbs });
+
+  rt.click(buttonByText(rt, ui, "取消"));
+  assert.equal(panelOf(rt, ui), null);
+  assert.equal(chipOf(rt, ui).props["aria-expanded"], false);
+  assert.equal(rt.fetch.calls.filter((call) => call.method === "PUT").length, 0);
+  const focused = rt.focused.at(-1);
+  assert.ok(focused, "chip was not focused");
+  assert.match(focused.props.className, /dsh-kb-scope-chip/);
+});
+
+test("panel exposes dialog semantics and an auto-focused search field", async () => {
+  const kbs = [{ name: "Alpha" }];
+  const { rt, ui } = await loadReady({ mode: "all", kbs: [] }, kbs);
+  await openPanel(rt, ui, { scope: { mode: "all", kbs: [] }, kbs });
+
+  const panel = panelOf(rt, ui);
+  assert.equal(panel.props.role, "dialog");
+  assert.equal(panel.props["aria-label"], "选择本会话知识库");
+  assert.equal(chipOf(rt, ui).props["aria-expanded"], true);
+
+  const search = rt.findByType(panel, "input");
+  assert.ok(search, "search input missing");
+  assert.equal(search.props["aria-label"], "搜索知识库");
+  assert.equal(search.props.autoFocus, true);
+
+  rt.click(buttonByText(rt, ui, "取消"));
+  assert.equal(chipOf(rt, ui).props["aria-expanded"], false);
 });
 
 // ===========================================================================
@@ -923,6 +1135,29 @@ test("subset applies a selected payload in knowledge-base list order", async () 
   assert.equal(rt.text(rt.findByClass(ui.tree, "dsh-kb-scope-toast")), "已限定为 2 个知识库");
 });
 
+test("row checkbox toggles the draft and the PUT payload", async () => {
+  const kbs = [{ name: "Alpha" }, { name: "Beta" }];
+  const { rt, ui } = await loadReady({ mode: "all", kbs: [] }, kbs);
+  await openPanel(rt, ui, { scope: { mode: "all", kbs: [] }, kbs });
+  assert.deepEqual(
+    rowsOf(rt, ui).map((row) => checkboxOf(rt, row).props.checked),
+    [true, true]
+  );
+
+  rt.change(checkboxOf(rt, rowByName(rt, ui, "Beta")));
+  assert.deepEqual(
+    rowsOf(rt, ui).map((row) => [rt.text(rt.findByClass(row, "dsh-kb-scope-name")), checkboxOf(rt, row).props.checked]),
+    [["Alpha", true], ["Beta", false]]
+  );
+  assert.deepEqual(draftOf(ui), ["Alpha"]);
+
+  const put = await applyAndRespond(rt, ui, {
+    body: { scope: { mode: "selected", kbs: ["Alpha"] } },
+  });
+  assert.deepEqual(JSON.parse(put.init.body), { session: "s1", mode: "selected", kbs: ["Alpha"] });
+  assert.equal(rt.text(chipOf(rt, ui)), "知识库：1 个");
+});
+
 test("failed PUT keeps the panel and chip, disables controls while saving, shows server message", async () => {
   const kbs = [{ name: "Alpha" }, { name: "Beta" }];
   const { rt, ui } = await loadReady({ mode: "all", kbs: [] }, kbs);
@@ -985,9 +1220,13 @@ test("double apply sends a single PUT", async () => {
 });
 
 // ===========================================================================
-// 5. 代号守卫：过期打开刷新不能覆盖已应用范围；归档库名不进 PUT
+// 5. 代号守卫：过期打开刷新不能覆盖已应用范围；重挂载隔离；归档库名不进 PUT
 // ===========================================================================
 
+// NOTE: 这个场景没有“普通可点击控件”能触发：刷新期间面板未挂载，保存期间 chip 点击被
+// saving 守卫挡住。所以这里直接调用上一个就绪渲染里的“应用”handler，模拟浏览器里已经
+// 排队的一次 click；它只验证 generation guard 的防御性，不声称是常规 UI 路径。
+// 真实可到达的隔离由下面的 remount 用例覆盖。
 test("a stale open-refresh cannot overwrite an applied scope", async () => {
   const kbs = [{ name: "Alpha" }, { name: "Beta" }, { name: "Gamma" }];
   const { rt, ui } = await loadReady({ mode: "all", kbs: [] }, kbs);
@@ -1018,6 +1257,50 @@ test("a stale open-refresh cannot overwrite an applied scope", async () => {
   assert.equal(rt.text(chipOf(rt, ui)), "知识库：1 个", "stale refresh overwrote the applied scope");
   assert.equal(panelOf(rt, ui), null);
   assert.equal(rt.text(rt.findByClass(ui.tree, "dsh-kb-scope-toast")), "已限定为 1 个知识库");
+});
+
+test("remounting with a new sessionId gets a fresh instance and ignores the old mount's late refresh", async () => {
+  const rt = loadCapsule();
+  const ui1 = rt.mount({ sessionId: "s1" });
+  rt.respond({ body: { features: { scope: true } } });
+  await rt.flush();
+  rt.respondWhere("/scope?session=s1", { body: { scope: { mode: "selected", kbs: ["Old"] } } });
+  rt.respondWhere("/kbs", { body: { kbs: [{ name: "Old" }] } });
+  await rt.flush();
+  assert.equal(rt.text(chipOf(rt, ui1)), "知识库：1 个");
+
+  rt.click(chipOf(rt, ui1)); // 旧挂载的打开刷新在途
+  assert.equal(rt.fetch.pending().length, 2);
+  ui1.unmount();
+
+  const ui2 = rt.mount({ sessionId: "s2" });
+  assert.equal(rt.fetch.calls.filter((call) => call.url === "/kb/api/status").length, 2);
+  rt.respondWhere("/status", { body: { features: { scope: true } } });
+  await rt.flush();
+  assert.ok(
+    rt.fetch.calls.some((call) => call.url === "/kb/api/scope?session=s2"),
+    "new mount must issue its own scope GET"
+  );
+
+  // 旧挂载的 /kbs 还排在队首；先收掉（旧实例已卸载，迟到的结果不会改状态）。
+  rt.respondWhere("/kbs", { body: { kbs: [{ name: "Old" }] } });
+  await rt.flush();
+  rt.respondWhere("/scope?session=s2", { body: { scope: { mode: "selected", kbs: ["New"] } } });
+  rt.respondWhere("/kbs", { body: { kbs: [{ name: "New" }] } });
+  await rt.flush();
+  assert.equal(rt.text(chipOf(rt, ui2)), "知识库：1 个");
+  assert.equal(panelOf(rt, ui2), null);
+
+  const before = ui2.stateSnapshot();
+  assert.deepEqual(draftOf(ui2), [], "new instance must start with an empty draft");
+
+  // 旧挂载的刷新现在才返回：新实例的状态、chip、草稿都不能被污染。
+  rt.respondWhere("/scope?session=s1", { body: { scope: { mode: "selected", kbs: ["Old"] } } });
+  await rt.flush();
+  assert.deepEqual(ui2.stateSnapshot(), before);
+  assert.equal(rt.text(chipOf(rt, ui2)), "知识库：1 个");
+  assert.equal(rt.findByClass(ui2.tree, "dsh-kb-scope-toast"), null);
+  assert.equal(rt.fetch.calls.filter((call) => call.method === "PUT").length, 0);
 });
 
 test("archived names are filtered out of the PUT payload", async () => {
@@ -1074,6 +1357,7 @@ test("toast is a live status element anchored by the capsule CSS", async () => {
   assert.equal(toast.props.role, "status");
   assert.equal(toast.props["aria-live"], "polite");
   assert.equal(rt.text(toast), "已改为全部知识库");
+  assert.equal(portalContainerOf(rt, "dsh-kb-scope-toast"), rt.document.body);
 
   const css = rt.documentStyles.map((style) => style.textContent).join("\n");
   const rule = /\.dsh-kb-scope-toast\s*\{([^}]*)\}/.exec(css)?.at(1) ?? "";
@@ -1128,29 +1412,61 @@ test("Escape closes the panel, removes the keydown listener and refocuses the ch
 });
 
 // ===========================================================================
-// 8. 定位：底部锚定 + 左右钳制、缺 rect 时居中、关闭摘监听
+// 8. 定位：有上方空间时向上锚定、贴近顶部时向下展开、左右钳制、缺 rect 居中
 // ===========================================================================
 
-test("panel anchors above the chip with a clamped left and no top", async () => {
+test("panel anchors above the chip with a clamped left, no top and a capped height", async () => {
   const kbs = [{ name: "Alpha" }];
   const data = { scope: { mode: "all", kbs: [] }, kbs };
   const { rt, ui } = await loadReady({ mode: "all", kbs: [] }, kbs);
 
-  rt.chipRect = { left: 100, top: 700, width: 120, height: 24 };
+  rt.chipRect = { left: 100, top: 700, bottom: 724, width: 120, height: 24 };
   await openPanel(rt, ui, data);
   let style = panelOf(rt, ui).props.style;
   assert.equal(style.left, 100);
   assert.equal(style.bottom, 800 - 700 + 8);
   assert.equal(Object.hasOwn(style, "top"), false, "bottom-anchored panel must not set top");
+  assert.equal(style.maxHeight, 420, "maxHeight must be capped at 420");
+  assert.equal(typeof style.maxHeight, "number");
 
   rt.click(chipOf(rt, ui));
-  rt.chipRect = { left: 5000, top: 700 };
+  rt.chipRect = { left: 5000, top: 700, bottom: 724 };
   await openPanel(rt, ui, data);
   style = panelOf(rt, ui).props.style;
   assert.equal(style.left, 1280 - 328, "left edge should clamp to the viewport");
 
   rt.click(chipOf(rt, ui));
-  rt.chipRect = { left: -40, top: 700 };
+  rt.chipRect = { left: -40, top: 700, bottom: 724 };
+  await openPanel(rt, ui, data);
+  assert.equal(panelOf(rt, ui).props.style.left, 8);
+});
+
+test("chip near the top opens the panel below with a rounded top and a capped height", async () => {
+  const kbs = [{ name: "Alpha" }];
+  const data = { scope: { mode: "all", kbs: [] }, kbs };
+  const { rt, ui } = await loadReady({ mode: "all", kbs: [] }, kbs);
+
+  rt.chipRect = { left: 100, top: 100, bottom: 123.6, width: 120, height: 23.6 };
+  await openPanel(rt, ui, data);
+  let style = panelOf(rt, ui).props.style;
+  assert.equal(style.top, 132, "top = Math.round(rect.bottom + 8)");
+  assert.equal(Object.hasOwn(style, "bottom"), false, "top-anchored panel must not set bottom");
+  assert.equal(style.maxHeight, 420);
+  assert.equal(typeof style.maxHeight, "number");
+
+  // 视口很矮时 maxHeight 收窄到实际可用空间，并保底 160。
+  rt.click(chipOf(rt, ui));
+  rt.window.innerHeight = 300;
+  rt.chipRect = { left: 100, top: 100, bottom: 124, width: 120, height: 24 };
+  await openPanel(rt, ui, data);
+  style = panelOf(rt, ui).props.style;
+  assert.equal(style.top, 132);
+  assert.equal(style.maxHeight, 160);
+  rt.window.innerHeight = 800;
+
+  // 向下展开时左右钳制仍然生效。
+  rt.click(chipOf(rt, ui));
+  rt.chipRect = { left: -40, top: 100, bottom: 124 };
   await openPanel(rt, ui, data);
   assert.equal(panelOf(rt, ui).props.style.left, 8);
 });

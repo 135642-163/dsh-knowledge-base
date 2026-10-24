@@ -24,12 +24,19 @@ type SlotContext = {
 };
 type Phase = "loading" | "ready" | "failed" | "hidden";
 type PanelPhase = "loading" | "ready";
-type PanelPosition = { left: number | string; bottom: number; transform?: string };
+type PanelPosition = {
+  left: number | string;
+  bottom?: number;
+  top?: number;
+  maxHeight?: number;
+  transform?: string;
+};
 type ScopeData = { scope: Scope; kbs: KbSummary[] };
 type Toast = { text: string; id: number };
 
 const API = "/kb/api";
 const CSS_ID = "dsh-knowledge-wiki/sidebar-entry.css";
+const PANEL_MAX_HEIGHT = 420;
 const FALLBACK_PANEL_POSITION: PanelPosition = { left: "50%", bottom: 24, transform: "translateX(-50%)" };
 const CSS = `
 .dsh-kb-entry { box-sizing: border-box; display: flex; flex: 1 1 0; align-items: center; gap: 8px; width: 100%; min-width: 0; min-height: 36px; margin: 8px 2px 0; padding: 7px 8px; border: 0; border-radius: var(--dsw-radius-md, 8px); background: transparent; color: var(--dsw-alias-label-primary); font: inherit; font-size: 14px; line-height: 22px; text-align: left; text-decoration: none; cursor: pointer; }
@@ -267,8 +274,21 @@ export function KbScopeCapsule({ sessionId }: ScopeSlotProps) {
         return;
       }
       const left = Math.min(Math.max(8, rect.left), Math.max(8, window.innerWidth - 328));
-      const bottom = Math.max(8, window.innerHeight - rect.top + 8);
-      setPosition({ left, bottom });
+      // 上方空间不够（胶囊贴近顶部）就向下展开，避免面板被视口顶部裁掉；
+      // 两个方向都用 maxHeight 限制到实际可用空间。
+      if (rect.top - 8 >= 240) {
+        setPosition({
+          left,
+          bottom: Math.max(8, window.innerHeight - rect.top + 8),
+          maxHeight: Math.min(PANEL_MAX_HEIGHT, rect.top - 16),
+        });
+        return;
+      }
+      setPosition({
+        left,
+        top: Math.round(rect.bottom + 8),
+        maxHeight: Math.min(PANEL_MAX_HEIGHT, Math.max(160, window.innerHeight - rect.bottom - 16)),
+      });
     }
     place();
     window.addEventListener("resize", place);
