@@ -117,6 +117,25 @@ test("purgeKb removes an archived name when no live library owns it", async () =
   assert.deepEqual(data.scopes.s2.kbs, []);
 });
 
+test("purgeKb removes both the manifest name and the original directory name", async () => {
+  const { kbRoot } = await setup();
+  const dir = join(kbRoot, "目录名");
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, "kb.json"), JSON.stringify({ schemaVersion: 5, name: "显示名", docs: [] }), "utf8");
+  const trashedTo = await archiveKb(kbRoot, "目录名");
+  assert.match(trashedTo, /目录名-\d{4}(?:-\d{2}){5}(?:-\d+)?$/);
+  // 清理归档时写入了两个别名：旧范围可能同时引用清单名与目录名。
+  await writeScopes(kbRoot, {
+    scopes: {
+      s9: { mode: "selected", kbs: ["目录名", "显示名"], updatedAt: new Date().toISOString() },
+    },
+  });
+  const [entry] = (await listTrash(kbRoot)).filter((item) => item.dir.startsWith("目录名-"));
+  await purgeKb(kbRoot, entry.dir);
+  const data = await readScopes(kbRoot);
+  assert.deepEqual(data.scopes.s9.kbs, []);
+});
+
 test("purgeKb keeps a name reused by a live library", async () => {
   const { kbRoot } = await setup();
   await archiveKb(kbRoot, "乙库");

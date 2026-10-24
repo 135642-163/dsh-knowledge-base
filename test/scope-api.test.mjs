@@ -95,6 +95,26 @@ test("PUT saves a selected scope and GET reflects it with resolved counts", asyn
   assert.ok(get.json.updatedAt);
 });
 
+test("resolved rows use the directory name when manifest.name differs", async () => {
+  const kbRoot = await setup();
+  // 范围条目与 resolved 的身份都是目录名；清单 name 只作为工作台显示名。
+  const manifestPath = join(kbRoot, "甲库", "kb.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  manifest.name = "显示名";
+  await writeFile(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
+
+  const put = await call(kbRoot, makeReq({
+    method: "PUT",
+    body: { session: "s1", mode: "selected", kbs: ["甲库"] },
+  }));
+  assert.equal(put.res.status, 200);
+  assert.deepEqual(put.json.scope.kbs, ["甲库"]);
+  assert.deepEqual(put.json.resolved, [{ name: "甲库", docs: 0, empty: true }]);
+
+  const get = await call(kbRoot, makeReq({ url: "/kb/api/scope?session=s1" }));
+  assert.deepEqual(get.json.resolved, [{ name: "甲库", docs: 0, empty: true }]);
+});
+
 test("GET trims the session id so updatedAt matches the stored entry", async () => {
   const kbRoot = await setup();
   const put = await call(kbRoot, makeReq({

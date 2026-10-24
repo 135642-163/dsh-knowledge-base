@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { scanDuplicates, titleKeys } from "../lib/dedup.js";
 
-async function makeKb(root, name, titles) {
+async function makeKb(root, name, titles, manifestName = name) {
   const dir = join(root, name);
   await mkdir(dir, { recursive: true });
   const docs = titles.map((title, i) => ({
@@ -26,7 +26,7 @@ async function makeKb(root, name, titles) {
     JSON.stringify(
       {
         schemaVersion: 1,
-        name,
+        name: manifestName,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         docs,
@@ -134,6 +134,21 @@ test("allowCrossKb still imports an exact cross-kb duplicate", async () => {
       allowCrossKb: true,
     });
     assert.equal(allowed.kept.length, 1);
+  });
+});
+
+test("same directory is same-kb even when manifest.name differs", async () => {
+  await withRoot(async (root) => {
+    await makeKb(root, "目录名", ["电能质量评估技术导则"], "显示名");
+    const files = [
+      { sourcePath: "/tmp/guide.pdf", relKey: "guide.pdf", title: "电能质量评估技术导则" },
+    ];
+    const r = await scanDuplicates({ root, targetKb: "目录名", files });
+    assert.equal(r.kept.length, 0);
+    assert.equal(r.duplicates.length, 1);
+    assert.equal(r.duplicates[0].scope, "same-kb");
+    // 报告里仍用清单显示名，避免用户看到内部目录名。
+    assert.equal(r.duplicates[0].matched[0].kb, "显示名");
   });
 });
 

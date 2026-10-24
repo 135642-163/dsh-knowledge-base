@@ -10,6 +10,7 @@ type Scope = { mode: "all" | "selected"; kbs: string[]; inheritedFrom?: string |
 type KbDocs = { total?: number; deleted?: number };
 type KbSummary = {
   name: string;
+  dir?: string;
   description?: string;
   docs?: number | KbDocs;
   mergedInto?: string | null;
@@ -97,6 +98,11 @@ async function getJson<T>(path: string): Promise<T> {
   const response = await fetch(`${API}${path}`, { headers: { accept: "application/json" } });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   return (await response.json()) as T;
+}
+
+/** 库身份＝目录名（范围条目用它）；清单 name 只做显示名。 */
+function kbIdentity(kb: KbSummary): string {
+  return kb.dir ?? kb.name;
 }
 
 /** 文档数徽标：软删除的文档不算“在用”，避免只剩删除项的库显示 N 篇。 */
@@ -304,7 +310,7 @@ export function KbScopeCapsule({ sessionId }: ScopeSlotProps) {
     };
   }, [open]);
 
-  const names = kbs.map((kb) => kb.name);
+  const identities = kbs.map(kbIdentity);
   const label = chipLabel(scope, { loading: phase === "loading", failed: phase === "failed" });
   const active = phase === "ready" && scope?.mode === "selected";
   const filtered = query.trim() === ""
@@ -334,13 +340,13 @@ export function KbScopeCapsule({ sessionId }: ScopeSlotProps) {
     try {
       const data = await loadScopeData(sessionId);
       if (gen !== generationRef.current) return;
-      const freshNames = data.kbs.map((kb) => kb.name);
+      const freshIdentities = data.kbs.map(kbIdentity);
       setScope(data.scope);
       setKbs(data.kbs);
       setDraft(
         data.scope.mode === "selected"
-          ? (data.scope.kbs ?? []).filter((name) => freshNames.includes(name))
-          : [...freshNames]
+          ? (data.scope.kbs ?? []).filter((name) => freshIdentities.includes(name))
+          : [...freshIdentities]
       );
       setPanelPhase("ready");
     } catch {
@@ -367,10 +373,10 @@ export function KbScopeCapsule({ sessionId }: ScopeSlotProps) {
 
   async function applySelection() {
     if (!sessionId || saving) return;
-    const picked = draft.filter((name) => names.includes(name));
-    const payload = picked.length === 0 || isAllSelection(picked, names)
+    const picked = draft.filter((name) => identities.includes(name));
+    const payload = picked.length === 0 || isAllSelection(picked, identities)
       ? { mode: "all", kbs: [] as string[] }
-      : selectionPayload("selected", picked, names);
+      : selectionPayload("selected", picked, identities);
     // 先递增代号：PUT 期间返回的旧 GET 响应不能再覆盖已应用的范围。
     generationRef.current += 1;
     setSaving(true);
@@ -428,24 +434,27 @@ export function KbScopeCapsule({ sessionId }: ScopeSlotProps) {
             ) : null}
           </div>
         ) : (
-          filtered.map((kb) => (
-            <label key={kb.name} className="dsh-kb-scope-row">
-              <input
-                type="checkbox"
-                checked={draft.includes(kb.name)}
-                disabled={saving}
-                onChange={() => setDraft((current) => (
-                  current.includes(kb.name) ? current.filter((name) => name !== kb.name) : [...current, kb.name]
-                ))}
-              />
-              <span className="dsh-kb-scope-name">{kb.name}</span>
-              <span className="dsh-kb-scope-meta">{docsBadge(kb)}</span>
-            </label>
-          ))
+          filtered.map((kb) => {
+            const identity = kbIdentity(kb);
+            return (
+              <label key={identity} className="dsh-kb-scope-row">
+                <input
+                  type="checkbox"
+                  checked={draft.includes(identity)}
+                  disabled={saving}
+                  onChange={() => setDraft((current) => (
+                    current.includes(identity) ? current.filter((name) => name !== identity) : [...current, identity]
+                  ))}
+                />
+                <span className="dsh-kb-scope-name">{kb.name}</span>
+                <span className="dsh-kb-scope-meta">{docsBadge(kb)}</span>
+              </label>
+            );
+          })
         )}
       </div>
       <div className="dsh-kb-scope-actions">
-        <button type="button" disabled={saving} onClick={() => setDraft([...names])}>全选</button>
+        <button type="button" disabled={saving} onClick={() => setDraft([...identities])}>全选</button>
         <button type="button" disabled={saving} onClick={() => setDraft([])}>清空</button>
         <button type="button" disabled={saving} onClick={() => closeScopePanel(true)}>取消</button>
         <button type="button" className="dsh-kb-scope-primary" disabled={saving} onClick={() => void applySelection()}>

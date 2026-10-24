@@ -921,6 +921,28 @@ test("draft is seeded from the fresh scope and drops scope names missing from th
   assert.equal(rt.text(rt.findByClass(ui.tree, "dsh-kb-scope-toast")), "已限定为 1 个知识库");
 });
 
+test("selection uses the directory identity while the row shows the manifest name", async () => {
+  // 范围条目是目录名；/kbs 的 dir 与清单 name 不一致时不能拿显示名去勾选/提交。
+  const kbs = [{ name: "显示名", dir: "目录名" }, { name: "其他库" }];
+  const { rt, ui } = await loadReady({ mode: "all", kbs: [] }, kbs);
+  await openPanel(rt, ui, {
+    scope: { mode: "selected", kbs: ["目录名"] },
+    kbs,
+  });
+
+  const rows = rowsOf(rt, ui);
+  assert.deepEqual(
+    rows.map((row) => [rt.text(rt.findByClass(row, "dsh-kb-scope-name")), checkboxOf(rt, row).props.checked]),
+    [["显示名", true], ["其他库", false]]
+  );
+  assert.deepEqual(draftOf(ui), ["目录名"], "draft must hold the directory identity");
+
+  const put = await applyAndRespond(rt, ui, {
+    body: { scope: { mode: "selected", kbs: ["目录名"] } },
+  });
+  assert.deepEqual(JSON.parse(put.init.body), { session: "s1", mode: "selected", kbs: ["目录名"] });
+});
+
 test("the search box filters rows by name or description", async () => {
   const kbs = [
     { name: "Alpha", description: "合同模板" },
