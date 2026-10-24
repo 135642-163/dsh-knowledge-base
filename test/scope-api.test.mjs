@@ -1,0 +1,163 @@
+/**
+ * GET/PUT /kb/api/scope：校验、鉴权、归档判定、features.scope。
+ */
+import test from "node:test";
+import assert from "node:assert/strict";
+import { chmod, mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { handleApi } from "../lib/web/api.js";
+
+function makeRes() {
+  return {
+    status: 0,
+    headers: {},
+    body: "",
+    writeHead(status, headers) { this.status = status; this.headers = headers; },
+    end(body = "") { this.body += body; },
+  };
+}
+
+function makeReq({ method = "GET", url = "/kb/api/scope", headers = {}, body } = {}) {
+  return {
+    method,
+    url,
+    headers: {
+      host: "127.0.0.1:55929",
+      origin: "http://127.0.0.1:55929",
+      "x-kb-ui": "1",
+      ...headers,
+    },
+    async *[Symbol.asyncIterator]() {
+      if (body !== undefined) yield Buffer.from(JSON.stringify(body));
+    },
+  };
+}
+
+async function call(kbRoot, req) {
+  const res = makeRes();
+  await handleApi(req, res, { opts: { kbRoot }, fence: () => true });
+  return { res, json: res.body ? JSON.parse(res.body) : null };
+}
+
+async function setup() {
+  const kbRoot = join(await mkdtemp(join(tmpdir(), "kb-scope-api-")), "kb");
+  for (const name of ["甲库", "乙库"]) {
+    const { res } = await call(kbRoot, makeReq({ method: "POST", url: "/kb/api/kbs", body: { name } }));
+    assert.equal(res.status, 201);
+  }
+  return kbRoot;
+}
+
+test("status advertises features.scope", async () => {
+  const kbRoot = await setup();
+  const { res, json } = await call(kbRoot, makeReq({ url: "/kb/api/status" }));
+  assert.equal(res.status, 200);
+  assert.equal(json.features.scope, true);
+});
+
+test("GET returns all mode for a fresh session", async () => {
+  const kbRoot = await setup();
+  const { res, json } = await call(kbRoot, makeReq({ url: "/kb/api/scope?session=s1" }));
+  assert.equal(res.status, 200);
+  assert.deepEqual(json.scope, { mode: "all", kbs: [], inheritedFrom: null });
+  assert.deepEqual(json.resolved, []);
+});
+
+test("GET validates the session parameter", async () => {
+  const kbRoot = await setup();
+  const missing = await call(kbRoot, makeReq({ url: "/kb/api/scope" }));
+  assert.equal(missing.res.status, 400);
+  assert.equal(missing.json.error.code, "SCOPE_INVALID");
+  const tooLong = await call(kbRoot, makeReq({ url: `/kb/api/scope?session=${"a".repeat(201)}` }));
+  assert.equal(tooLong.res.status, 400);
+});
+
+test("PUT saves a selected scope and GET reflects it with resolved counts", async () => {
+  const kbRoot = await setup();
+  const put = await call(kbRoot, makeReq({
+    method: "PUT",
+    body: { session: "s1", mode: "selected", kbs: ["甲库"] },
+  }));
+  assert.equal(put.res.status, 200);
+  assert.deepEqual(put.json.scope.kbs, ["甲库"]);
+  assert.deepEqual(put.json.resolved.map((row) => row.name), ["甲库"]);
+  assert.equal(put.json.resolved[0].docs, 0);
+  assert.equal(put.json.resolved[0].empty, true);
+  assert.ok(put.json.updatedAt);
+
+  const get = await call(kbRoot, makeReq({ url: "/kb/api/scope?session=s1" }));
+  assert.deepEqual(get.json.scope.kbs, ["甲库"]);
+  assert.ok(get.json.updatedAt);
+});
+
+test("PUT mode=all clears kbs", async () => {
+  const kbRoot = await setup();
+  await call(kbRoot, makeReq({ method: "PUT", body: { session: "s1", mode: "selected", kbs: ["甲库"] } }));
+  const put = await call(kbRoot, makeReq({ method: "PUT", body: { session: "s1", mode: "all", kbs: ["甲库"] } }));
+  assert.equal(put.res.status, 200);
+  assert.deepEqual(put.json.scope, { mode: "all", kbs: [], inheritedFrom: null });
+});
+
+test("PUT rejects an invalid mode", async () => {
+  const kbRoot = await setup();
+  const { res, json } = await call(kbRoot, makeReq({
+    method: "PUT",
+    body: { session: "s1", mode: "weird", kbs: [] },
+  }));
+  assert.equal(res.status, 400);
+  assert.equal(json.error.code, "SCOPE_INVALID");
+});
+
+test("PUT reports missing and archived kbs distinctly", async () => {
+  const kbRoot = await setup();
+  const missing = await call(kbRoot, makeReq({
+    method: "PUT",
+    body: { session: "s1", mode: "selected", kbs: ["不存在"] },
+  }));
+  assert.equal(missing.res.status, 404);
+  assert.equal(missing.json.error.code, "KB_NOT_FOUND");
+
+  await call(kbRoot, makeReq({ method: "POST", url: "/kb/api/kbs/%E4%B9%99%E5%BA%93/archive", body: { confirm: "乙库" } }));
+  const archived = await call(kbRoot, makeReq({
+    method: "PUT",
+    body: { session: "s1", mode: "selected", kbs: ["乙库"] },
+  }));
+  assert.equal(archived.res.status, 409);
+  assert.equal(archived.json.error.code, "KB_ARCHIVED");
+});
+
+test("PUT requires the x-kb-ui header", async () => {
+  const kbRoot = await setup();
+  const { res } = await call(kbRoot, makeReq({
+    method: "PUT",
+    headers: { "x-kb-ui": "" },
+    body: { session: "s1", mode: "all", kbs: [] },
+  }));
+  assert.equal(res.status, 403);
+});
+
+test("PUT rejects a cross-origin request", async () => {
+  const kbRoot = await setup();
+  const { res } = await call(kbRoot, makeReq({
+    method: "PUT",
+    headers: { origin: "http://evil.example" },
+    body: { session: "s1", mode: "all", kbs: [] },
+  }));
+  assert.equal(res.status, 403);
+});
+
+test("PUT reports SCOPE_WRITE_FAILED when the scopes file cannot be written", async () => {
+  const kbRoot = await setup();
+  await chmod(kbRoot, 0o555);
+  try {
+    const { res, json } = await call(kbRoot, makeReq({
+      method: "PUT",
+      body: { session: "s1", mode: "all", kbs: [] },
+    }));
+    assert.equal(res.status, 500);
+    assert.equal(json.error.code, "SCOPE_WRITE_FAILED");
+  } finally {
+    await chmod(kbRoot, 0o755);
+  }
+});
