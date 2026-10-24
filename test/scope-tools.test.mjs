@@ -687,3 +687,70 @@ test("scope names: multi-kb resolution sanitizes names at the normalize root", a
     }
   );
 });
+
+test("kb_lint: selected multi-kb scope lints each kb and groups results", async () => {
+  const { tools, scoped, importDoc, scope } = await setup();
+  await importDoc("a.md", "# 甲\n\n正文。\n", "甲库", "甲文档");
+  await importDoc("b.md", "# 乙\n\n正文。\n", "乙库", "乙文档");
+  await scope("s1", ["甲库", "乙库"]);
+  const result = await tools.get("kb_lint").execute({}, scoped("s1"));
+  assert.equal(result.kb, "scope");
+  assert.deepEqual(result.kbs.map((row) => row.kb), ["甲库", "乙库"]);
+  assert.match(tools.get("kb_lint").output.render({}, result)[0].text, /甲库/);
+});
+
+test("kb_lint: explicit out-of-scope kb is rejected", async () => {
+  const { tools, scoped, importDoc, scope } = await setup();
+  await importDoc("a.md", "# 甲\n\n正文。\n", "甲库", "甲文档");
+  await importDoc("b.md", "# 乙\n\n正文。\n", "乙库", "乙文档");
+  await scope("s1", ["甲库"]);
+  await assert.rejects(
+    () => tools.get("kb_lint").execute({ kb: "乙库" }, scoped("s1")),
+    (error) => error.code === "KB_OUT_OF_SCOPE"
+  );
+});
+
+test("kb_std_check: default kb is 标准 even in all mode", async () => {
+  const { tools, scoped, kbRoot } = await setup();
+  // runStdCheck 依赖 kb.json，空库也要有清单（否则会抛「知识库清单不存在」）；
+  // 空清单没有任何标准号，检查不会发起网络请求。
+  await mkdir(join(kbRoot, "标准"), { recursive: true });
+  await writeFile(join(kbRoot, "标准", "kb.json"), JSON.stringify({ schemaVersion: 5, name: "标准", docs: [] }), "utf8");
+  const result = await tools.get("kb_std_check").execute({ action: "check" }, scoped("s1"));
+  assert.equal(result.kb, "标准");
+});
+
+test("kb_std_check: selected scope without 标准 is out of scope", async () => {
+  const { tools, scoped, importDoc, scope } = await setup();
+  await importDoc("a.md", "# 甲\n\n正文。\n", "甲库", "甲文档");
+  await scope("s1", ["甲库"]);
+  await assert.rejects(
+    () => tools.get("kb_std_check").execute({ action: "check" }, scoped("s1")),
+    (error) => error.code === "KB_OUT_OF_SCOPE"
+  );
+});
+
+test("kb_std_check: explicit out-of-scope kb is rejected", async () => {
+  const { tools, scoped, importDoc, scope } = await setup();
+  await importDoc("a.md", "# 甲\n\n正文。\n", "甲库", "甲文档");
+  await importDoc("b.md", "# 乙\n\n正文。\n", "乙库", "乙文档");
+  await scope("s1", ["甲库"]);
+  await assert.rejects(
+    () => tools.get("kb_std_check").execute({ kb: "乙库", action: "check" }, scoped("s1")),
+    (error) => error.code === "KB_OUT_OF_SCOPE"
+  );
+});
+
+test("kb_rename: requires explicit kb and rejects out-of-scope targets", async () => {
+  const { tools, scoped, importDoc, scope } = await setup();
+  await importDoc("a.md", "# 甲\n\n正文。\n", "甲库", "甲文档");
+  await importDoc("b.md", "# 乙\n\n正文。\n", "乙库", "乙文档");
+  await scope("s1", ["甲库"]);
+  await assert.rejects(() => tools.get("kb_rename").execute({ newName: "甲库2" }, scoped("s1")), (error) => error.code === "KB_REQUIRED");
+  await assert.rejects(
+    () => tools.get("kb_rename").execute({ kb: "乙库", newName: "乙库2" }, scoped("s1")),
+    (error) => error.code === "KB_OUT_OF_SCOPE"
+  );
+  const renamed = await tools.get("kb_rename").execute({ kb: "甲库", newName: "甲库2" }, scoped("s1"));
+  assert.equal(renamed.kb, "甲库2");
+});
