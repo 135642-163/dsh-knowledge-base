@@ -64,6 +64,7 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
     pollRetry: 0,
     allowCrossDuplicates: false,
     ocrModel: "best",
+    forceOcr: false,
   };
 
   let resumeToken = 0;
@@ -150,7 +151,8 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
               <option value="fast" ${state.ocrModel === "fast" ? "selected" : ""}>fast（更快）</option>
             </select>
           </label>
-          <span class="muted">仅扫描版 PDF / 图片需要；文字版 PDF 不受影响</span>
+          <label class="check"><input type="checkbox" id="upload-force-ocr" ${state.forceOcr ? "checked" : ""} /> 强制 OCR</label>
+          <span class="muted">仅扫描版 PDF / 图片需要；文字层损坏时勾选「强制 OCR」</span>
         </div>
         ${state.resumeChecked ? "" : `<p class="muted">正在检查目标库的上次导入任务…</p>`}
         <p class="form-error" ${state.error ? "" : "hidden"}>${escapeHtml(state.error)}</p>
@@ -291,6 +293,9 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
         state.ocrModel = event.target.value === "fast" ? "fast" : "best";
       });
     }
+    modal.querySelector("#upload-force-ocr")?.addEventListener("change", (event) => {
+      state.forceOcr = event.target.checked === true;
+    });
   }
 
   function pick({ directory }) {
@@ -424,6 +429,7 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
     const imported = await api.importBatch(state.batchId, {
       allowCrossDuplicates: state.allowCrossDuplicates,
       ocrModel: state.ocrModel,
+      forceOcr: state.forceOcr,
     });
     if (state.closed) {
       // 关闭发生在导入请求期间：任务可能已经启动，记下来供下次恢复。
