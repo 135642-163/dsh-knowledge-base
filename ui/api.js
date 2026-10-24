@@ -80,6 +80,34 @@ export const api = {
     return request("GET", `/kbs/${encodeURIComponent(name)}/docs?${query.toString()}`);
   },
   doc: (name, id) => request("GET", `/kbs/${encodeURIComponent(name)}/docs/${encodeURIComponent(id)}`),
+  /** 软删除（默认）或永久删除；永久删除必须逐字给出 confirm=标题。 */
+  deleteDoc: (name, id, { permanent = false, confirm } = {}) => request(
+    "POST",
+    `/kbs/${encodeURIComponent(name)}/docs/${encodeURIComponent(id)}/delete`,
+    {
+      permanent: permanent === true,
+      ...(confirm !== undefined ? { confirm: String(confirm) } : {}),
+    },
+  ),
+  restoreDoc: (name, id) => request("POST", `/kbs/${encodeURIComponent(name)}/docs/${encodeURIComponent(id)}/restore`, {}),
+  reparseDoc: (name, id) => request("POST", `/kbs/${encodeURIComponent(name)}/docs/${encodeURIComponent(id)}/reparse`, {}),
+  /** 移动预检：只读，返回逐篇文件大小与目标库冲突。 */
+  movePreflight: (name, { ids = [], target = "" } = {}) => request(
+    "POST",
+    `/kbs/${encodeURIComponent(name)}/docs/move/preflight`,
+    { ids, target },
+  ),
+  /** 跨库移动：onConflict=skip（默认）或 rename。 */
+  moveDocs: (name, { ids = [], target = "", onConflict = "skip" } = {}) => request(
+    "POST",
+    `/kbs/${encodeURIComponent(name)}/docs/move`,
+    { ids, target, onConflict },
+  ),
+  undoMove: (name, id, { target = "" } = {}) => request(
+    "POST",
+    `/kbs/${encodeURIComponent(name)}/docs/${encodeURIComponent(id)}/undo-move`,
+    { target },
+  ),
   createKb: (body) => request("POST", "/kbs", body),
   patchKb: (name, body) => request("PATCH", `/kbs/${encodeURIComponent(name)}`, body),
   archiveKb: (name, confirm) => request("POST", `/kbs/${encodeURIComponent(name)}/archive`, { confirm }),

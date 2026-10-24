@@ -2,11 +2,12 @@ import { api, ApiError } from "./api.js";
 import { icons } from "./icons.js";
 import { hrefForKb, hrefForOverview, hrefForTrash, parseHash } from "./router.js";
 import { renderOverview } from "./views/overview.js";
-import { docsPageSize, docsStatus, renderDetail } from "./views/detail.js";
+import { docsPageSize, docsStatus, renderDetail, selectionToggle, selectionToggleOne } from "./views/detail.js";
 import { attachDocsControls, createRequestGate } from "./docs-controls.js";
 import { renderTrash } from "./views/trash.js";
 import {
-  openConfirmModal, openCreateModal, openDocModal, openKbPickerModal, openPreviewModal, openRenameModal, openRestoreModal,
+  deleteConfirmBody, openConfirmModal, openCreateModal, openDocModal, openKbPickerModal, openMoveModal,
+  openPreviewModal, openRenameModal, openRestoreModal, retryFailedDoc,
 } from "./views/modals.js";
 import { openUploadModal } from "./views/upload.js";
 
@@ -24,7 +25,10 @@ const state = {
   detail: null,
   detailLoading: false,
   detailError: "",
-  docs: { items: [], total: 0, offset: 0, limit: 50, query: "", appliedQuery: "", status: "" },
+  docs: {
+    items: [], total: 0, offset: 0, limit: 50, query: "", appliedQuery: "", status: "",
+    selected: [], busy: false, retrying: [],
+  },
   notes: { items: [], total: 0, loading: false, error: "" },
   trash: { items: [], loading: false, error: "" },
   std: {
@@ -91,9 +95,14 @@ async function loadDetail(name, tab) {
   const token = detailGate.begin();
   if (state.detail?.kb?.name !== name) {
     state.detail = null;
-    state.docs = { items: [], total: 0, offset: 0, limit: 50, query: "", appliedQuery: "", status: "" };
+    state.docs = {
+      items: [], total: 0, offset: 0, limit: 50, query: "", appliedQuery: "", status: "",
+      selected: [], busy: false, retrying: [],
+    };
     state.notes = { items: [], total: 0, loading: false, error: "" };
   }
+  // 离开资料 tab 时清空勾选；跨页/同页刷新时保留（loadCurrentDocs 只在搜索变化时清）。
+  if (tab !== "docs") state.docs.selected = [];
   // 笔记 tab 先亮加载态再等列表：同库切 tab 时不会闪一下「还没有笔记」。
   if (tab === "notes") state.notes = { ...state.notes, loading: true, error: "" };
   state.detailLoading = true;
@@ -118,6 +127,7 @@ async function loadDetail(name, tab) {
         || query !== String(state.docs.query ?? "")
         || status !== docsStatus(state.docs.status)) return { stale: true };
       state.docs = {
+        ...state.docs,
         items: docs.docs,
         total: docs.total,
         offset: docs.offset,
@@ -162,10 +172,186 @@ async function loadDetail(name, tab) {
 }
 
 /** 资料工具栏的 load 回调：只在当前路由仍是该库的资料 tab 时发请求。 */
-function loadCurrentDocs() {
+function loadCurrentDocs(request = {}) {
   const current = route();
   if (current.page !== "detail" || (current.tab || "overview") !== "docs") return Promise.resolve({ stale: true });
+  // 搜索词变化时先清空勾选；翻页/改每页条数（query 未变）保留跨页选择。
+  if (String(request?.query ?? "") !== String(state.docs.appliedQuery ?? "")) state.docs.selected = [];
   return loadDetail(current.name, "docs");
+}
+
+function errorText(error) {
+  return error instanceof ApiError ? error.message : String(error?.message ?? error);
+}
+
+/** 当前选中的资料（对象含 id/title/status，跨页保留）。 */
+function selectedDocs() {
+  return Array.isArray(state.docs.selected) ? state.docs.selected : [];
+}
+
+function pageDocById(id) {
+  const key = String(id ?? "");
+  return (Array.isArray(state.docs.items) ? state.docs.items : [])
+    .find((doc) => String(doc.id) === key) ?? null;
+}
+
+/** 文档操作后的统一刷新：侧栏计数 + 当前详情页（不闪整页 loading）。 */
+async function refreshAfterDocsChange() {
+  await refreshKbsQuiet();
+  const current = route();
+  if (current.page === "detail") await loadDetail(current.name, current.tab || "overview");
+}
+
+/** 软删除一篇或多篇：先确认，再逐篇调用；部分失败时报告成功/失败数量。 */
+function trashDocs(docs) {
+  const current = route();
+  const list = (Array.isArray(docs) ? docs : []).filter((doc) => doc?.id);
+  if (current.page !== "detail" || list.length === 0) return;
+  const name = current.name;
+  openConfirmModal({
+    title: list.length > 1 ? `移入回收站（${list.length} 篇）` : `移入回收站「${list[0].title}」`,
+    body: deleteConfirmBody(list),
+    confirmText: "移入回收站",
+    onConfirm: async () => {
+      state.docs.busy = true;
+      render();
+      const settled = await Promise.allSettled(list.map((doc) => api.deleteDoc(name, doc.id)));
+      const failures = settled.filter((item) => item.status === "rejected");
+      state.docs.selected = [];
+      try {
+        await refreshAfterDocsChange();
+      } finally {
+        state.docs.busy = false;
+        render();
+      }
+      const ok = list.length - failures.length;
+      if (failures.length === 0) {
+        showToast(list.length > 1 ? `已移入回收站（${list.length} 篇）` : "已移入回收站");
+        return;
+      }
+      const reason = errorText(failures[0].reason);
+      showToast(ok > 0
+        ? `${ok} 篇已移入回收站，${failures.length} 篇失败：${reason}`
+        : `移入回收站失败：${reason}`, "error");
+    },
+  });
+}
+
+/** 从已删除行恢复；失败时保留列表并提示原因。 */
+async function restoreDocAction(doc) {
+  const current = route();
+  if (current.page !== "detail" || !doc?.id) return;
+  if (state.docs.busy) return;
+  state.docs.busy = true;
+  render();
+  try {
+    await api.restoreDoc(current.name, doc.id);
+    state.docs.busy = false;
+    showToast("已恢复");
+    await refreshAfterDocsChange();
+  } catch (error) {
+    state.docs.busy = false;
+    showToast(errorText(error), "error");
+    render();
+  }
+}
+
+/** 彻底删除：必须逐字输入标题；400 等错误留在弹窗内联显示。 */
+function purgeDoc(doc) {
+  const current = route();
+  if (current.page !== "detail" || !doc?.id) return;
+  const title = String(doc.title ?? "").trim();
+  openConfirmModal({
+    title: `彻底删除「${doc.title}」`,
+    body: "彻底删除后，原件、解析内容与历史版本都会删除，无法恢复。",
+    confirmText: "彻底删除",
+    requireText: title,
+    textLabel: "输入文档标题",
+    danger: true,
+    onConfirm: async () => {
+      state.docs.busy = true;
+      render();
+      try {
+        await api.deleteDoc(current.name, doc.id, { permanent: true, confirm: title });
+      } finally {
+        state.docs.busy = false;
+        render();
+      }
+      showToast("已彻底删除");
+      await refreshAfterDocsChange();
+    },
+  });
+}
+
+/** 撤销跨库移动：源库文档恢复、目标库副本进回收站。 */
+function undoMoveDoc(doc) {
+  const current = route();
+  const target = String(doc?.movedTo?.kb ?? "");
+  if (current.page !== "detail" || !doc?.id || target === "") return;
+  openConfirmModal({
+    title: `撤销移动「${doc.title}」`,
+    body: `源库文档会恢复，目标库「${target}」中的副本会移入回收站；两边的原件与解析内容都保留。`,
+    confirmText: "撤销移动",
+    onConfirm: async () => {
+      state.docs.busy = true;
+      render();
+      try {
+        await api.undoMove(current.name, doc.id, { target });
+      } finally {
+        state.docs.busy = false;
+        render();
+      }
+      showToast("已撤销移动");
+      await refreshAfterDocsChange();
+    },
+  });
+}
+
+/** 失败行重试：启动 reparse 任务并轮询，结算后刷新列表；同一行不重复触发。 */
+async function retryRowDoc(doc) {
+  const current = route();
+  if (current.page !== "detail" || !doc?.id) return;
+  const id = String(doc.id);
+  if (state.docs.retrying.includes(id)) return;
+  state.docs.retrying = [...state.docs.retrying, id];
+  render();
+  try {
+    await retryFailedDoc({
+      name: current.name,
+      id,
+      notify: showToast,
+      onSettled: async () => { await refreshAfterDocsChange(); },
+    });
+  } catch (error) {
+    showToast(errorText(error), "error");
+  } finally {
+    state.docs.retrying = state.docs.retrying.filter((item) => item !== id);
+    render();
+  }
+}
+
+/** 多选移动：只有就绪资料可移动，其余跳过并提示。 */
+function moveSelectedDocs() {
+  const current = route();
+  const selected = selectedDocs();
+  const movable = selected.filter((doc) => doc.status === "ready");
+  if (movable.length === 0) {
+    showToast("所选资料中没有可移动的就绪资料");
+    return;
+  }
+  if (movable.length < selected.length) {
+    showToast(`仅移动就绪资料，已忽略 ${selected.length - movable.length} 篇`);
+  }
+  openMoveModal({
+    name: current.name,
+    ids: movable.map((doc) => doc.id),
+    kbs: state.kbs,
+    notify: showToast,
+    onDone: async () => {
+      state.docs.selected = [];
+      await refreshAfterDocsChange();
+    },
+  });
 }
 
 function stdErrorText(error) {
@@ -524,7 +710,13 @@ function bind() {
     } else if (action === "open-kb") {
       window.location.hash = hrefForKb(target.dataset.name);
     } else if (action === "open-doc") {
-      openDocModal({ name: target.dataset.kb, id: target.dataset.id, icons, fmtNumber });
+      openDocModal({
+        name: target.dataset.kb,
+        id: target.dataset.id,
+        icons,
+        notify: showToast,
+        onChanged: refreshAfterDocsChange,
+      });
     } else if (action === "open-note") {
       const current = route();
       const id = target.dataset.id;
@@ -543,6 +735,7 @@ function bind() {
       const current = route();
       if (current.page !== "detail") return;
       state.docs.status = docsStatus(target.dataset.docsStatus);
+      state.docs.selected = [];
       state.docs.offset = 0;
       if (current.tab !== "docs") {
         window.location.hash = hrefForKb(current.name, "docs");
@@ -559,6 +752,40 @@ function bind() {
       state.docs.limit = limit;
       state.docs.offset = Math.max(0, Math.round(Number(target.dataset.offset) || 0));
       await loadDetail(current.name, "docs");
+    } else if (action === "docs-select") {
+      const doc = pageDocById(target.dataset.id);
+      if (!doc) return;
+      state.docs.selected = selectionToggleOne(state.docs.selected, doc, target.checked);
+      render();
+    } else if (action === "docs-select-all") {
+      state.docs.selected = selectionToggle(state.docs.selected, state.docs.items ?? []);
+      render();
+    } else if (action === "docs-clear-selection") {
+      if (state.docs.busy) return;
+      state.docs.selected = [];
+      render();
+    } else if (action === "docs-move") {
+      if (state.docs.busy) return;
+      moveSelectedDocs();
+    } else if (action === "docs-trash-selected") {
+      if (state.docs.busy) return;
+      trashDocs(selectedDocs());
+    } else if (action === "docs-remove") {
+      if (state.docs.busy) return;
+      const doc = pageDocById(target.dataset.id);
+      if (doc) trashDocs([{ id: doc.id, title: doc.title }]);
+    } else if (action === "docs-retry") {
+      const doc = pageDocById(target.dataset.id);
+      if (doc) await retryRowDoc(doc);
+    } else if (action === "docs-restore") {
+      const doc = pageDocById(target.dataset.id);
+      if (doc) await restoreDocAction(doc);
+    } else if (action === "docs-purge") {
+      const doc = pageDocById(target.dataset.id);
+      if (doc) purgeDoc(doc);
+    } else if (action === "docs-undo-move") {
+      const doc = pageDocById(target.dataset.id);
+      if (doc) undoMoveDoc(doc);
     } else if (action === "archive-kb") {
       const current = route();
       if (!current.name) return;
@@ -740,6 +967,8 @@ function boot() {
   window.addEventListener("hashchange", () => {
     // 路由/切库/切 tab：让所有在途详情与资料请求作废，且不重新渲染旧页面。
     detailGate.invalidate();
+    // 离开资料 tab / 换库：跨页勾选只在当前资料 tab 内保留。
+    state.docs.selected = [];
     stopStd();
     const current = route();
     if (current.page === "trash") loadTrash();

@@ -276,3 +276,65 @@ body.embed .side-foot a[target="_blank"] { display: none; }
   gap: 8px; padding: 24px; text-align: center;
 }
 .preview-unsupported .btn { margin-top: 8px; }
+
+/* 资料操作：多选、回收站、行内操作与移动/重试（0.23.0） */
+.confirm-body p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.table-scroll { overflow-x: auto; }
+.docs-table .col-check { width: 34px; padding-right: 2px; }
+.docs-table .col-check input { width: 15px; height: 15px; margin: 2px 0 0; }
+.docs-table .col-actions { white-space: nowrap; }
+.docs-table .doc-deleted td,
+.docs-table .doc-deleted .link { color: var(--muted); }
+.doc-row .badge { margin-left: 6px; }
+.btn.mini { padding: 2px 8px; font-size: 12px; border-radius: 6px; line-height: 1.5; }
+.docs-bulk {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin: 0 0 10px; padding: 8px 10px;
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--line));
+  border-radius: 8px; font-size: 13px;
+}
+.docs-bulk strong { margin-right: 2px; }
+.docs-bulk .btn { padding: 4px 9px; font-size: 12px; }
+
+/* 跨库移动弹窗与结果页 */
+.modal.move-modal { width: min(720px, 92vw); max-height: 92vh; }
+.move-summary { margin: 0; }
+.move-preflight { min-height: 22px; }
+.move-conflict-mode { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.move-ack { align-items: flex-start; line-height: 1.5; }
+.move-hint { margin: 0; font-size: 12px; }
+.conflict-groups { border-top: 1px dashed var(--line); padding-top: 10px; display: grid; gap: 8px; }
+.conflict-title { margin: 0; font-weight: 600; }
+.conflict-group { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.conflict-head { color: var(--accent); font-weight: 600; font-size: 13px; }
+.conflict-list { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; max-height: 160px; overflow: auto; }
+.conflict-row { display: flex; gap: 10px; justify-content: space-between; align-items: baseline; font-size: 13px; }
+.conflict-name { overflow-wrap: anywhere; }
+.conflict-target { flex: 0 1 auto; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.move-result-summary { margin: 0; font-weight: 600; }
+.result-group { border-top: 1px dashed var(--line); padding-top: 8px; }
+.result-group h3 { margin: 0 0 6px; font-size: 13px; color: var(--muted); font-weight: 600; }
+.result-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; max-height: 200px; overflow: auto; }
+.result-list li { display: flex; gap: 10px; justify-content: space-between; align-items: baseline; font-size: 13px; }
+.result-name { overflow-wrap: anywhere; }
+.result-reason { flex: 0 1 auto; text-align: right; overflow-wrap: anywhere; }
+.move-progress, .move-undo-report { margin: 0; font-size: 12px; }
+
+/* 失败文档详情：错误原因等宽、可滚动、限高 */
+.doc-error { background: var(--panel-2); border: 1px solid color-mix(in srgb, var(--danger) 25%, var(--line)); border-radius: 8px; padding: 10px; }
+.doc-error-text {
+  margin: 0; max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; color: var(--danger);
+}
+.doc-warnings { margin: 8px 0 0; padding-left: 18px; color: var(--muted); font-size: 12px; max-height: 120px; overflow: auto; }
+.doc-retry-state { margin: 8px 0 0; }
+
+/* 窄屏（含 320px）：只保留勾选、标题与操作，其余列可横向滚动/隐藏 */
+@media (max-width: 560px) {
+  .docs-table th:nth-child(3), .docs-table td:nth-child(3),
+  .docs-table th:nth-child(4), .docs-table td:nth-child(4),
+  .docs-table th:nth-child(5), .docs-table td:nth-child(5),
+  .docs-table th:nth-child(6), .docs-table td:nth-child(6) { display: none; }
+  .docs-bulk { align-items: stretch; }
+}

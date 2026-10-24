@@ -6,7 +6,7 @@ import { renderStdPanel } from "./std.js";
 export const DOCS_PAGE_SIZES = [50, 100, 200];
 
 /** 资料 tab 的状态筛选（空字符串=全部）；其余值一律回落到全部。 */
-export const DOCS_STATUSES = ["", "failed", "importing"];
+export const DOCS_STATUSES = ["", "failed", "importing", "deleted"];
 
 export function docsStatus(value) {
   const status = String(value ?? "").trim();
@@ -16,7 +16,112 @@ export function docsStatus(value) {
 export function docsStatusLabel(status) {
   if (status === "failed") return "有失败";
   if (status === "importing") return "导入中";
+  if (status === "deleted") return "已删除";
   return "全部";
+}
+
+/** 只有 ready/failed 行可以勾选：导入中不能操作，已删除只保留行内操作。 */
+export function selectableDoc(doc) {
+  return doc?.status === "ready" || doc?.status === "failed";
+}
+
+function selectionEntry(doc) {
+  return {
+    id: String(doc?.id ?? ""),
+    title: String(doc?.title ?? ""),
+    status: String(doc?.status ?? ""),
+  };
+}
+
+function selectionList(selected) {
+  return (Array.isArray(selected) ? selected : []).map((item) => (
+    typeof item === "string" ? { id: item, title: "", status: "" } : selectionEntry(item)
+  ));
+}
+
+/** 选中项的 id 列表（保持选择顺序）。 */
+export function selectionIds(selected) {
+  return selectionList(selected).map((item) => item.id).filter(Boolean);
+}
+
+/** 某篇资料是否在当前选择里。 */
+export function selectionHas(selected, id) {
+  const target = String(id ?? "");
+  return selectionList(selected).some((item) => item.id === target);
+}
+
+/** 表头复选框：本页可勾选行全选中时再点=全部取消，否则补齐本页。 */
+export function selectionToggle(selected, rows) {
+  const current = selectionList(selected);
+  const pageRows = (Array.isArray(rows) ? rows : []).filter(selectableDoc);
+  if (pageRows.length === 0) return current;
+  const selectedIds = new Set(current.map((item) => item.id));
+  if (pageRows.every((row) => selectedIds.has(String(row.id)))) {
+    const pageIds = new Set(pageRows.map((row) => String(row.id)));
+    return current.filter((item) => !pageIds.has(item.id));
+  }
+  const seen = new Set(current.map((item) => item.id));
+  const next = [...current];
+  for (const row of pageRows) {
+    const entry = selectionEntry(row);
+    if (seen.has(entry.id)) continue;
+    seen.add(entry.id);
+    next.push(entry);
+  }
+  return next;
+}
+
+/** 单行复选框：checked 明确给出时按它增删，否则按当前状态取反。 */
+export function selectionToggleOne(selected, doc, checked) {
+  const current = selectionList(selected);
+  const id = String(doc?.id ?? "");
+  if (id === "") return current;
+  const exists = current.some((item) => item.id === id);
+  const want = checked === undefined ? !exists : Boolean(checked);
+  if (!want) return current.filter((item) => item.id !== id);
+  return exists ? current : [...current, selectionEntry(doc)];
+}
+
+/** 本页可勾选行是否已全部选中（没有可勾选行时为 false）。 */
+export function selectionAllSelected(selected, rows) {
+  const pageRows = (Array.isArray(rows) ? rows : []).filter(selectableDoc);
+  if (pageRows.length === 0) return false;
+  const ids = new Set(selectionList(selected).map((item) => item.id));
+  return pageRows.every((row) => ids.has(String(row.id)));
+}
+
+/** 行内操作集合：ready=移除；failed=重试+移除；deleted=恢复/撤销移动+彻底删除。 */
+export function docRowActions(doc) {
+  if (!doc) return [];
+  if (doc.status === "failed") return ["retry", "remove"];
+  if (doc.status === "ready") return ["remove"];
+  if (doc.status === "deleted") {
+    // 已跨库移动过的文档只能用「撤销移动」恢复；普通「恢复」会留下两份可用副本。
+    return doc.movedTo ? ["undo-move", "purge"] : ["restore", "purge"];
+  }
+  return [];
+}
+
+const DOC_ACTION_LABELS = Object.freeze({
+  retry: "重试",
+  remove: "移除",
+  restore: "恢复",
+  purge: "彻底删除",
+  "undo-move": "撤销移动",
+});
+
+/** 多选工具条；没有选中项时不渲染。 */
+export function renderDocsBulkBar({ selected = [], busy = false } = {}) {
+  const count = Array.isArray(selected) ? selected.length : 0;
+  if (count === 0) return "";
+  return `
+    <div class="docs-bulk">
+      <strong>已选 ${count} 篇</strong>
+      <button type="button" class="btn" data-action="docs-move"${busy ? " disabled" : ""}>移动到…</button>
+      <button type="button" class="btn danger" data-action="docs-trash-selected"${busy ? " disabled" : ""}>移入回收站</button>
+      <button type="button" class="btn" data-action="docs-clear-selection"${busy ? " disabled" : ""}>取消选择</button>
+    </div>
+  `;
 }
 
 /** 旧状态/手改 URL 里的其它 limit 一律回落到默认 50。 */
@@ -72,7 +177,7 @@ export function renderDetail(state, current, { icons, fmtNumber }) {
         ${tabLink(kb.name, "settings", "设置", tab)}
       </nav>
       ${tab === "overview" ? overview(kb, detail, { fmtNumber }) : ""}
-      ${tab === "docs" ? docs(kb.name, state, { fmtNumber, icons }) : ""}
+      ${tab === "docs" ? docs(kb, state, { fmtNumber, icons }) : ""}
       ${tab === "notes" ? notes(state, { fmtNumber }) : ""}
       ${tab === "log" ? log(detail.logTail) : ""}
       ${tab === "std" ? renderStdPanel(state, kb.name, { escapeHtml }) : ""}
@@ -124,7 +229,8 @@ function overview(kb, detail, { fmtNumber }) {
   `;
 }
 
-function docs(name, state, { fmtNumber, icons }) {
+function docs(kb, state, { fmtNumber, icons }) {
+  const name = kb?.name ?? "";
   const page = state.docs;
   const query = String(page.query ?? "");
   // 输入框显示的是正在输入的词；结果属于真正应用过的 appliedQuery。
@@ -136,11 +242,20 @@ function docs(name, state, { fmtNumber, icons }) {
   const limit = docsPageSize(page.limit);
   const offset = Math.max(0, Math.round(Number(page.offset) || 0));
   const items = Array.isArray(page.items) ? page.items : [];
+  const selected = Array.isArray(page.selected) ? page.selected : [];
+  const retrying = Array.isArray(page.retrying) ? page.retrying : [];
+  const busy = Boolean(page.busy);
+  const deleted = Math.max(0, Math.round(Number(kb?.docs?.deleted) || 0));
+  // 「已删除」筛选只在有回收站内容时出现；正在看回收站时即使刚清空也保留入口。
+  const showDeleted = deleted > 0 || status === "deleted";
+  const toolbar = (extra) => docsToolbar({
+    query, limit, status, deleted, showDeleted, fmtNumber, icons, ...extra,
+  });
   if (searching) {
     // 防抖/请求在途：只保留工具栏与「正在搜索…」，不把上一轮的行/表格挂在新搜索词下。
     return `
       <div class="panel">
-        ${docsToolbar({ query, limit, status, total, pages: 1, pageNo: 1, fmtNumber, icons, showPager: false })}
+        ${toolbar({ total, pages: 1, pageNo: 1, showPager: false })}
         <div class="state docs-empty"><p>正在搜索…</p></div>
       </div>
     `;
@@ -155,10 +270,12 @@ function docs(name, state, { fmtNumber, icons }) {
       ? "没有匹配的资料"
       : status === "failed"
         ? "没有导入失败的资料"
-        : "没有导入中的资料";
+        : status === "deleted"
+          ? "没有已删除的资料"
+          : "没有导入中的资料";
     return `
       <div class="panel">
-        ${docsToolbar({ query, limit, status, total, pages: 1, pageNo: 1, fmtNumber, icons, showPager: false })}
+        ${toolbar({ total, pages: 1, pageNo: 1, showPager: false })}
         <div class="state docs-empty">
           <p>${message}</p>
           ${filtered ? `<button class="btn" data-docs-clear>清除搜索</button>` : ""}
@@ -169,39 +286,71 @@ function docs(name, state, { fmtNumber, icons }) {
   const pages = docsPageCount(total, limit);
   const pageNo = clampDocsPage(Math.floor(offset / limit) + 1, pages);
   const rangeEnd = Math.min(offset + items.length, total);
+  const selectableCount = items.filter(selectableDoc).length;
   return `
     <div class="panel">
-      ${docsToolbar({ query, limit, status, total, pages, pageNo, fmtNumber, icons, showPager: true })}
+      ${toolbar({ total, pages, pageNo, showPager: true })}
+      ${renderDocsBulkBar({ selected, busy })}
       <div class="table-head">
         <strong>${fmtNumber(total)} 篇</strong>
         ${items.length > 0
           ? `<span class="muted">第 ${fmtNumber(offset + 1)}–${fmtNumber(rangeEnd)} 篇</span>`
           : ""}
       </div>
-      <table class="table">
-        <thead><tr><th>标题</th><th>类型</th><th>页数</th><th>可信度</th><th>更新</th></tr></thead>
-        <tbody>
-          ${items.map((doc) => `<tr>
-            <td><button class="link" data-action="open-doc" data-kb="${escapeAttr(name)}" data-id="${escapeAttr(doc.id)}">${escapeHtml(doc.title)}</button></td>
-            <td class="muted">${escapeHtml(doc.type ?? "")}</td>
-            <td class="muted">${fmtNumber(doc.pages)}</td>
-            <td class="muted">${escapeHtml(doc.trust)}</td>
-            <td class="muted">${formatDate(doc.updatedAt)}</td>
-          </tr>`).join("")}
-        </tbody>
-      </table>
+      <div class="table-scroll">
+        <table class="table docs-table">
+          <thead><tr>
+            <th class="col-check"><input type="checkbox" data-action="docs-select-all" aria-label="选择本页可操作资料"${selectionAllSelected(selected, items) ? " checked" : ""}${selectableCount === 0 ? " disabled" : ""} /></th>
+            <th>标题</th><th>类型</th><th>页数</th><th>可信度</th><th>更新</th><th class="col-actions">操作</th>
+          </tr></thead>
+          <tbody>
+            ${items.map((doc) => {
+              const checkable = selectableDoc(doc);
+              const checked = checkable && selectionHas(selected, doc.id);
+              const isRetrying = retrying.includes(String(doc.id));
+              const actions = docRowActions(doc);
+              return `<tr class="doc-row${doc.deleted ? " doc-deleted" : ""}">
+                <td class="col-check">${checkable ? `<input type="checkbox" data-action="docs-select" data-id="${escapeAttr(doc.id)}" aria-label="选择 ${escapeAttr(doc.title)}"${checked ? " checked" : ""} />` : ""}</td>
+                <td>
+                  <button class="link" data-action="open-doc" data-kb="${escapeAttr(name)}" data-id="${escapeAttr(doc.id)}">${escapeHtml(doc.title)}</button>
+                  ${doc.deleted ? `<span class="badge">已删除</span>` : ""}
+                  ${doc.status === "failed" ? `<span class="badge warn">失败</span>` : ""}
+                  ${doc.movedTo?.kb ? `<span class="badge accent">已移至 ${escapeHtml(doc.movedTo.kb)}</span>` : ""}
+                </td>
+                <td class="muted">${escapeHtml(doc.type ?? "")}</td>
+                <td class="muted">${fmtNumber(doc.pages)}</td>
+                <td class="muted">${escapeHtml(doc.trust)}</td>
+                <td class="muted">${formatDate(doc.updatedAt)}</td>
+                <td class="col-actions">${actions.map((action) => docActionButton(doc, action, { busy, retrying: isRetrying })).join("")}</td>
+              </tr>`;
+            }).join("")}
+          </tbody>
+        </table>
+      </div>
       ${docsPager({ pageNo, pages, total, limit, fmtNumber, label: "底部分页" })}
     </div>
   `;
 }
 
-function docsToolbar({ query, limit, status, total, pages, pageNo, fmtNumber, icons, showPager }) {
+function docActionButton(doc, action, { busy, retrying }) {
+  const label = action === "retry" && retrying ? "重试中…" : DOC_ACTION_LABELS[action];
+  const disabled = busy || (action === "retry" && retrying);
+  const target = action === "undo-move" ? ` data-target="${escapeAttr(doc.movedTo?.kb ?? "")}"` : "";
+  const danger = action === "purge" ? " danger" : "";
+  return `<button type="button" class="btn mini${danger}" data-action="docs-${action}" data-id="${escapeAttr(doc.id)}"${target}${disabled ? " disabled" : ""}>${label}</button>`;
+}
+
+function docsToolbar({ query, limit, status, deleted = 0, showDeleted = false, total, pages, pageNo, fmtNumber, icons, showPager }) {
+  const statuses = DOCS_STATUSES.filter((value) => value !== "deleted" || showDeleted);
   return `
     <div class="table-tools">
       <div class="segmented docs-status" role="group" aria-label="按状态筛选资料">
-        ${DOCS_STATUSES.map((value) => `
-          <button type="button" class="seg${status === value ? " active" : ""}" data-action="docs-status" data-docs-status="${value}" aria-pressed="${status === value}">${docsStatusLabel(value)}</button>
-        `).join("")}
+        ${statuses.map((value) => {
+          const title = value === "deleted" ? ` title="已删除 ${fmtNumber(deleted)} 篇"` : "";
+          return `
+          <button type="button" class="seg${status === value ? " active" : ""}" data-action="docs-status" data-docs-status="${value}" aria-pressed="${status === value}"${title}>${docsStatusLabel(value)}</button>
+        `;
+        }).join("")}
       </div>
       <label class="search docs-search">
         ${icons?.search ?? ""}

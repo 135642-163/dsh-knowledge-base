@@ -238,9 +238,10 @@ test("状态筛选无结果时保留工具栏，可切回全部", () => {
 });
 
 test("docsStatus 收敛合法值", () => {
-  assert.deepEqual(DOCS_STATUSES, ["", "failed", "importing"]);
+  assert.deepEqual(DOCS_STATUSES, ["", "failed", "importing", "deleted"]);
   assert.equal(docsStatus("failed"), "failed");
   assert.equal(docsStatus(" importing "), "importing");
+  assert.equal(docsStatus("deleted"), "deleted");
   assert.equal(docsStatus("ready"), "");
   assert.equal(docsStatus(undefined), "");
 });

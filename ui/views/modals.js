@@ -1,4 +1,5 @@
 import { api, ApiError } from "../api.js";
+import { formatBytes } from "../upload-core.js";
 
 // 弹窗关闭统一走 closeOverlay：同时摘掉 Esc 监听并从栈里移除。
 // 预览弹窗叠在资料详情弹窗上时，只有最上层响应 Esc。
@@ -43,12 +44,47 @@ function closeOverlay(node) {
 }
 
 /**
+ * 逐字确认输入是否匹配（去首尾空白）。
+ * 永久删除/归档这类不可恢复操作共用同一判定，按钮在输入匹配前保持禁用。
+ * @returns {{ok: boolean, expected: string}}
+ */
+export function deleteConfirmCheck(value, expected) {
+  const want = String(expected ?? "").trim();
+  return { ok: want !== "" && String(value ?? "").trim() === want, expected: want };
+}
+
+/**
+ * 「移入回收站」确认正文：固定说明 + 标题清单（最多 20 条）。
+ * 多选批量时只列前 20 条，避免确认弹窗无限长。
+ */
+export function deleteConfirmBody(docs = []) {
+  const list = Array.isArray(docs) ? docs : [];
+  const titles = list.map((doc) => `· ${String(doc?.title ?? doc?.id ?? "")}`);
+  const shown = titles.slice(0, 20);
+  return [
+    "移入回收站，可在『已删除』中恢复；原件与解析内容保留",
+    "",
+    ...shown,
+    ...(titles.length > shown.length ? [`…等 ${titles.length} 篇`] : []),
+  ].join("\n");
+}
+
+/**
  * 通用确认弹窗。body 按纯文本渲染（内部统一 escapeHtml），
  * requireCheckbox=true 时需勾选确认才能提交；
- * requireText 传入库名时需逐字输入，danger 用危险色确认按钮。
- * onConfirm 可同步或异步。
+ * requireText 传入库名/标题时需逐字输入，textLabel 定制输入提示，danger 用危险色确认按钮。
+ * onConfirm 可同步或异步；抛错时错误信息内联显示、弹窗不关闭。
  */
-export function openConfirmModal({ title, body = "", confirmText = "确认", requireCheckbox = false, requireText, danger = false, onConfirm } = {}) {
+export function openConfirmModal({
+  title,
+  body = "",
+  confirmText = "确认",
+  requireCheckbox = false,
+  requireText,
+  textLabel = "输入库名",
+  danger = false,
+  onConfirm,
+} = {}) {
   const required = requireText === undefined || requireText === null ? "" : String(requireText);
   const needsText = required !== "";
   const node = overlay(`
@@ -56,7 +92,7 @@ export function openConfirmModal({ title, body = "", confirmText = "确认", req
       <h2>${escapeHtml(title)}</h2>
       <div class="confirm-body"><p class="muted">${escapeHtml(body)}</p></div>
       ${requireCheckbox ? `<label class="check"><input type="checkbox" name="ack" /> 我已知晓</label>` : ""}
-      ${needsText ? `<label class="field"><span>输入库名「${escapeHtml(required)}」以确认</span><input name="confirm" autocomplete="off" /></label>` : ""}
+      ${needsText ? `<label class="field"><span>${escapeHtml(textLabel)}「${escapeHtml(required)}」以确认</span><input name="confirm" autocomplete="off" /></label>` : ""}
       <p class="form-error" hidden></p>
       <div class="modal-actions">
         <button type="button" class="btn" data-close>取消</button>
@@ -73,7 +109,7 @@ export function openConfirmModal({ title, body = "", confirmText = "确认", req
       button.disabled = false;
       return;
     }
-    button.disabled = String(confirmInput?.value ?? "") !== required;
+    button.disabled = !deleteConfirmCheck(confirmInput?.value, required).ok;
   };
   if (needsText) {
     confirmInput?.addEventListener("input", () => {
@@ -89,8 +125,8 @@ export function openConfirmModal({ title, body = "", confirmText = "确认", req
       error.hidden = false;
       return;
     }
-    if (needsText && String(new FormData(form).get("confirm") ?? "") !== required) {
-      error.textContent = "库名不匹配";
+    if (needsText && !deleteConfirmCheck(new FormData(form).get("confirm"), required).ok) {
+      error.textContent = "输入不匹配，请逐字输入以确认";
       error.hidden = false;
       return;
     }
@@ -319,36 +355,211 @@ export function openPreviewModal({ name, doc, icons } = {}) {
   return node;
 }
 
-export function openDocModal({ name, id, icons } = {}) {
-  const node = overlay(`<div class="modal-form"><h2>加载中…</h2></div>`);
-  api.doc(name, id).then((doc) => {
-    if (!node.isConnected) return;
-    node.querySelector(".modal").innerHTML = `
-      <div class="modal-form">
-        <h2>${escapeHtml(doc.title)}</h2>
-        <div class="kv"><span>ID</span><strong>${escapeHtml(doc.id)}</strong></div>
-        <div class="kv"><span>类型</span><strong>${escapeHtml(doc.type ?? "")}</strong></div>
-        <div class="kv"><span>页数 / 字数</span><strong>${doc.pages} / ${doc.chars}</strong></div>
-        <div class="kv"><span>可信度</span><strong>${escapeHtml(doc.trust)}</strong></div>
-        <div class="kv"><span>来源文件</span><strong>${escapeHtml(doc.sourceFile || "—")}</strong></div>
-        <div class="kv"><span>摘要</span><strong>${escapeHtml(doc.summary || "—")}</strong></div>
-        <div class="kv"><span>标签</span><strong>${escapeHtml((doc.tags ?? []).join("、") || "—")}</strong></div>
-        <div class="modal-actions">
-          <button type="button" class="btn primary" data-preview>查看原件</button>
-          <a class="btn" href="${escapeAttr(api.sourceUrl(name, id))}">下载原件</a>
-          <button type="button" class="btn" data-close>关闭</button>
-        </div>
+/** 失败文档详情正文（纯函数，便于单测）。 */
+export function renderDocModalBody({ name, id, doc } = {}) {
+  const failed = doc?.status === "failed";
+  const warnings = Array.isArray(doc?.warnings) ? doc.warnings : [];
+  const deleted = doc?.deleted === true || doc?.status === "deleted";
+  return `
+    <div class="modal-form">
+      <h2>${escapeHtml(doc?.title ?? "文档")}</h2>
+      ${deleted ? `<p class="muted">该文档已移入回收站。</p>` : ""}
+      <div class="kv"><span>ID</span><strong>${escapeHtml(doc?.id ?? id ?? "")}</strong></div>
+      <div class="kv"><span>类型</span><strong>${escapeHtml(doc?.type ?? "")}</strong></div>
+      <div class="kv"><span>页数 / 字数</span><strong>${doc?.pages ?? 0} / ${doc?.chars ?? 0}</strong></div>
+      <div class="kv"><span>可信度</span><strong>${escapeHtml(doc?.trust ?? "unknown")}</strong></div>
+      <div class="kv"><span>来源文件</span><strong>${escapeHtml(doc?.sourceFile || "—")}</strong></div>
+      <div class="kv"><span>摘要</span><strong>${escapeHtml(doc?.summary || "—")}</strong></div>
+      <div class="kv"><span>标签</span><strong>${escapeHtml((doc?.tags ?? []).join("、") || "—")}</strong></div>
+      ${failed ? `
+        <div class="doc-error">
+          <pre class="doc-error-text">${escapeHtml(doc?.error || "导入失败")}</pre>
+          ${warnings.length > 0 ? `<ul class="doc-warnings">
+            ${warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("")}
+          </ul>` : ""}
+          <p class="muted doc-retry-state" data-retry-state hidden></p>
+        </div>` : ""}
+      <p class="form-error" data-doc-error hidden></p>
+      <div class="modal-actions">
+        ${failed ? `<button type="button" class="btn primary" data-retry>重新导入</button>` : ""}
+        <button type="button" class="btn" data-preview>查看原件</button>
+        <a class="btn" href="${escapeAttr(api.sourceUrl(name, id))}">下载原件</a>
+        ${failed ? `<button type="button" class="btn danger" data-remove>移入回收站</button>` : ""}
+        <button type="button" class="btn" data-close>关闭</button>
       </div>
-    `;
+    </div>
+  `;
+}
+
+export const REPARSE_POLL_INTERVAL_MS = 1000;
+export const REPARSE_POLL_TIMEOUT_MS = 120000;
+
+function defaultSleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * 轮询任务直到结算（running 之外都算结算）。
+ * 按 1 秒间隔查询；超过 timeoutMs 抛 REPARSE_TIMEOUT，让调用方提示稍后再看。
+ * getJob/sleep 可注入，单测不需要真实计时器。
+ */
+export async function waitForJob({
+  jobId,
+  getJob,
+  sleep = defaultSleep,
+  intervalMs = REPARSE_POLL_INTERVAL_MS,
+  timeoutMs = REPARSE_POLL_TIMEOUT_MS,
+} = {}) {
+  if (!jobId) throw new Error("缺少任务 id");
+  if (typeof getJob !== "function") throw new Error("缺少任务查询函数");
+  const wait = Math.max(1, Math.round(Number(intervalMs) || REPARSE_POLL_INTERVAL_MS));
+  const limit = Math.max(0, Number(timeoutMs) || 0);
+  let waited = 0;
+  for (;;) {
+    const job = await getJob(jobId);
+    if (!job || job.status !== "running") return job;
+    if (waited >= limit) {
+      const error = new Error("重试超时：任务仍在运行，稍后可在资料列表查看结果");
+      error.code = "REPARSE_TIMEOUT";
+      throw error;
+    }
+    await sleep(wait);
+    waited += wait;
+  }
+}
+
+/**
+ * 重新解析失败的文档：启动任务 → 每 1 秒轮询 → 结算后刷新列表并提示结果。
+ * notify(message, kind) 由调用方注入（工作台用 showToast），避免弹窗模块依赖 app.js。
+ */
+export async function retryFailedDoc({
+  name,
+  id,
+  notify = () => {},
+  onSettled,
+  reparse = (kb, docId) => api.reparseDoc(kb, docId),
+  getJob = (jobId) => api.job(jobId),
+  sleep = defaultSleep,
+  intervalMs = REPARSE_POLL_INTERVAL_MS,
+  timeoutMs = REPARSE_POLL_TIMEOUT_MS,
+} = {}) {
+  const started = await reparse(name, id);
+  const jobId = started?.jobId;
+  if (!jobId) throw new Error("重试任务没有返回 jobId");
+  notify("已开始重试解析");
+  const job = await waitForJob({ jobId, getJob, sleep, intervalMs, timeoutMs });
+  try {
+    await onSettled?.(job);
+  } catch {
+    /* 刷新失败不改变重试已经结算的事实 */
+  }
+  if (job?.status === "succeeded") {
+    notify(job.detail || "重试完成");
+  } else {
+    notify(`重试失败${job?.detail ? `：${job.detail}` : ""}`, "error");
+  }
+  return job;
+}
+
+export function openDocModal({ name, id, icons, notify = () => {}, onChanged } = {}) {
+  const node = overlay(`<div class="modal-form"><h2>加载中…</h2></div>`);
+  let doc = null;
+  let retrying = false;
+  let removing = false;
+
+  function showError(message) {
+    const error = node.querySelector("[data-doc-error]");
+    if (!error) return;
+    error.textContent = message;
+    error.hidden = false;
+  }
+
+  function bind() {
     node.querySelectorAll("[data-close]").forEach((button) => button.addEventListener("click", () => closeOverlay(node)));
     node.querySelector("[data-preview]")?.addEventListener("click", () => {
-      openPreviewModal({ name, doc, icons });
+      if (doc) openPreviewModal({ name, doc, icons });
     });
-  }).catch((failure) => {
+    node.querySelector("[data-retry]")?.addEventListener("click", () => { void retry(); });
+    node.querySelector("[data-remove]")?.addEventListener("click", () => { void remove(); });
+  }
+
+  function paint(next) {
+    doc = next;
     if (!node.isConnected) return;
-    node.querySelector(".modal").innerHTML = `<div class="modal-form"><p class="form-error">${escapeHtml(failure?.message ?? failure)}</p><button class="btn" data-close>关闭</button></div>`;
-    node.querySelector("[data-close]").onclick = () => closeOverlay(node);
-  });
+    node.querySelector(".modal").innerHTML = renderDocModalBody({ name, id, doc });
+    bind();
+  }
+
+  async function load() {
+    try {
+      paint(await api.doc(name, id));
+    } catch (failure) {
+      if (!node.isConnected) return;
+      node.querySelector(".modal").innerHTML = `<div class="modal-form"><p class="form-error">${escapeHtml(errorText(failure))}</p><button class="btn" data-close>关闭</button></div>`;
+      bind();
+    }
+  }
+
+  async function retry() {
+    if (retrying) return;
+    retrying = true;
+    const button = node.querySelector("[data-retry]");
+    if (button) {
+      button.disabled = true;
+      button.textContent = "正在重试…";
+    }
+    const stateText = node.querySelector("[data-retry-state]");
+    if (stateText) {
+      stateText.hidden = false;
+      stateText.textContent = "正在重新解析，最长等待约 2 分钟…";
+    }
+    try {
+      await retryFailedDoc({
+        name,
+        id,
+        notify,
+        onSettled: async () => {
+          await onChanged?.();
+          await load();
+        },
+      });
+    } catch (failure) {
+      notify(errorText(failure), "error");
+    } finally {
+      retrying = false;
+      if (node.isConnected) paint(doc);
+    }
+  }
+
+  async function remove() {
+    if (removing) return;
+    removing = true;
+    const button = node.querySelector("[data-remove]");
+    if (button) {
+      button.disabled = true;
+      button.textContent = "正在移入…";
+    }
+    try {
+      await api.deleteDoc(name, id);
+      closeOverlay(node);
+      notify("已移入回收站");
+      try {
+        await onChanged?.();
+      } catch {
+        /* 列表刷新失败不影响删除结果 */
+      }
+    } catch (failure) {
+      removing = false;
+      if (button) {
+        button.disabled = false;
+        button.textContent = "移入回收站";
+      }
+      showError(errorText(failure));
+    }
+  }
+
+  void load();
+  return node;
 }
 
 /**
@@ -440,6 +651,378 @@ export function openRestoreModal({ name, dir, onRestored }) {
       button.disabled = false;
     }
   };
+}
+
+// ---------------------------------------------------------------------------
+// 跨库移动
+// ---------------------------------------------------------------------------
+
+export const MOVE_CONFLICT_KINDS = Object.freeze([
+  { kind: "id", label: "同 ID" },
+  { kind: "hash", label: "同内容" },
+  { kind: "title", label: "同标题" },
+]);
+
+/** 把预检结果里的冲突按 同 ID/同内容/同标题 分组（无冲突时返回空数组）。 */
+export function conflictGroups(preflight) {
+  const docs = Array.isArray(preflight)
+    ? preflight
+    : Array.isArray(preflight?.docs)
+      ? preflight.docs
+      : [];
+  const groups = [];
+  for (const { kind, label } of MOVE_CONFLICT_KINDS) {
+    const items = [];
+    for (const doc of docs) {
+      if (doc?.conflict?.kind !== kind) continue;
+      items.push({
+        id: String(doc?.id ?? ""),
+        title: String(doc?.title ?? ""),
+        targetTitle: String(doc?.conflict?.withTitle ?? ""),
+      });
+    }
+    if (items.length > 0) groups.push({ kind, label, count: items.length, items });
+  }
+  return groups;
+}
+
+/** 「开始移动」按钮是否可用；reason 供弹窗内提示。 */
+export function moveConfirmState({ target = "", ack = false, loading = false, busy = false, preflight = null, error = "" } = {}) {
+  if (!target) return { disabled: true, reason: "请选择目标知识库" };
+  if (loading) return { disabled: true, reason: "正在预检…" };
+  if (error) return { disabled: true, reason: "预检失败，无法移动" };
+  if (!preflight) return { disabled: true, reason: "请等待预检完成" };
+  if (busy) return { disabled: true, reason: "正在移动…" };
+  if (!ack) return { disabled: true, reason: "请先勾选确认移动说明" };
+  return { disabled: false, reason: "" };
+}
+
+/** 预检摘要：将移动 N 篇（约 X MB）到「目标」。 */
+export function renderMoveSummary({ target = "", ids = [], loading = false, error = "", preflight = null } = {}) {
+  if (!target) return `<p class="muted move-summary">请选择目标知识库</p>`;
+  if (loading) return `<p class="muted move-summary">正在预检…</p>`;
+  if (error) return `<p class="form-error move-summary">${escapeHtml(error)}</p>`;
+  const docs = Array.isArray(preflight?.docs) ? preflight.docs : null;
+  const count = docs ? docs.length : (Array.isArray(ids) ? ids.length : 0);
+  const bytes = Number(preflight?.totalBytes) || 0;
+  return `<p class="move-summary">将移动 ${count} 篇（约 ${escapeHtml(formatBytes(bytes))}）到「${escapeHtml(target)}」</p>`;
+}
+
+function skipReason(item) {
+  if (item?.reason) return String(item.reason);
+  const kind = item?.conflict?.kind;
+  if (kind === "id") return "目标库已有相同 id 的文档";
+  if (kind === "hash") return "目标库已有相同内容的文档";
+  if (kind === "title") return "目标库已有相同标题的文档";
+  return "目标库存在冲突";
+}
+
+/** 移动结果正文：已移动 / 已跳过 / 失败 三组逐条说明。 */
+export function renderMoveResult({ result = null, target = "" } = {}) {
+  if (!result) return `<p class="muted">尚无移动结果。</p>`;
+  const results = Array.isArray(result?.results) ? result.results : [];
+  const moved = results.filter((item) => item?.status === "moved");
+  const skipped = results.filter((item) => item?.status === "skipped");
+  const failed = results.filter((item) => item?.status === "failed");
+  const numberOf = (key, fallback) => (Number.isFinite(Number(result?.[key])) ? Number(result[key]) : fallback);
+  const movedCount = numberOf("moved", moved.length);
+  const skippedCount = numberOf("skipped", skipped.length);
+  const failedCount = numberOf("failed", failed.length);
+  const total = movedCount + skippedCount + failedCount;
+  const groups = [];
+  if (moved.length > 0) {
+    groups.push(`
+      <div class="result-group">
+        <h3>已移动 ${movedCount} 篇${target ? ` → 「${escapeHtml(target)}」` : ""}</h3>
+        <ul class="result-list">
+          ${moved.map((item) => {
+            const title = String(item?.title ?? item?.id ?? "");
+            const nextTitle = String(item?.newTitle ?? "");
+            const renamed = nextTitle !== "" && nextTitle !== title
+              ? `<span class="muted">→ ${escapeHtml(nextTitle)}</span>`
+              : "";
+            return `<li><span class="result-name">${escapeHtml(title)}</span>${renamed}</li>`;
+          }).join("")}
+        </ul>
+      </div>
+    `);
+  }
+  if (skipped.length > 0) {
+    groups.push(`
+      <div class="result-group">
+        <h3>已跳过 ${skippedCount} 篇</h3>
+        <ul class="result-list">
+          ${skipped.map((item) => `<li><span class="result-name">${escapeHtml(item?.title ?? item?.id ?? "")}</span><span class="muted result-reason">${escapeHtml(skipReason(item))}</span></li>`).join("")}
+        </ul>
+      </div>
+    `);
+  }
+  if (failed.length > 0) {
+    groups.push(`
+      <div class="result-group">
+        <h3>失败 ${failedCount} 篇</h3>
+        <ul class="result-list">
+          ${failed.map((item) => `<li><span class="result-name">${escapeHtml(item?.title ?? item?.id ?? "")}</span><span class="form-error result-reason">${escapeHtml(item?.error || "移动失败")}</span></li>`).join("")}
+        </ul>
+      </div>
+    `);
+  }
+  return `
+    <p class="move-result-summary">共 ${total} 篇：成功 ${movedCount} · 跳过 ${skippedCount} · 失败 ${failedCount}</p>
+    ${groups.join("")}
+  `;
+}
+
+function conflictSection(groups) {
+  const total = groups.reduce((sum, group) => sum + group.count, 0);
+  return `
+    <div class="conflict-groups">
+      <p class="conflict-title">目标库已有重复（${total} 篇）：</p>
+      ${groups.map((group) => `
+        <div class="conflict-group">
+          <div class="conflict-head">${escapeHtml(group.label)} · ${group.count} 篇</div>
+          <ul class="conflict-list">
+            ${group.items.map((item) => `<li class="conflict-row"><span class="conflict-name">${escapeHtml(item.title)}</span><span class="muted conflict-target" title="${escapeAttr(item.targetTitle)}">目标库已有「${escapeHtml(item.targetTitle)}」</span></li>`).join("")}
+          </ul>
+        </div>`).join("")}
+    </div>
+  `;
+}
+
+/**
+ * 跨库移动弹窗：选目标库 → 预检（摘要 + 冲突分组）→ 确认移动 → 结果页（可撤销全部）。
+ * onDone 在移动/撤销完成后调用，用于刷新资料列表与侧栏计数。
+ */
+export function openMoveModal({ name, ids = [], kbs = [], notify = () => {}, onDone } = {}) {
+  const sourceIds = (Array.isArray(ids) ? ids : []).filter(Boolean);
+  const targets = (Array.isArray(kbs) ? kbs : [])
+    .filter((kb) => kb && kb.name !== name && !kb.mergedInto)
+    .map((kb) => String(kb.name));
+  const state = {
+    target: targets[0] ?? "",
+    preflight: null,
+    loading: false,
+    error: "",
+    ack: false,
+    busy: false,
+    onConflict: "skip",
+    result: null,
+    undoing: false,
+    undoProgress: "",
+    undo: null,
+  };
+  const node = overlay(`<div class="modal-form"><h2>移动资料</h2></div>`, { className: "move-modal" });
+  let requestSeq = 0;
+
+  function formView() {
+    const confirm = moveConfirmState({
+      target: state.target,
+      ack: state.ack,
+      loading: state.loading,
+      busy: state.busy,
+      preflight: state.preflight,
+      error: state.error,
+    });
+    const groups = conflictGroups(state.preflight);
+    return `
+      <form class="modal-form">
+        <h2>移动 ${sourceIds.length} 篇资料</h2>
+        <label class="field"><span>目标知识库</span>
+          <select name="target" ${state.busy ? "disabled" : ""}>
+            ${targets.length === 0
+              ? `<option value="">没有可移动到的目标库</option>`
+              : targets.map((target) => `<option value="${escapeAttr(target)}"${target === state.target ? " selected" : ""}>${escapeHtml(target)}</option>`).join("")}
+          </select>
+        </label>
+        <p class="muted">同一篇资料不能移到自己所在的库；已合并的库不能作为移动目标。</p>
+        <div class="move-preflight">${renderMoveSummary({ target: state.target, ids: sourceIds, loading: state.loading, error: state.error, preflight: state.preflight })}</div>
+        ${groups.length > 0 ? conflictSection(groups) : ""}
+        <div class="move-conflict-mode">
+          <span class="muted">遇到重复：</span>
+          <label class="check"><input type="radio" name="on-conflict" value="skip"${state.onConflict === "skip" ? " checked" : ""} ${groups.length === 0 || state.busy ? "disabled" : ""} /> 跳过</label>
+          <label class="check"><input type="radio" name="on-conflict" value="rename"${state.onConflict === "rename" ? " checked" : ""} ${groups.length === 0 || state.busy ? "disabled" : ""} /> 重命名为副本</label>
+        </div>
+        ${groups.some((group) => group.kind === "hash") ? `<p class="muted">同内容重复始终跳过（重命名只会制造真正的重复）。</p>` : ""}
+        <label class="check move-ack"><input type="checkbox" name="ack"${state.ack ? " checked" : ""} ${state.busy ? "disabled" : ""} /> 我已了解：移动=复制到目标库并软删除源库文档，可在源库回收站撤销</label>
+        ${confirm.disabled ? `<p class="muted move-hint">${escapeHtml(confirm.reason)}</p>` : ""}
+        <div class="modal-actions">
+          <button type="button" class="btn" data-close>取消</button>
+          <button type="submit" class="btn primary"${confirm.disabled ? " disabled" : ""}>开始移动</button>
+        </div>
+      </form>
+    `;
+  }
+
+  function resultView() {
+    const result = state.result ?? { results: [], moved: 0, skipped: 0, failed: 0 };
+    const movedCount = Number.isFinite(Number(result.moved)) ? Number(result.moved) : 0;
+    const undo = state.undo;
+    return `
+      <div class="modal-form">
+        <h2>移动结果</h2>
+        ${renderMoveResult({ result, target: state.target })}
+        ${state.undoProgress ? `<p class="muted move-progress">${escapeHtml(state.undoProgress)}</p>` : ""}
+        ${undo ? `<p class="muted move-undo-report">已撤销 ${undo.ok} 篇${undo.failures.length > 0 ? ` · 失败 ${undo.failures.length} 篇` : ""}</p>` : ""}
+        ${undo && undo.failures.length > 0 ? `<ul class="result-list">${undo.failures.map((failure) => `<li><span class="result-name">${escapeHtml(failure.title)}</span><span class="form-error result-reason">${escapeHtml(failure.error)}</span></li>`).join("")}</ul>` : ""}
+        <div class="modal-actions">
+          ${movedCount > 0 && !undo ? `<button type="button" class="btn" data-undo${state.undoing ? " disabled" : ""}>${state.undoing ? "正在撤销…" : "撤销全部已移动"}</button>` : ""}
+          <button type="button" class="btn primary" data-finish>完成</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function paint() {
+    if (!node.isConnected) return;
+    node.querySelector(".modal").innerHTML = state.result ? resultView() : formView();
+    bind();
+  }
+
+  function bind() {
+    node.querySelectorAll("[data-close]").forEach((button) => button.addEventListener("click", () => closeOverlay(node)));
+    node.querySelector("form.modal-form")?.addEventListener("submit", (event) => {
+      event.preventDefault();
+      void submit();
+    });
+    const select = node.querySelector("select[name='target']");
+    select?.addEventListener("change", () => {
+      if (state.busy) return;
+      state.target = select.value;
+      state.preflight = null;
+      state.error = "";
+      void loadPreflight();
+    });
+    node.querySelectorAll("input[name='on-conflict']").forEach((input) => {
+      input.addEventListener("change", () => {
+        if (!input.checked) return;
+        state.onConflict = input.value === "rename" ? "rename" : "skip";
+        paint();
+      });
+    });
+    node.querySelector("input[name='ack']")?.addEventListener("change", (event) => {
+      state.ack = event.target.checked === true;
+      paint();
+    });
+    node.querySelector("[data-undo]")?.addEventListener("click", () => { void undoAll(); });
+    node.querySelector("[data-finish]")?.addEventListener("click", () => { void finish(); });
+  }
+
+  async function loadPreflight() {
+    const seq = (requestSeq += 1);
+    if (!state.target) {
+      state.preflight = null;
+      state.loading = false;
+      state.error = "";
+      paint();
+      return;
+    }
+    state.loading = true;
+    state.preflight = null;
+    state.error = "";
+    paint();
+    try {
+      const preflight = await api.movePreflight(name, { ids: sourceIds, target: state.target });
+      if (seq !== requestSeq || !node.isConnected) return;
+      state.preflight = preflight;
+    } catch (failure) {
+      if (seq !== requestSeq || !node.isConnected) return;
+      state.preflight = null;
+      state.error = errorText(failure);
+    } finally {
+      if (seq === requestSeq && node.isConnected) {
+        state.loading = false;
+        paint();
+      }
+    }
+  }
+
+  async function finish() {
+    closeOverlay(node);
+    try {
+      await onDone?.();
+    } catch {
+      /* 刷新失败不影响已经完成的移动 */
+    }
+  }
+
+  async function submit() {
+    const confirm = moveConfirmState({
+      target: state.target,
+      ack: state.ack,
+      loading: state.loading,
+      busy: state.busy,
+      preflight: state.preflight,
+      error: state.error,
+    });
+    if (confirm.disabled || state.busy) return;
+    state.busy = true;
+    state.error = "";
+    paint();
+    try {
+      const result = await api.moveDocs(name, { ids: sourceIds, target: state.target, onConflict: state.onConflict });
+      state.result = result ?? { results: [], moved: 0, skipped: 0, failed: 0 };
+      state.busy = false;
+      const moved = Number(state.result.moved) || 0;
+      const skipped = Number(state.result.skipped) || 0;
+      const failed = Number(state.result.failed) || 0;
+      notify(`移动完成：成功 ${moved} · 跳过 ${skipped} · 失败 ${failed}`, failed > 0 ? "error" : "info");
+      if (node.isConnected) paint();
+      try {
+        await onDone?.();
+      } catch {
+        /* 刷新失败不影响已经完成的移动 */
+      }
+    } catch (failure) {
+      state.busy = false;
+      state.error = errorText(failure);
+      if (node.isConnected) {
+        paint();
+      } else {
+        notify(errorText(failure), "error");
+      }
+    }
+  }
+
+  async function undoAll() {
+    if (state.undoing || !state.result) return;
+    const moved = (Array.isArray(state.result.results) ? state.result.results : [])
+      .filter((item) => item?.status === "moved");
+    if (moved.length === 0) return;
+    state.undoing = true;
+    state.undo = null;
+    paint();
+    let ok = 0;
+    const failures = [];
+    for (let index = 0; index < moved.length; index += 1) {
+      const item = moved[index];
+      state.undoProgress = `正在撤销 ${index + 1}/${moved.length}：${item.title}`;
+      paint();
+      try {
+        await api.undoMove(name, item.id, { target: state.target });
+        ok += 1;
+      } catch (failure) {
+        failures.push({ title: String(item.title ?? item.id ?? ""), error: errorText(failure) });
+      }
+    }
+    state.undoing = false;
+    state.undoProgress = "";
+    state.undo = { ok, failures };
+    paint();
+    try {
+      await onDone?.();
+    } catch {
+      /* 刷新失败不影响撤销结果 */
+    }
+    notify(`已撤销 ${ok} 篇${failures.length > 0 ? `，${failures.length} 篇失败` : ""}`, failures.length > 0 ? "error" : "info");
+  }
+
+  paint();
+  if (state.target) void loadPreflight();
+  return node;
+}
+
+function errorText(failure) {
+  return failure instanceof ApiError ? failure.message : String(failure?.message ?? failure);
 }
 
 function escapeHtml(value) {

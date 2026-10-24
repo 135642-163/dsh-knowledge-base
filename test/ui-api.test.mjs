@@ -198,6 +198,40 @@ test("cancelJob 用 POST 打 /jobs/:id/cancel 并解包 job", async () => {
   assert.equal(calls[0].options.headers["x-kb-ui"], "1");
 });
 
+test("文档删除/恢复/重试与跨库移动方法：POST + 编码路径 + JSON 体", async () => {
+  calls.length = 0;
+  await api.deleteDoc("标准", "d1");
+  await api.deleteDoc("标准", "d1", { permanent: true, confirm: "电压偏差" });
+  await api.restoreDoc("标准", "d1");
+  await api.reparseDoc("标准", "d1");
+  await api.movePreflight("标准", { ids: ["d1", "d2"], target: "目标" });
+  await api.moveDocs("标准", { ids: ["d1"], target: "目标", onConflict: "rename" });
+  await api.undoMove("标准", "d1", { target: "目标" });
+
+  assert.equal(calls.length, 7);
+  const encoded = "/kb/api/kbs/%E6%A0%87%E5%87%86/docs";
+  assert.deepEqual(calls.map((call) => [call.url, call.options.method]), [
+    [`${encoded}/d1/delete`, "POST"],
+    [`${encoded}/d1/delete`, "POST"],
+    [`${encoded}/d1/restore`, "POST"],
+    [`${encoded}/d1/reparse`, "POST"],
+    [`${encoded}/move/preflight`, "POST"],
+    [`${encoded}/move`, "POST"],
+    [`${encoded}/d1/undo-move`, "POST"],
+  ]);
+  for (const call of calls) {
+    assert.equal(call.options.headers["content-type"], "application/json");
+    assert.equal(call.options.headers["x-kb-ui"], "1");
+  }
+  assert.deepEqual(JSON.parse(calls[0].options.body), { permanent: false });
+  assert.deepEqual(JSON.parse(calls[1].options.body), { permanent: true, confirm: "电压偏差" });
+  assert.deepEqual(JSON.parse(calls[2].options.body), {});
+  assert.deepEqual(JSON.parse(calls[3].options.body), {});
+  assert.deepEqual(JSON.parse(calls[4].options.body), { ids: ["d1", "d2"], target: "目标" });
+  assert.deepEqual(JSON.parse(calls[5].options.body), { ids: ["d1"], target: "目标", onConflict: "rename" });
+  assert.deepEqual(JSON.parse(calls[6].options.body), { target: "目标" });
+});
+
 test("错误响应映射成 ApiError", async () => {
   globalThis.fetch = async () => ({
     ok: false,

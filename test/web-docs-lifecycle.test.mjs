@@ -150,6 +150,7 @@ test("docs list/read expose error, sourceFile and errorAt", async () => {
   const row2 = list.json.docs.find((doc) => doc.id === "doc2");
   assert.equal(row1.error, "");
   assert.equal(row1.sourceFile, "doc1.pdf");
+  assert.equal(row1.movedTo, null);
   assert.equal(row2.error, "解析失败：文件损坏");
   assert.equal(row2.sourceFile, "doc2.txt");
 
@@ -158,12 +159,40 @@ test("docs list/read expose error, sourceFile and errorAt", async () => {
   assert.equal(read.json.error, "解析失败：文件损坏");
   assert.equal(read.json.errorAt, "2026-10-01T00:00:00.000Z");
   assert.deepEqual(read.json.warnings, ["第 2 页低置信度"]);
+  assert.equal(read.json.movedTo, null);
   assert.equal(read.json.sourceFile, "doc2.txt");
 
   // 没有 errorAt 的旧条目返回空串，而不是 undefined。
   const read1 = await call({ kbRoot }, makeReq({ url: docUrl("doc1") }));
   assert.equal(read1.json.error, "");
   assert.equal(read1.json.errorAt, "");
+});
+
+test("deleted docs keep movedTo in list/read projections for undo UI", async () => {
+  const { kbRoot, dir } = await setup();
+  const movedTo = { kb: "目标库", docId: "t1", transferId: "abc123", at: "2026-10-02T00:00:00.000Z" };
+  const manifest = await readManifest(dir);
+  manifest.docs.push({
+    id: "doc5",
+    title: "已移走",
+    type: "pdf-text",
+    status: "deleted",
+    deletedAt: "2026-10-02T00:00:00.000Z",
+    deletedFromStatus: "ready",
+    movedTo,
+    version: 1,
+  });
+  await writeManifestAtomic(dir, manifest);
+
+  const list = await call({ kbRoot }, makeReq({ url: docsUrl("?status=deleted") }));
+  assert.equal(list.res.status, 200);
+  assert.deepEqual(list.json.docs.map((doc) => doc.id), ["doc5"]);
+  assert.deepEqual(list.json.docs[0].movedTo, movedTo);
+
+  const read = await call({ kbRoot }, makeReq({ url: docUrl("doc5") }));
+  assert.equal(read.res.status, 200);
+  assert.deepEqual(read.json.movedTo, movedTo);
+  assert.equal(read.json.deleted, true);
 });
 
 test("soft delete accepts ready and failed docs, restore returns the original status", async () => {
