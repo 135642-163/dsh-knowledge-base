@@ -251,6 +251,11 @@ export function KbScopeCapsule({ sessionId }: ScopeSlotProps) {
   }, [sessionId, retry]);
 
   useEffect(() => {
+    // 会话切换（宿主要在原地换 sessionId）时作废旧会话在途的打开刷新结果。
+    generationRef.current += 1;
+  }, [sessionId]);
+
+  useEffect(() => {
     if (!toast) return undefined;
     const timer = setTimeout(() => setToast(null), 2400);
     return () => clearTimeout(timer);
@@ -305,6 +310,8 @@ export function KbScopeCapsule({ sessionId }: ScopeSlotProps) {
   const filtered = query.trim() === ""
     ? kbs
     : kbs.filter((kb) => `${kb.name} ${kb.description ?? ""}`.toLowerCase().includes(query.trim().toLowerCase()));
+  // 面板真实可见（已挂载）才对外声明 expanded，加载阶段面板并不存在。
+  const panelVisible = open && phase === "ready" && panelPhase === "ready";
 
   if (phase === "hidden") return null;
 
@@ -389,7 +396,7 @@ export function KbScopeCapsule({ sessionId }: ScopeSlotProps) {
     }
   }
 
-  const panel = open && phase === "ready" && panelPhase === "ready" ? createPortal(
+  const panel = panelVisible ? createPortal(
     <div
       className="dsh-kb-scope-panel"
       role="dialog"
@@ -458,7 +465,7 @@ export function KbScopeCapsule({ sessionId }: ScopeSlotProps) {
         ref={chipRef}
         type="button"
         className={`dsh-kb-scope-chip${active ? " dsh-kb-scope-chip-active" : ""}`}
-        aria-expanded={open}
+        aria-expanded={panelVisible}
         aria-label={label}
         title={phase === "failed" ? "知识库：点击重试" : label}
         onClick={toggleOpen}

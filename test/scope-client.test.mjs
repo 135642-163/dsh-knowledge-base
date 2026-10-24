@@ -856,9 +856,8 @@ test("panel stays hidden until the open refresh resolves", async () => {
   assert.equal(panelOf(rt, ui), null);
 
   rt.click(chipOf(rt, ui));
-  // NOTE(a11y): aria-expanded 直接跟随 `open`，所以刷新在途、面板尚未挂载时仍是 true。
-  // 这是本次 review 报告的可访问性缺陷；按“只报告、不改源码”的要求，这里记录现状。
-  assert.equal(chipOf(rt, ui).props["aria-expanded"], true);
+  // 刷新在途、面板尚未挂载：不能对外声明 expanded。
+  assert.equal(chipOf(rt, ui).props["aria-expanded"], false);
   assert.equal(rt.text(chipOf(rt, ui)), "知识库：全部");
   assert.equal(panelOf(rt, ui), null, "panel must wait for the refresh");
   assert.deepEqual(rt.fetch.pending().map((call) => call.url), [
@@ -1030,15 +1029,23 @@ test("取消 closes the panel without a PUT and restores focus to the chip", asy
   assert.match(focused.props.className, /dsh-kb-scope-chip/);
 });
 
-test("panel exposes dialog semantics and an auto-focused search field", async () => {
+test("panel exposes dialog semantics, autofocused search and visibility-aware aria-expanded", async () => {
   const kbs = [{ name: "Alpha" }];
   const { rt, ui } = await loadReady({ mode: "all", kbs: [] }, kbs);
-  await openPanel(rt, ui, { scope: { mode: "all", kbs: [] }, kbs });
+
+  rt.click(chipOf(rt, ui));
+  assert.equal(
+    chipOf(rt, ui).props["aria-expanded"],
+    false,
+    "loading phase must not claim the panel is expanded"
+  );
+  assert.equal(panelOf(rt, ui), null);
+  await respondScopeData(rt, { scope: { mode: "all", kbs: [] }, kbs });
+  assert.equal(chipOf(rt, ui).props["aria-expanded"], true);
 
   const panel = panelOf(rt, ui);
   assert.equal(panel.props.role, "dialog");
   assert.equal(panel.props["aria-label"], "选择本会话知识库");
-  assert.equal(chipOf(rt, ui).props["aria-expanded"], true);
 
   const search = rt.findByType(panel, "input");
   assert.ok(search, "search input missing");
@@ -1301,6 +1308,42 @@ test("remounting with a new sessionId gets a fresh instance and ignores the old 
   assert.equal(rt.text(chipOf(rt, ui2)), "知识库：1 个");
   assert.equal(rt.findByClass(ui2.tree, "dsh-kb-scope-toast"), null);
   assert.equal(rt.fetch.calls.filter((call) => call.method === "PUT").length, 0);
+});
+
+test("an in-place session change invalidates the old session's in-flight open refresh", async () => {
+  const rt = loadCapsule();
+  const ui = rt.mount({ sessionId: "s1" });
+  rt.respond({ body: { features: { scope: true } } });
+  await rt.flush();
+  rt.respondWhere("/scope?session=s1", { body: { scope: { mode: "all", kbs: [] } } });
+  rt.respondWhere("/kbs", { body: { kbs: [{ name: "Old" }] } });
+  await rt.flush();
+
+  rt.click(chipOf(rt, ui)); // s1 的打开刷新在途
+  assert.equal(rt.fetch.pending().length, 2);
+  ui.rerender({ sessionId: "s2" }); // 宿主原地换会话，不卸载
+  rt.respondWhere("/status", { body: { features: { scope: true } } });
+  await rt.flush();
+  assert.ok(
+    rt.fetch.calls.some((call) => call.url === "/kb/api/scope?session=s2"),
+    "new session must issue its own scope GET"
+  );
+
+  rt.respondWhere("/scope?session=s2", { body: { scope: { mode: "selected", kbs: ["New"] } } });
+  rt.respondWhere("/kbs", { body: { kbs: [{ name: "Old" }] } }); // 队列里旧会话的 /kbs
+  await rt.flush();
+  rt.respondWhere("/kbs", { body: { kbs: [{ name: "New" }] } });
+  await rt.flush();
+  const afterSwitch = ui.stateSnapshot();
+  assert.deepEqual(afterSwitch[3].map((kb) => kb.name), ["New"]);
+  assert.equal(rt.text(chipOf(rt, ui)), "知识库：1 个");
+
+  // 旧会话的刷新现在才返回：必须被 sessionId effect 递增的代号丢弃。
+  rt.respondWhere("/scope?session=s1", { body: { scope: { mode: "selected", kbs: ["Old"] } } });
+  await rt.flush();
+  assert.deepEqual(ui.stateSnapshot()[3].map((kb) => kb.name), ["New"]);
+  assert.deepEqual(ui.stateSnapshot(), afterSwitch);
+  assert.equal(rt.text(chipOf(rt, ui)), "知识库：1 个");
 });
 
 test("archived names are filtered out of the PUT payload", async () => {
