@@ -44,10 +44,10 @@ async function setup() {
     agent: { session: { id: sessionId, header: { cwd: root, parentSession } } },
     signal: SIGNAL,
   });
-  async function importDoc(fileName, text, kb, title) {
+  async function importDoc(fileName, text, kb, title, options = {}) {
     const path = join(root, fileName);
     await writeFile(path, text, "utf8");
-    const result = await tools.get("kb_import").execute({ path, kb, title }, unscoped);
+    const result = await tools.get("kb_import").execute({ path, kb, title, ...options }, unscoped);
     return result.imported?.[0];
   }
   const scope = (sessionId, kbs) =>
@@ -246,4 +246,109 @@ test("kb_list explains an unavailable scoped kb", async () => {
   assert.match(text, /本会话范围/);
   assert.match(text, /不可用/);
   assert.doesNotMatch(text, /还没有任何知识库/);
+});
+
+test("doc tools: selected single kb resolves without kb argument", async () => {
+  const { tools, scoped, importDoc, scope } = await setup();
+  const doc = await importDoc("a.md", "# 甲\n\n继电保护技术条件正文。\n", "甲库", "继电保护技术条件");
+  await scope("s1", ["甲库"]);
+  const read = await tools.get("kb_read").execute({ doc: doc.docId }, scoped("s1"));
+  assert.equal(read.kb, "甲库");
+  const view = await tools.get("kb_read").execute({ doc: "继电", part: "outline" }, scoped("s1"));
+  assert.equal(view.docId, doc.docId);
+});
+
+test("doc tools: multi-kb scope resolves a unique title across kbs", async () => {
+  const { tools, scoped, importDoc, scope } = await setup();
+  await importDoc("a.md", "# 甲\n\n继电保护技术条件正文。\n", "甲库", "继电保护技术条件");
+  const doc = await importDoc("b.md", "# 乙\n\n变压器验收规范正文。\n", "乙库", "变压器验收规范");
+  await scope("s1", ["甲库", "乙库"]);
+  const read = await tools.get("kb_read").execute({ doc: "变压器" }, scoped("s1"));
+  assert.equal(read.kb, "乙库");
+  assert.equal(read.docId, doc.docId);
+});
+
+test("doc tools: duplicate titles across kbs report candidates", async () => {
+  const { tools, scoped, importDoc, scope } = await setup();
+  await importDoc("a.md", "# 甲\n\n交接试验规程正文。\n", "甲库", "交接试验规程");
+  await importDoc("b.md", "# 乙\n\n交接试验规程正文。\n", "乙库", "交接试验规程", { allowCrossDuplicates: true });
+  await scope("s1", ["甲库", "乙库"]);
+  await assert.rejects(
+    () => tools.get("kb_read").execute({ doc: "交接试验" }, scoped("s1")),
+    (error) => error.code === "KB_AMBIGUOUS" && error.message.includes("甲库/") && error.message.includes("乙库/") && error.message.includes("请指定 kb")
+  );
+});
+
+test("doc tools: explicit out-of-scope kb is rejected", async () => {
+  const { tools, scoped, importDoc, scope } = await setup();
+  const doc = await importDoc("a.md", "# 甲\n\n正文。\n", "甲库", "甲文档");
+  await importDoc("b.md", "# 乙\n\n正文。\n", "乙库", "乙文档");
+  await scope("s1", ["甲库"]);
+  await assert.rejects(
+    () => tools.get("kb_read").execute({ kb: "乙库", doc: doc.docId }, scoped("s1")),
+    (error) => error.code === "KB_OUT_OF_SCOPE"
+  );
+});
+
+test("doc tools: edit and describe cross-kb by unique title", async () => {
+  const { tools, scoped, importDoc, scope } = await setup();
+  await importDoc("a.md", "# 甲\n\nAAAA 旧内容。\n", "甲库", "甲文档");
+  const doc = await importDoc("b.md", "# 乙\n\nBBBB 旧内容。\n", "乙库", "乙文档");
+  await scope("s1", ["甲库", "乙库"]);
+  const edit = await tools.get("kb_edit").execute(
+    { doc: "乙文档", old_string: "BBBB", new_string: "BEEF" },
+    scoped("s1")
+  );
+  assert.equal(edit.kb, "乙库");
+  const described = await tools.get("kb_describe").execute(
+    { doc: doc.docId, summary: "乙库文档摘要" },
+    scoped("s1")
+  );
+  assert.equal(described.kb, "乙库");
+});
+
+test("doc tools: virtual docs require an explicit kb when scope has several", async () => {
+  const { tools, scoped, importDoc, scope } = await setup();
+  await importDoc("a.md", "# 甲\n\n正文。\n", "甲库", "甲文档");
+  await importDoc("b.md", "# 乙\n\n正文。\n", "乙库", "乙文档");
+  await scope("s1", ["甲库", "乙库"]);
+  await assert.rejects(
+    () => tools.get("kb_read").execute({ doc: "schema" }, scoped("s1")),
+    (error) => error.code === "KB_REQUIRED"
+  );
+  const allowed = await tools.get("kb_read").execute({ kb: "甲库", doc: "schema" }, scoped("s1"));
+  assert.equal(allowed.kb, "甲库");
+});
+
+test("kb_remove: doc-level cross-kb works, removeKb requires explicit kb", async () => {
+  const { tools, scoped, importDoc, scope } = await setup();
+  const doc = await importDoc("a.md", "# 甲\n\n正文。\n", "甲库", "甲文档");
+  await importDoc("b.md", "# 乙\n\n正文。\n", "乙库", "乙文档");
+  await scope("s1", ["甲库", "乙库"]);
+  const removed = await tools.get("kb_remove").execute({ doc: "甲文档" }, scoped("s1"));
+  assert.equal(removed.kb, "甲库");
+  await assert.rejects(
+    () => tools.get("kb_remove").execute({ removeKb: true, confirm: "甲库" }, scoped("s1")),
+    (error) => error.code === "KB_REQUIRED"
+  );
+});
+
+test("doc tools: describe batch mode needs an explicit kb in multi-kb scope", async () => {
+  const { tools, scoped, importDoc, scope } = await setup();
+  await importDoc("a.md", "# 甲\n\n正文。\n", "甲库", "甲文档");
+  await importDoc("b.md", "# 乙\n\n正文。\n", "乙库", "乙文档");
+  await scope("s1", ["甲库", "乙库"]);
+  await assert.rejects(
+    () => tools.get("kb_describe").execute({ all: true, auto: true }, scoped("s1")),
+    (error) => error.code === "KB_REQUIRED"
+  );
+});
+
+test("doc tools: describe batch mode uses the only scoped kb", async () => {
+  const { tools, scoped, importDoc, scope } = await setup();
+  await importDoc("a.md", "# 甲\n\n继电保护技术条件正文。\n", "甲库", "甲文档");
+  await scope("s1", ["甲库"]);
+  const result = await tools.get("kb_describe").execute({ all: true, auto: true }, scoped("s1"));
+  assert.equal(result.kb, "甲库");
+  assert.equal(result.mode, "auto");
 });
