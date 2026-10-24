@@ -141,6 +141,7 @@ button { font: inherit; color: inherit; }
 .bar i { display: block; height: 100%; border-radius: 999px; flex: 0 1 auto; }
 .bar.empty i { width: 100%; background: var(--line); }
 .trust-dots { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; row-gap: 2px; font-size: 11px; color: var(--muted); }
+.trust-label { font-size: 10px; letter-spacing: 0.02em; }
 .trust-dot { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
 .trust-dot-mark { font-size: 8px; line-height: 1; }
 .card-foot { display: flex; gap: 6px; align-items: center; font-size: 11px; flex-wrap: wrap; }

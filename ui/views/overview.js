@@ -118,7 +118,7 @@ function trustDots(trust = {}) {
   const entries = TRUST_LEVELS.map((level) => [level, Math.max(0, Number(trust[level]) || 0)]);
   if (entries.every(([, value]) => value === 0)) return "";
   const title = `可信度：${entries.map(([level, value]) => `${TRUST_LABELS[level]} ${value}`).join(" · ")}`;
-  return `<div class="trust-dots" title="${escapeAttr(title)}" aria-label="${escapeAttr(title)}">${entries
+  return `<div class="trust-dots" title="${escapeAttr(title)}" aria-label="${escapeAttr(title)}"><span class="trust-label muted">可信度</span>${entries
     .filter(([, value]) => value > 0)
     .map(([level, value]) => {
       const label = `${TRUST_LABELS[level]} ${value}`;
