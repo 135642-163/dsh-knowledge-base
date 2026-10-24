@@ -3561,3 +3561,23 @@ Expected: `--ff-only` 成功；HEAD 是 `chore: release 0.21.0 …`。
 - [ ] `npm test`、`npm run typecheck`、`npm run check:client`、`node scripts/check-ui.mjs` 全绿。
 - [ ] `git status --short` 干净；main 已 ff 到 `feat/kb-scope-capsule`。
 
+---
+
+## 实施记录（偏差与追加）
+
+以下是实施过程中经用户确认的偏差与追加（相对本计划原文）：
+
+- **scope 文件层加固**：`lib/scope.js` 与 `lib/scope-store.js` 分两层落地；损坏/超限的 `.scopes.json` 不再被静默覆盖——读按 `all`，写抛 `SCOPE_UNUSABLE` 并转成可读的 `SCOPE_WRITE_FAILED`；同步视图改为 mtime+size 缓存 + 冻结视图，不实现计划里的 `scopesFileInfo`。
+- **导入查重限定范围**：`scanDuplicates` 增加 `kbNames` 白名单，`kb_import` 只与范围内库比对，范围外库不再误报跨库重合；`null` = 扫描全部。
+- **范围库名净化**：`.scopes.json` 里的库名统一 `sanitizeKbName`（落盘/提示/缓存路径都走净化后的名字），无法落盘或保留的条目在 prune 时摘掉，兼顾路径安全与提示注入。
+- **GET 父会话解析**：`GET /kb/api/scope` 通过 `ctx.get("agents")` 读 live agent 的 `parentSession`，继承范围无需落快照即可见；`updatedAt` 只在请求会话有自己条目时返回。
+- **5xx 脱敏**：`mapError` 对 `status >= 500` 剥离 `details`，避免内部路径/库名回传浏览器。
+- **软删除文档解析**：`resolveDocTarget` 增加 `includeDeleted`，供 `kb_restore` / `kb_history` / `kb_remove(soft=false)` 跨库解析软删除文档。
+- **`kb_lint` 逐库隔离**：每个库单独 try/catch（失败条目 `{kb, error}` 不拖垮整轮），超出 `scopeLintMaxKbs` 时返回 `truncated` + `omittedKbs`；输出 schema 增加可选 `error`。
+- **`kb_std_check` 友好报错**：目标库缺 `kb.json` 时提示「不存在或缺少 kb.json，请先创建该库」，不再抛底层 ENOENT。
+- **`kb_export` 输出加 `kb`**：输出 schema 增加 `kb` 字段（additive），与其它工具一致。
+- **胶囊面板位置与无障碍修正**：面板改为空间自适应（默认上方、贴近视口顶部时下方，动态 max-height）；toast portal 到 body、底部居中、`role="status"`；`aria-expanded` 仅在面板挂载时为 true；全部模式预勾选全部库；会话切换作废旧请求。
+- **Task 12 改为 effect-running harness**：用可执行 React effect 的 VM 桩替代计划里的非 effect stub，覆盖面板定位、勾选/应用、失败回滚与会话切换竞态（40 个用例）。
+- **修正计划中的实现笔误**：Task 3 的 `scope-view` 说明/导出措辞按实现校正；Task 5 的 import 语句去掉未使用的 `MAX_SCOPE_KBS`；Task 8 的 lint 渲染断言改用 `output.render`；Task 9 在 GET 路由内用局部 `new URL(...)` 解析（计划依赖了未声明的 `url`/`URL`）；Task 8 的 `kb_std_check` 测试改为显式造库，避免依赖临时库根里的既有库。
+- **验收结果**：`npm test` 500/500（新增 188 例：scope-store 17、scope 37、scope-tools 52、scope-prompt 10、scope-api 19、scope-sync 6、scope-view 7、scope-client 40）；真实宿主验收与截图见 spec §20。
+

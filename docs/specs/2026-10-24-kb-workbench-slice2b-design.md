@@ -43,7 +43,7 @@ Slice 2A 已交付工作台上传/导入任务与标准更新面板（0.20.x）�
 | # | 决策 | 结论 |
 |---|---|---|
 | 1 | 继承机制 | **懒解析 + 首次使用时快照继承**：子会话无显式条目且父有 → 复制一份写回（`inheritedFrom`）；不依赖事件；首次解析前父变化会传递，之后不回溯 |
-| 2 | 工具接入 | **一次性全接 21 个工具**，公共 `resolveScopeTarget`/`resolveDocInScope` 收口，表驱动测试 |
+| 2 | 工具接入 | **一次性全接 21 个工具**，公共 `resolveExecScope`/`resolveSingleKb`/`resolveDocTarget`/`assertInScope` 收口，表驱动测试 |
 | 3 | 提示段 | **仅 `mode=selected` 注入**；`all` 不注入（零 token 开销） |
 | 4 | 胶囊 | **按 M1 §6.1 全量**：搜索、多选、全选/清空、应用/取消、打开工作台、三类降级 |
 | 5 | 打开工作台 | **复用 DSH 内弹窗**：把 Slice 1.5 弹窗抽成可复用组件，侧栏与胶囊各持开关状态 |
@@ -94,10 +94,13 @@ Slice 2A 已交付工作台上传/导入任务与标准更新面板（0.20.x）�
 
 ```
 lib/
-  scope.js          新增：存储/校验/清理/继承/解析/ScopeError
+  scope-store.js    新增：.scopes.json 文件层（原子读写/串行队列/mtime+size 同步视图/库名同步）
+  scope.js          新增：校验/清理/继承/解析/ScopeError（工具与 API 共用）
   scope-view.js     新增：纯函数（chipLabel/selectionPayload/mergeSelection）
-  index.js          改：21 工具接入 + 动态提示段 + config scopeTtlDays
-  kbmeta.js         改：归档/重命名同步 .scopes.json（复用 removeScopesReferences）
+  index.js          改：21 工具接入 + 动态提示段 + config scopeTtlDays/scopeLintMaxKbs
+  dedup.js          改：导入查重限定在会话范围内（kbNames 白名单，null = 全部）
+  kbmeta.js         改：archiveKb/purgeKb 剔除库名（复用 removeScopeKb）
+  store.js          改：renameKb 说明（.scopes.json 同步由工具与 HTTP 两个入口负责）
   version.js        改：0.21.0
   web/api.js        改：GET/PUT /kb/api/scope；features.scope
   web/http.js       不改（复用 requireUiHeader/assertSameOrigin/isTrustedApiRequest）
@@ -105,11 +108,13 @@ src/client/index.tsx  改：抽 WorkbenchModal + 注册胶囊
 lib/client.js         改：构建产物（esbuild）
 test/
   scope-store.test.mjs     新增
-  scope-inherit.test.mjs   新增
+  scope.test.mjs           新增（存储语义 + 继承 + 入口解析）
   scope-tools.test.mjs     新增
   scope-prompt.test.mjs    新增
   scope-api.test.mjs       新增
-  scope-client.test.mjs    新增
+  scope-sync.test.mjs      新增（Task 10）
+  scope-view.test.mjs      新增
+  scope-client.test.mjs    新增（Task 12：effect-running VM）
 package.json / README.md   改
 ```
 
@@ -141,7 +146,7 @@ package.json / README.md   改
 - 写入：临时文件（`<path>.<pid>.<ts>.tmp`）+ `rename` 原子替换，权限 `0600`；**按 kbRoot 的进程内串行队列**（模块级 `Map<root, Promise>`），并发 PUT 不互相覆盖。
 - 读取：JSON 解析失败、结构非法、读取 EACCES → 按空库处理并保留原文件（不删）；单条条目结构非法跳过该条。
 - 清理（惰性，仅读路径发现变化才回写）：`updatedAt` 超过 `scopeTtlDays`（默认 30）的条目删除；`kbs` 中已不存在/已归档/已合并的库名剔除；剔除后 `selected` 且空 → `all`。
-- 归档/重命名同步：现有 `removeScopesReferences(root, name)` 只在**彻底删除归档库**（`purgeKb`）时调用，归档与重命名都没接。2B 把它迁移到 `lib/scope-store.js`（`removeScopeKb` / `renameScopeKb`），并在 `archiveKb`（归档）与 `renameKb`（重命名，`lib/store.js` 单一入口）补齐 best-effort 同步。
+- 归档/重命名同步：现有 `removeScopesReferences(root, name)` 只在**彻底删除归档库**（`purgeKb`）时调用，归档与重命名都没接。2B 把它迁移到 `lib/scope-store.js`（`removeScopeKb` / `renameScopeKb`）：`archiveKb` / `purgeKb` 内 best-effort 剔除库名；重命名由 `kb_rename` 工具与 `PATCH /kbs/:name` 两个入口在 `renameKb` 之后调用 `renameScopeKb`（`lib/store.js` 的 `renameKb` 保持纯目录操作）。
 - 隐私：只含 sessionId 与库名，无对话内容。
 
 ## 7. 范围解析与继承
@@ -161,7 +166,9 @@ package.json / README.md   改
 ### 7.2 同步只读视图（系统提示用）
 
 - `systemPrompt.section` 的 `text` 是同步函数，因此提供 `readScopeSync(root)`：
-  - `readFileSync` + mtime/1s 缓存；文件 >1MB、解析失败、结构非法 → 视为空（`all`）。
+  - `readFileSync` + **mtime+size 缓存**（同一路径且 mtime/size 未变时复用；写入成功后主动失效）；
+    文件 >1MB、解析失败、结构非法或不可读 → 视为空（`all`）。
+  - 返回的视图被**冻结**（顶层、每个条目与 `kbs` 数组都 `Object.freeze`），调用方不能改坏缓存。
   - 只做内存内清理与父链解析（子无条目 → 父条目值，`inheritedFrom=parent`），**不写盘**。
 - 工具与 API 使用异步 `resolveScope`（会落快照/清理回写）。
 - 由此产生的语义细节：一个只聊天、从未调用 `kb_*` 工具的子会话，提示段会一直跟随父范围变化；首次工具调用落快照后才固化。这是“懒快照”的预期行为，README 记录。
@@ -177,12 +184,17 @@ package.json / README.md   改
 公共入口（`lib/scope.js`）：
 
 ```js
-resolveScopeTarget(exec, requestedKb, policy) -> { mode, kbs, kb?, sessionId, inheritedFrom }
-// policy: "list" | "query" | "doc" | "single" | "std" | "lint" | "snapshot" | "export" | "kbAdmin"
-resolveDocInScope(exec, requestedKb, docRef) -> { kb, doc }
+resolveExecScope(exec, { kbRoot, ttlDays }) -> { mode, kbs, inheritedFrom, stored }
+resolveSingleKb(exec, requestedKb, { kbRoot, defaultKb, ttlDays }, { policy }) -> { scope, kb }
+// policy: "single"（默认）| "std"（默认「标准」）| "kbAdmin"（同 single，要求显式 kb）
+resolveDocTarget(exec, requestedKb, docRef, { kbRoot, defaultKb, ttlDays, includeDeleted }) -> { scope, kb, doc? }
+assertInScope(scope, name) -> name（范围外抛 ScopeError）
+// kb_list / kb_query / kb_lint 用 resolveExecScope + assertInScope 自行处理多库分支
 ```
 
 `kb` 显式指定时一律先 `sanitizeKbName` 再校验在范围内，范围外抛 `ScopeError`（`code: "KB_OUT_OF_SCOPE"`）。`exec` 允许为 `undefined`（现有测试存在只传 args 的调用）：按 fail-open 处理，不限制。
+
+`resolveDocTarget` 的 `includeDeleted=true` 供 `kb_restore` / `kb_history` / `kb_remove(soft=false)` 使用：跨库解析时连软删除文档一起扫描，否则恢复/查看历史的入口会先报“范围内找不到”。其它 doc 类工具保持 `false`。
 
 | 工具 | `kb` 显式 | `kb` 省略 | policy |
 |---|---|---|---|
@@ -246,6 +258,8 @@ ctx.systemPrompt.section({
 
 - 校验 `session`（1–200 字符、无控制字符）→ 否则 `SCOPE_INVALID` 400。
 - 不创建继承快照；允许清理回写（超 TTL 条目、失效库名，可能因此删改文件里的任意条目），但不把请求会话“提升”为显式条目。
+- `parentSession` 从**活的 agent 注册表**解析（`ctx.get("agents")` 取该会话 header 的 `parentSession`，取不到按 `null`），因此继承来的父范围无需落快照即可在响应里看到。
+- `updatedAt` 只在请求会话**自己有条目**时返回（继承视图返回 `null`）。
 - 响应：
 
 ```json
@@ -285,6 +299,8 @@ ctx.systemPrompt.section({
 
 `ScopeError` 属性：`code`、`message`、`details`（如 `{ scope: [...], requested: "电能质量" }`），工具直接抛出（DSH 以工具失败展示 message）。
 
+`KB_REQUIRED` 与 `KB_AMBIGUOUS` 是**工具专用**错误码（HTTP API 不会产生）；`KB_NOT_FOUND` 在工具里也用于“范围内跨库解析 0 命中”。**5xx 响应永不携带 `details`**（`mapError` 对 `status >= 500` 剥离），只有 4xx 才回传 `details`，避免内部路径、库名列表等被回传给浏览器。
+
 ## 12. 胶囊 UI
 
 ### 12.1 组件与注册
@@ -300,23 +316,23 @@ ctx.systemPrompt.section({
 - 尺寸对齐 24px 工具行：14px 图标 + 12px 文本，`max-width` 限宽省略。
 - 文案：`知识库：全部` / `知识库：N 个`（`selected` 用强调色）/ 加载中 `知识库：…` / 失败 `知识库：—`（点击即重试）。
 - 无 API（`/kb/api/status.features.scope` 不为 `true`，或 `/kb/api/status` 404/网络失败）→ **不渲染**（静默降级）。
-- `aria-expanded`、`title` 提示。
+- 展开态才输出 `aria-expanded="true"`（只按面板**真正挂载**计算，加载中/未挂载不声明）；`title` 提示。
 
 ### 12.3 展开态
 
-- portal 到 `document.body`；按 chip `getBoundingClientRect()` 定位（resize/scroll 重算；拿不到 rect 时居中兜底），宽度约 320px、最大高度 420px、列表滚动。
+- portal 到 `document.body`；按 chip `getBoundingClientRect()` 定位（resize/scroll 重算；拿不到 rect 时屏幕居中兜底）。**空间自适应**：优先在胶囊上方展开；上方不足约 240px（胶囊贴近视口顶部）时改为下方展开，两个方向都按可用空间动态限制 `max-height`（上限 420px）。宽度约 320px、列表滚动。
 - 内容：
   - 标题「本会话使用哪些知识库？」。
   - 搜索框（按名称/简介过滤，输入即过滤）。
-  - 库列表：复选框 + 名称 + 文档数 + 空库徽标；不显示已归档/已合并库。
+  - 库列表：复选框 + 名称 + 文档数 + 空库徽标；不显示已归档/已合并库。打开面板时按当前范围预置勾选：`all` 模式**全部勾选**（收窄靠取消勾选），`selected` 模式只勾选范围内库。
   - 快捷：`全选` / `清空`。
   - 底部：`应用` / `取消` / `打开知识库工作台`（打开 `WorkbenchModal`）。
 - 列表里没有任何可用库时：显示「暂无知识库」+「去工作台新建」。
 - 应用：
   - `全选` → 提交 `mode: "all"`；`清空` → 提交 `mode: "all"`（M1：`selected`+空视为 all）。
   - 其余 → `mode: "selected"` + 勾选列表。
-  - 成功：面板内轻量 toast（自绘，2.4s 消失，不依赖宿主 API）「已限定为 N 个知识库」/「已改为全部知识库」；关闭面板；chip 更新。
-  - 失败：面板保留、toast 报错、chip 不变（等价回滚）。
+  - 成功：toast（自绘，portal 到 `document.body`，底部居中，`role="status"` + `aria-live="polite"`，2.4s 消失，不依赖宿主 API）「已限定为 N 个知识库」/「已改为全部知识库」；关闭面板；chip 更新。
+  - 失败：面板保留、同一 toast 报错、chip 不变（等价回滚）。
   - `取消`：丢弃本地勾选并关闭。
 - 数据：打开面板时并行 GET `/kb/api/scope` 与 `/kb/api/kbs`；防重复请求（同一时刻只保留一次在途请求）；`PUT` 期间按钮禁用。
 - 请求一律用**同源相对路径**（`/kb/api/...`）：桌面端页面由插件所在 webServer 提供（Slice 1.5 已用同源 iframe 验证），不要写死 `dsh-app://` 或绝对主机；PUT 带 `x-kb-ui: 1`。
@@ -328,7 +344,7 @@ ctx.systemPrompt.section({
 - `.scopes.json` 权限 `0600`、原子写、串行队列；读无锁（原子替换保证读到完整 JSON）。
 - **范围不是权限边界**：sessionId 由客户端提供、不做身份认证；用户始终可以用胶囊改范围；工作台 HTTP API/UI 不受范围影响（M1 §7.9）。README 明确。
 - 降级顺序：无 `webServer` → 无 API（胶囊不渲染，工具/提示照常）；`features.scope` 缺失 → 胶囊不渲染；scope 文件损坏 → 读按 `all`、写报错；`exec.agent` 缺失 → fail-open。
-- 同步读文件在提示组装路径上：文件小、1s 缓存、>1MB 忽略；损坏绝不抛错。
+- 同步读文件在提示组装路径上：文件小、mtime+size 缓存、>1MB 忽略；损坏绝不抛错。
 
 ## 14. 配置
 
@@ -341,23 +357,25 @@ ctx.systemPrompt.section({
 
 ## 15. 测试计划
 
-### 15.1 自动化（`node:test`，计划细化到新增 85 例；基线 312 → 397 全绿）
+### 15.1 自动化（`node:test`，最终新增 188 例；基线 312 → **500** 全绿）
 
-- `scope-store.test.mjs`：结构校验（sessionId/mode/kbs/50 上限/去重）、TTL 清理、缺失与归档/合并库剔除、损坏文件、原子写、串行并发、`0600`、清理回写只在变化时发生。
-- `scope-inherit.test.mjs`：子会话快照 + `inheritedFrom`；父无条目 → all；父变化不回溯；孙链复制生效值；GET 不落快照；写失败降级为父范围。
-- `scope-tools.test.mjs`：表驱动矩阵——每个 policy 选代表工具测「显式内/显式外/省略 0 库/省略 1 库/省略多库」；`kb_query` 的 `*`；跨库 doc 单命中/多候选/0 命中；`kb_list` 过滤 + `scope` 字段；`kb_lint` 循环分组；`kb_std_check` 标准不在范围；`kb_remove(removeKb=true)`；`kb_edit_batch` 单库事务；`mode=all` 回归（现有行为不变）。
-- `scope-prompt.test.mjs`：selected/all/空/损坏/无 session/子继承/写完刷新/缓存 TTL/超 20 个库名截断；函数永不抛错。
-- `scope-api.test.mjs`：GET/PUT 正常、非法 session、非法 mode、缺 `x-kb-ui`、跨源拒绝、`features.scope`、写失败、归档库、`mode=all` 忽略 kbs。
-- `scope-sync.test.mjs`：`kb_rename` 工具与 `PATCH /kbs/:name` 两个调用点都同步 `.scopes.json`；`archiveKb` / `purgeKb` 剔除库名。
-- `scope-client.test.mjs`：VM 加载 `lib/client.js`，断言同时注册 `sidebar.footer.action` 与 `conversation.input.left`；`lib/scope-view.js` 纯函数单测（chipLabel/selectionPayload/isAllSelection）；`check:client` 产物不漂移。
+- `scope-store.test.mjs`（17）：结构校验（sessionId/mode/kbs/50 上限/去重）、TTL 清理、缺失与归档/合并库剔除、损坏/超限文件（读空、拒写 `SCOPE_UNUSABLE`）、原子写、串行并发、`0600`、清理回写只在变化时发生、同步视图 mtime+size 缓存与冻结。
+- `scope.test.mjs`（37）：条目归一化/50 上限/非法 sessionId、子会话快照 + `inheritedFrom`、父无条目 → all、父变化不回溯、只读解析（GET）不落快照、写失败降级为只读解析、`setScope` 严格校验（不存在/归档/合并）、`resolveSingleKb`/`resolveDocTarget` 单测（含软删除与虚拟文档）。
+- `scope-tools.test.mjs`（52）：表驱动矩阵——每个 policy 选代表工具测「显式内/显式外/省略 0 库/省略 1 库/省略多库」；`kb_query` 的 `*`；跨库 doc 单命中/多候选/0 命中；`kb_restore`/`kb_history`/永久删除解析软删除文档；`kb_list` 过滤 + `scope` 字段；`kb_lint` 逐库分组与 `truncated`/`omittedKbs`；`kb_std_check` 默认「标准」与范围外；`kb_remove(removeKb=true)`；`kb_edit_batch` 单库事务；`mode=all` 回归（现有行为不变）。
+- `scope-prompt.test.mjs`（10）：selected/all/空/损坏/无 session/子继承/写完刷新/同步视图缓存（mtime+size）/超 20 个库名截断；函数永不抛错。
+- `scope-api.test.mjs`（19）：GET/PUT 正常、非法 session、非法 mode、缺 `x-kb-ui`、跨源拒绝、`features.scope`、写失败、归档库、`mode=all` 忽略 kbs、GET 从 live agent 注册表解析父会话且不落快照、`updatedAt` 为空。
+- `scope-sync.test.mjs`（6）：`kb_rename` 工具与 `PATCH /kbs/:name` 两个调用点都同步 `.scopes.json`；`archiveKb` / `purgeKb` 剔除库名（含名字被现存库复用的情况）。
+- `scope-view.test.mjs`（7）：`lib/scope-view.js` 纯函数（chipLabel/selectionPayload/isAllSelection/mergeSelection）。
+- `scope-client.test.mjs`（40）：effect-running VM 加载 `lib/client.js`（替代原计划的非 effect stub），断言注册 `conversation.input.left`、chip 状态/面板空间自适应/勾选与提交/失败回滚/`aria-expanded`；`check:client` 产物不漂移。
 - 现有 312 个用例全绿：除 `test/client-entry.test.mjs` 需要扩展注册断言（新增 `conversation.input.left`）外，其余断言不变（`mode=all` 行为与 0.20.4 一致；fake exec 无 session.id 走 fail-open）。
 
-### 15.2 真实宿主验收（沿用 spike 手法）
+### 15.2 真实宿主验收（2026-10-24 已完成，记录见 §20）
 
-- 临时 `dsh --profile web --port <port>` + 临时 `kbRoot` + 真实插件（探针式插入 profile，结束还原）。
-- WKWebView 流程：chip「全部」→ 开面板 → 勾选 1 库 → 应用 → toast + chip「1 个」→ 重新打开面板勾选状态保持 → 读 `.scopes.json` 断言 →「打开知识库工作台」弹窗可开可关。
-- 失败注入：`.scopes.json` 所在目录只读 → 应用报错且 chip 不变；禁用 `webServer` → 胶囊不渲染。
-- 桌面端重启后人工清单：chip 可见；切换范围后一轮对话里 `kb_list` 只返回范围内库；范围外 `kb_query` 收到 `KB_OUT_OF_SCOPE`；子代理（`subagent`）继承。
+- 临时 `dsh --profile web --port 55940` + 临时 `kbRoot /tmp/kb-2b-accept/kb-root` + 真实插件（探针式插入 profile，结束已还原）。
+- WKWebView 实测：chip「知识库：全部」→ 开面板（2 个库）→ 清空并勾选「验收甲库」→ 应用 → chip「知识库：1 个」+ toast 可见；重开面板勾选保持；「打开知识库工作台」弹窗可开可关。
+- 失败注入：`.scopes.json` 只读 → toast「范围保存失败，请重试」、chip 不变、面板保留。
+- 真实模型轮次里让模型调用 `kb_list`：只返回「验收甲库」，「验收乙库」不出现。
+- 降级：没有 `webServer` 时胶囊不渲染（由 `features.scope` / status 探测决定）。
 
 ## 16. 验收标准
 
@@ -383,7 +401,7 @@ ctx.systemPrompt.section({
 ## 18. 风险与已知限制
 
 - **前缀缓存**：切换范围会改写首个 system 节点一次；范围不变时无影响。
-- **同步文件读**：提示组装路径上的同步读；1s 缓存 + 1MB 上限，损坏降级 `all`。
+- **同步文件读**：提示组装路径上的同步读；mtime+size 缓存 + 1MB 上限，损坏降级 `all`。
 - **身份缺失 fail-open**：无 session id 的调用不受限制（测试与非常规宿主路径）。
 - **`kb_edit_batch`/`kb_add_note` 单库策略**：偏离 M1 字面表述，已在第 8 节记录。
 - **`conversation.session.header.utilities` 未实现**：首页没有会话头部，`input.left` 覆盖主场景；若未来某些视图没有 composer，胶囊不出现（可后续补 header 注册）。
@@ -395,3 +413,15 @@ ctx.systemPrompt.section({
 - 复用 2A 的 `/kb/api/*` 路由分发、错误包装（`WebError`/`mapError`）、静态资源与工作台 UI；不新增任务类型。
 - 复用 2A 的临时宿主 + WKWebView 验收手法（`.acceptance/`）。
 - 2A 交接项（2A design §14）四项全部落实：slot（结论 1）、session 事件（结论 2）、父会话字段（结论 3）、工具公共入口（结论 4 + 第 8 节）。
+
+## 20. 2B 验收记录（2026-10-24，0.21.0）
+
+- [x] 自动化：`npm test` **500/500** 通过（含 `check:client`、`check-ui`）；`npm run typecheck`、`npm run check:client`、`node scripts/check-ui.mjs` 均通过。
+- [x] 真实宿主（临时 `dsh --profile web --port 55940` + 临时 kbRoot `/tmp/kb-2b-accept/kb-root`，WKWebView）：
+  - chip「知识库：全部」→ 打开面板（2 个库）→ 清空 + 勾选「验收甲库」→ 应用 → chip「知识库：1 个」+ 可见 toast；
+  - 重新打开面板，勾选保持；
+  - 从胶囊「打开知识库工作台」可打开/关闭 DSH 内弹窗；
+  - 只读 `.scopes.json` 注入：toast「范围保存失败，请重试」、chip 不变、面板保留；
+  - 真实模型轮次要求模型调用 `kb_list`：只返回「验收甲库」，「验收乙库」不出现。
+- 截图：`.acceptance/screenshot-2b-chip-all.png`、`screenshot-2b-chip-selected.png`、`screenshot-2b-workbench-modal.png`、`screenshot-2b-write-failed.png`、`screenshot-2b-scoped-tool-turn.png`。
+- 说明：「全部」模式打开面板时所有复选框预勾选，因此收窄范围靠**取消勾选**（第 12.3 节已记录）。
