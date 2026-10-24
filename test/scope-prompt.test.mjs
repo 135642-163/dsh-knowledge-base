@@ -98,9 +98,39 @@ test("corrupt scopes file degrades to empty without throwing", async () => {
 });
 
 test("scope changes are visible on the next assembly (mtime cache refresh)", async () => {
-  const { kbRoot, section } = await setup();
+  const { kbRoot, section } = await setup({ scopes: {} });
   assert.equal(await textFor(section, "s1"), "");
-  await writeScopes(kbRoot, { scopes: { s1: { mode: "selected", kbs: ["标准"], updatedAt: new Date().toISOString() } } });
+  await writeFile(
+    join(kbRoot, ".scopes.json"),
+    JSON.stringify({ version: 1, scopes: { s1: { mode: "selected", kbs: ["标准"], updatedAt: new Date().toISOString() } } }),
+    "utf8"
+  );
   const text = await textFor(section, "s1");
   assert.match(text, /标准/);
+});
+
+test("expired scope entries are not injected", async () => {
+  const stale = new Date(Date.now() - 40 * 86400000).toISOString();
+  const { section } = await setup({
+    scopes: { s1: { mode: "selected", kbs: ["标准"], updatedAt: stale } },
+  });
+  assert.equal(await textFor(section, "s1"), "");
+});
+
+test("missing session context never throws and injects nothing", async () => {
+  const { section } = await setup({
+    scopes: { s1: { mode: "selected", kbs: ["标准"], updatedAt: new Date().toISOString() } },
+  });
+  assert.equal(await section.text(undefined), "");
+  assert.equal(await section.text({ agent: {} }), "");
+});
+
+test("selected scope with poisoned kb name cannot inject prompt refs", async () => {
+  const { section } = await setup({
+    scopes: { s1: { mode: "selected", kbs: ["{{cwd}}"], updatedAt: new Date().toISOString() } },
+  });
+  const text = await textFor(section, "s1");
+  assert.notEqual(text, "");
+  assert.doesNotMatch(text, /\{\{|\}\}/);
+  assert.match(text, /｛｛cwd｝｝/);
 });

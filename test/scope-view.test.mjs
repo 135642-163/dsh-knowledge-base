@@ -32,6 +32,13 @@ test("scopePromptText truncates beyond 20 names", () => {
   assert.doesNotMatch(text, /库21/);
 });
 
+test("scopePromptText neutralizes brace interpolation and drops empty names", () => {
+  const text = scopePromptText({ mode: "selected", kbs: ["{{cwd}}", "a{b}c\n库", "\u0000"] });
+  assert.doesNotMatch(text, /\{\{|\}\}/);
+  assert.doesNotMatch(text, /[\u0000-\u001f\u007f]/);
+  assert.match(text, /本会话用户选定：｛｛cwd｝｝、a｛b｝c 库。/);
+});
+
 test("selectionPayload collapses all/empty to mode all", () => {
   assert.deepEqual(selectionPayload("all", ["A"]), { mode: "all", kbs: [] });
   assert.deepEqual(selectionPayload("selected", []), { mode: "all", kbs: [] });

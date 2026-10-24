@@ -480,3 +480,15 @@ test("scopeForSessionSync resolves child via parent without writing", async () =
   assert.equal(scope.inheritedFrom, "parent");
   assert.equal((await readScopes(root)).scopes.child, undefined);
 });
+
+test("scopeForSessionSync hides entries older than ttlDays", async () => {
+  const root = await tmpRoot();
+  const stale = new Date(Date.now() - 40 * 86400000).toISOString();
+  await writeScopes(root, { scopes: { s1: { mode: "selected", kbs: ["A"], updatedAt: stale } } });
+  const expired = scopeForSessionSync(root, "s1", null, 30);
+  assert.equal(expired.mode, "all");
+  assert.deepEqual(expired.kbs, []);
+  const kept = scopeForSessionSync(root, "s1", null, 0);
+  assert.equal(kept.mode, "selected");
+  assert.deepEqual(kept.kbs, ["A"]);
+});
