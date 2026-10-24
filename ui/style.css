@@ -178,6 +178,7 @@ code { background: var(--panel-2); border-radius: 4px; padding: 1px 4px; }
 .head-actions { display: flex; gap: 8px; margin-left: auto; }
 .modal.modal-wide { width: min(720px, 92vw); }
 .field select { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; color: inherit; font: inherit; }
+.ocr-field select { width: auto; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; color: inherit; font: inherit; }
 .dropzone { border: 1px dashed var(--line); border-radius: var(--radius); padding: 18px; text-align: center; display: grid; gap: 8px; }
 .dropzone p { margin: 0; }
 .dropzone-actions { display: flex; gap: 8px; justify-content: center; }

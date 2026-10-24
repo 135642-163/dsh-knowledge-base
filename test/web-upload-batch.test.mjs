@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { handleApi } from "../lib/web/api.js";
 import { createKb } from "../lib/kbmeta.js";
 import { createJobRegistry } from "../lib/web/jobs.js";
-import { markBatchImporting, normalizeLimits, sweepOldBatches } from "../lib/web/upload.js";
+import { buildImportFiles, markBatchImporting, normalizeLimits, sweepOldBatches } from "../lib/web/upload.js";
 
 const LIMITS = { maxUploadBytes: 1024, maxBatchFiles: 2, extensions: [".md", ".pdf"] };
 
@@ -351,6 +351,27 @@ test("并发 PUT 同一批次的两个文件都落盘", async () => {
   assert.deepEqual(results.map((result) => result.res.status), [200, 200]);
   const got = await call(opts, makeReq({ method: "GET", url: `/kb/api/upload-batches/${id}` }));
   assert.deepEqual(got.json.batch.files.map((file) => file.path).sort(), ["a.md", "b.md"]);
+});
+
+test("buildImportFiles 清洗标题但保留原路径键", () => {
+  const kbDir = join(tmpdir(), "kb-upload-title-fixture");
+  const paths = [
+    "标准/GB_T 40595-2021 并网电源一次调频技术规定及试验导则(标准网-www.biaozhun.org).pdf",
+    "资料/1. 会议纪要.md",
+    "资料/电能质量管理办法.md",
+  ];
+  const files = buildImportFiles(kbDir, {
+    batchId: "b-0123456789ab",
+    files: paths.map((path, index) => ({ path, size: index + 1 })),
+  });
+  assert.deepEqual(files.map((file) => file.title), [
+    "GB/T 40595-2021 并网电源一次调频技术规定及试验导则",
+    "会议纪要",
+    "电能质量管理办法",
+  ]);
+  assert.deepEqual(files.map((file) => file.relKey), paths);
+  assert.deepEqual(files.map((file) => file.sourceFile), paths);
+  assert.deepEqual(files.map((file) => file.storedSourcePath), ["", "", ""]);
 });
 
 test("路径片段超长/尾部点空格与大小写重复返回 400", async () => {

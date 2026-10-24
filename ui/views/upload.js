@@ -125,9 +125,10 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
       <div class="modal-form">
         <h2>上传资料</h2>
         <label class="field"><span>目标库</span>
-          <select id="upload-kb" ${kb ? "disabled" : ""}>
+          <select id="upload-kb">
             ${kbs.map((item) => `<option value="${escapeAttr(item.name)}" ${item.name === state.kb ? "selected" : ""}>${escapeHtml(item.name)}</option>`).join("")}
           </select>
+          <span class="muted">选择文件后仍可切换目标库</span>
         </label>
         <div class="dropzone" id="upload-drop">
           <p>把文件拖到这里</p>
@@ -143,11 +144,15 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
         </div>
         <div class="form-row">
           <label class="check"><input type="checkbox" id="upload-dup" ${state.allowCrossDuplicates ? "checked" : ""} /> 允许跨库重复</label>
-          <span class="muted">OCR</span>
-          <label class="check"><input type="radio" name="ocr" value="best" ${state.ocrModel === "best" ? "checked" : ""} /> best</label>
-          <label class="check"><input type="radio" name="ocr" value="fast" ${state.ocrModel === "fast" ? "checked" : ""} /> fast</label>
+          <label class="check ocr-field">OCR
+            <select id="upload-ocr">
+              <option value="best" ${state.ocrModel === "best" ? "selected" : ""}>best（更准，默认）</option>
+              <option value="fast" ${state.ocrModel === "fast" ? "selected" : ""}>fast（更快）</option>
+            </select>
+          </label>
+          <span class="muted">仅扫描版 PDF / 图片需要；文字版 PDF 不受影响</span>
         </div>
-        ${state.resumeChecked ? "" : `<p class="muted">正在检查该库上次的导入任务…</p>`}
+        ${state.resumeChecked ? "" : `<p class="muted">正在检查目标库的上次导入任务…</p>`}
         <p class="form-error" ${state.error ? "" : "hidden"}>${escapeHtml(state.error)}</p>
         <div class="modal-actions">
           <button type="button" class="btn" data-close>取消</button>
@@ -258,6 +263,7 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
     const kbSelect = modal.querySelector("#upload-kb");
     if (kbSelect) {
       kbSelect.addEventListener("change", (event) => {
+        if (state.phase !== "select" || state.closed) return;
         state.kb = event.target.value;
         state.resumeChecked = false;
         state.error = "";
@@ -279,9 +285,12 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
 
     const duplicate = modal.querySelector("#upload-dup");
     if (duplicate) duplicate.addEventListener("change", (event) => { state.allowCrossDuplicates = event.target.checked; });
-    modal.querySelectorAll("input[name='ocr']").forEach((input) => {
-      input.addEventListener("change", (event) => { if (event.target.checked) state.ocrModel = event.target.value; });
-    });
+    const ocrSelect = modal.querySelector("#upload-ocr");
+    if (ocrSelect) {
+      ocrSelect.addEventListener("change", (event) => {
+        state.ocrModel = event.target.value === "fast" ? "fast" : "best";
+      });
+    }
   }
 
   function pick({ directory }) {
