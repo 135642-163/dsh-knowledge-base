@@ -696,7 +696,38 @@ test("kb_lint: selected multi-kb scope lints each kb and groups results", async 
   const result = await tools.get("kb_lint").execute({}, scoped("s1"));
   assert.equal(result.kb, "scope");
   assert.deepEqual(result.kbs.map((row) => row.kb), ["甲库", "乙库"]);
-  assert.match(tools.get("kb_lint").output.render({}, result)[0].text, /甲库/);
+  const text = tools.get("kb_lint").output.render({}, result)[0].text;
+  assert.match(text, /知识库「甲库」体检/);
+  assert.match(text, /知识库「乙库」体检/);
+});
+
+test("kb_lint: one corrupt kb does not abort the scoped multi-kb report", async () => {
+  const { tools, scoped, importDoc, scope, kbRoot } = await setup();
+  await importDoc("a.md", "# 甲\n\n正文。\n", "甲库", "甲文档");
+  await importDoc("b.md", "# 乙\n\n正文。\n", "乙库", "乙文档");
+  await writeFile(join(kbRoot, "乙库", "kb.json"), "{broken", "utf8");
+  await scope("s1", ["甲库", "乙库"]);
+  const result = await tools.get("kb_lint").execute({}, scoped("s1"));
+  assert.equal(result.kb, "scope");
+  const byKb = Object.fromEntries(result.kbs.map((row) => [row.kb, row]));
+  assert.equal(byKb["甲库"].counts.docs, 1);
+  assert.match(String(byKb["乙库"].error), /读取知识库清单失败/);
+  const text = tools.get("kb_lint").output.render({}, result)[0].text;
+  assert.match(text, /知识库「甲库」体检/);
+  assert.match(text, /知识库「乙库」体检失败：读取知识库清单失败/);
+});
+
+test("kb_lint: scopeLintMaxKbs cap is reported, never silent", async () => {
+  const { tools, scoped, importDoc, scope } = await setup({ scopeLintMaxKbs: 1 });
+  await importDoc("a.md", "# 甲\n\n正文。\n", "甲库", "甲文档");
+  await importDoc("b.md", "# 乙\n\n正文。\n", "乙库", "乙文档");
+  await scope("s1", ["甲库", "乙库"]);
+  const result = await tools.get("kb_lint").execute({}, scoped("s1"));
+  assert.equal(result.kb, "scope");
+  assert.deepEqual(result.kbs.map((row) => row.kb), ["甲库"]);
+  assert.equal(result.truncated, true);
+  assert.deepEqual(result.omittedKbs, ["乙库"]);
+  assert.match(tools.get("kb_lint").output.render({}, result)[0].text, /scopeLintMaxKbs/);
 });
 
 test("kb_lint: explicit out-of-scope kb is rejected", async () => {
@@ -739,6 +770,22 @@ test("kb_std_check: explicit out-of-scope kb is rejected", async () => {
     () => tools.get("kb_std_check").execute({ kb: "乙库", action: "check" }, scoped("s1")),
     (error) => error.code === "KB_OUT_OF_SCOPE"
   );
+});
+
+test("kb_std_check: missing library fails friendly without leaking the kb root", async () => {
+  const { tools, scoped, kbRoot } = await setup();
+  await assert.rejects(
+    () => tools.get("kb_std_check").execute({ action: "check" }, scoped("s1")),
+    (error) => {
+      assert.match(error.message, /知识库「标准」不存在/);
+      assert.ok(error.message.includes("标准"));
+      assert.equal(error.message.includes(kbRoot), false);
+      assert.equal(error.message.includes("kb.json"), true);
+      return true;
+    }
+  );
+  // 缺库时不应顺手 mkdir 出一个空目录
+  await assert.rejects(() => readdir(join(kbRoot, "标准")), /ENOENT/);
 });
 
 test("kb_rename: requires explicit kb and rejects out-of-scope targets", async () => {
