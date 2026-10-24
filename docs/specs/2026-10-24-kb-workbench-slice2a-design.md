@@ -493,3 +493,30 @@ select → uploading(并发 2) → starting → importing(1s 轮询) → done | 
 4. 工具矩阵逐项接入的公共入口：现有 21 个 `kb_*` 工具各自解析 `kb`，需要一个共享的 `resolveScopeKb`/`assertInScope`，避免 21 处散改。
 
 2B 的 `.scopes.json`、API（`GET/PUT /kb/api/scope`）、胶囊 UI、`KB_OUT_OF_SCOPE` 语义按 M1 6.1–6.6 执行；本切片预留的 `/status.features.scope=false` 在 2B 打开。
+
+## 15. 验收记录（2026-10-24，0.20.0）
+
+### 15.1 自动化与 API 级端到端
+
+- `npm test`：**295/295 pass / 0 fail**（含 `check:client`、`check-ui` 11 个 UI 模块）。
+- `npm run typecheck`、`npm run check:client`、`node scripts/check-ui.mjs` 全部通过。
+- 真实 API 级端到端（临时 `kbRoot` + 真实 `worker/import-worker.mjs` + 真实 `lib/web/jobs.js` 注册表 + `handleApi`）11 项全过：
+  1. 创建批次 201；2. 嵌套目录上传 2 个 `.md`；3. import 202；4. 任务 succeeded 且 `result.files[].path` 保留相对路径；
+  5. 2 篇文档入库、`sources/` 落原件、成功批次目录删除；6. 资料 API 可读；
+  7. 损坏文件 → 任务 failed、批次保留并标记 failed；8. 标题重合（不同 relKey）→ `jobId:null` 且批次保持 open；
+  9. `GET std` configured=true 且响应不含 cookie；10. `std-check` 任务 succeeded、结果 entries 正常；11. `/status` features upload/std。
+- 说明：UI 无 DOM 自动化（仓库无 jsdom/happy-dom/Playwright）；`ui/**` 仅由 `scripts/check-ui.mjs` 做语法门禁，交互行为需浏览器验收。
+
+### 15.2 浏览器/桌面端验收状态
+
+本轮**未执行**真实 DSH 桌面端视觉验收：当前运行中的 DSH 实例仍是 0.19.1（插件代码已更新到 0.20.0，需重启宿主后加载），且本机未安装浏览器自动化依赖。以下项目留待重启后人工确认（步骤见 `docs/plans/2026-10-24-kb-workbench-slice2a.md` Task 14）：
+
+- 上传弹窗：逐文件进度行高度/布局（`.uprow-progress` 已修）、拖拽弹窗空白处不导航、目录选择、非法扩展名拒绝、成功后刷新资料页。
+- 刷新/重开弹窗的任务恢复；从库详情页打开时 resume 目标库正确。
+- 标准面板：阶段中文、TTL、可补下载、金币确认框需勾选、任务完成后详情页不被卸载、1 小时内结果可回看。
+- 桌面端 `Cmd+R` 后侧栏入口 → 弹窗 → `/kb/?embed=1` 布局正常。
+- `curl http://127.0.0.1:<port>/kb/api/status` 返回 `version: "0.20.0"`、`features.upload/std/jobs = true`。
+
+### 15.3 已知限制
+
+见 README「实现偏差 / 已知限制（0.20.0）」：不做拖拽文件夹递归、不做资料按更新时间排序、失败批次仅诊断保留（无删除/重试失败批次 API）、批次过期清扫由创建批次触发、`refreshKbIndex` 仍在 `lib/import-job.js`、UI 无自动化 DOM 测试。
