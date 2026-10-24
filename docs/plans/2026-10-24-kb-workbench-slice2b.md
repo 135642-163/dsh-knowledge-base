@@ -3588,4 +3588,10 @@ Expected: `--ff-only` 成功；HEAD 为 `chore: release 0.21.0 …`，其后还�
 - **0600 测试平台守卫**：Windows 与 root 下 `0600` 语义不成立，`writeScopes` 的 0600 用例加 `skip` 守卫（与其它 chmod 用例一致）。
 - **`kb_lint` 的 `staleDays` NaN 修复**：原写法 `Number(args.staleDays) ?? 90` 对缺省参数得到 NaN（NaN 不是 nullish），改为 `Number(args.staleDays ?? 90)`。
 - **验收结果**：`npm test` 500/500（新增 188 例：scope-store 17、scope 37、scope-tools 52、scope-prompt 10、scope-api 19、scope-sync 6、scope-view 7、scope-client 40）；真实宿主验收与截图见 spec §20。
+- **0.21.1 复审跟进（2026-10-24）**：
+  - **库身份目录名统一**：`/kb/api/scope` 的 `resolved` 按 `kb.dir` 匹配；胶囊行值取 `kb.dir ?? kb.name`（勾选/全选/`isAllSelection`/PUT 载荷），显示仍是 `kb.name`；`scanDuplicates` 的 catalog 增加 `dir`，同库判定改为 `cat.dir === targetKb`，报告 `kb` 保持清单名；`purgeKb` 由归档目录名去掉 `<YYYY-MM-DD-HH-mm-ss>[-N]` 后缀推导原目录名，与清单名各自带现存库保护地清理范围条目。调用点不变（`importBatch` 的 `targetKb` 本是 `basename(kbDir)`，工具路径的 `kb` 也是目录名）。
+  - **文档解析单一来源**：10 个 doc 级工具改为 `const target = await resolveDocTarget(...)`，文档取 `target.doc ?? resolveDoc(manifest, args.doc)`；`kb_keep` 只对 `args.doc` 这一条复用解析结果，`kb_trust` 的 `docs` 批量路径不变。
+  - **范围 TTL 活跃续期**：`resolveScope` 的 mutator 在 prune 前调用 `renewOnUse`（`snapshot === true` 且自己的条目 `updatedAt` 缺失/非法或超过 24h 时刷新并标记 changed）；GET（`snapshot:false`）与 `scopeForSessionSync` 不续期。README 的 TTL 警告同步改写，原「条目超 `scopeTtlDays` 会静默过期」仅适用于从未被工具使用的会话。
+  - **系统提示措辞**：order 106 静态提示的「当前库及全部知识库」改为「当前库及本会话范围内的知识库（未限定范围时为全部）」，其余长文本未动；工具描述（`kb_import`）不在本次范围。
+  - **测试与版本**：`npm test` **508/508** 通过（较 0.21.0 新增 8 例：scope +2、scope-tools +2、scope-api 1、scope-client 1、dedup 1、scope-sync 1）；改写 scope 的过期用例为「工具续期/GET 过期/24h 不重写」三例，改写 scope-tools 的 `ttlDays` 透传用例为陈旧父条目继承；版本 0.21.1（`package.json` / `package-lock.json` / `lib/version.js` / README）。
 

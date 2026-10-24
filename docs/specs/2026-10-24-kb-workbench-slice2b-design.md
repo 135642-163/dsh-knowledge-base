@@ -426,3 +426,9 @@ ctx.systemPrompt.section({
   - 口径说明：范围化 `kb_list` 真实轮次只返回「验收甲库」；系统提示注入机制由设计 spike（§4.3）证明，Task 13 期间未重新读取实际渲染的 `[知识库范围]` 行。
 - 截图：`.acceptance/screenshot-2b-chip-all.png`、`screenshot-2b-chip-selected.png`、`screenshot-2b-workbench-modal.png`、`screenshot-2b-write-failed.png`、`screenshot-2b-scoped-tool-turn.png`。
 - 说明：「全部」模式打开面板时所有复选框预勾选，因此收窄范围靠**取消勾选**（第 12.3 节已记录）。
+- **0.21.1 复审跟进（2026-10-24）**：
+  - 库身份统一为目录名：`/kb/api/scope` 的 `resolved` 按 `kb.dir` 匹配；胶囊按目录身份勾选/全选/提交（可见标签仍是清单 `name`）；导入查重用 `catalog.dir === targetKb` 判定同库（报告仍用清单名）；`purgeKb` 同时清理清单名与归档前目录名两个别名（均带现存库保护）。
+  - 文档解析单一来源：`kb_read` / `kb_view` / `kb_edit` / `kb_describe` / `kb_keep` / `kb_trust` / `kb_retitle` / `kb_remove` / `kb_restore` / `kb_history` 直接消费 `resolveDocTarget().doc`，仅在其缺失时回退 `resolveDoc`。
+  - 范围 TTL 活跃续期：工具路径在 prune 前按 24h 粒度续期会话自己的条目；GET（`snapshot:false`）与系统提示的同步读不续期，`scopeTtlDays` 只淘汰从未被工具使用的会话。
+  - 系统提示措辞：order 106 静态提示的导入查重范围改为「当前库及本会话范围内的知识库（未限定范围时为全部）」。
+  - 测试：`npm test` **508/508** 通过（较 0.21.0 新增 8 例：scope +2、scope-tools +2、scope-api 1、scope-client 1、dedup 1、scope-sync 1）；`npm run typecheck`、`npm run check:client`、`node scripts/check-ui.mjs` 均通过。
