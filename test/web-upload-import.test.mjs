@@ -3,6 +3,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -70,6 +71,34 @@ function fakeWorkerSpawn({
       collected: {
         stdout: { readFrom: () => ({ text: "", nextOffset: 0, lossy: false }) },
         stderr: { readFrom: () => ({ text: "", nextOffset: 0, lossy: false }) },
+      },
+    };
+  };
+}
+
+/** 真实 worker：用于必须跑通 pipeline 的端到端回归（如原位更新）。 */
+function realWorkerSpawn() {
+  return (spec) => {
+    const child = spawn(spec.argv[0], spec.argv.slice(1), {
+      cwd: spec.cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    const done = new Promise((resolve) => {
+      child.on("close", (exitCode, signal) => resolve({ exitCode, signal }));
+      child.on("error", () => resolve({ exitCode: 1, signal: null }));
+    });
+    return {
+      terminate: async () => { child.kill("SIGTERM"); },
+      done,
+      collected: {
+        stdout: { readFrom: (offset = 0) => ({ text: stdout.slice(offset), nextOffset: stdout.length, lossy: false }) },
+        stderr: { readFrom: (offset = 0) => ({ text: stderr.slice(offset), nextOffset: stderr.length, lossy: false }) },
       },
     };
   };
@@ -413,4 +442,30 @@ test("进程启动前的初始进度：done=0、全部 pending、相对路径", 
   assert.equal(initial.total, 1);
   assert.deepEqual(initial.files, [{ path: "电气/a.md", status: "pending" }]);
   assert.equal(JSON.stringify(initial).includes(kbRoot), false);
+});
+
+test("工作台重新上传 kb_import 导入过的文档：原位更新并版本 +1", { timeout: 90_000 }, async () => {
+  const { kbRoot, opts } = await setup({ spawn: realWorkerSpawn() });
+  const kbDir = join(kbRoot, "标准");
+  // kb_import 路径会记录源文件的绝对 sourcePath；工作台重传若不带 docId，
+  // pipeline 会把它当成“同名不同文件”另建文档（B1）。
+  const src = join(await mkdtemp(join(tmpdir(), "kb-web-update-")), "old.md");
+  await writeFile(src, "# 旧\n旧内容\n", "utf8");
+  await importFileInto(kbDir, { sourcePath: src, relKey: "old.md", title: "旧文档标题", config: { partMaxChars: 2000 } });
+
+  const seeded = JSON.parse(await readFile(join(kbDir, "kb.json"), "utf8"));
+  assert.equal(seeded.docs.length, 1);
+  assert.equal(seeded.docs[0].version, 1);
+  assert.ok(seeded.docs[0].sourcePath, "seed 文档应记录绝对 sourcePath");
+
+  const id = await createBatch(opts, { "old.md": "# 旧\n新内容\n" });
+  const { json } = await call(opts, makeReq({ method: "POST", url: `/kb/api/upload-batches/${id}/import`, body: "{}" }));
+  assert.ok(json.jobId, JSON.stringify(json));
+  const job = await waitJob(opts, json.jobId);
+  assert.equal(job.status, "succeeded");
+  assert.equal(job.result.files[0].path, "old.md");
+
+  const manifest = JSON.parse(await readFile(join(kbDir, "kb.json"), "utf8"));
+  assert.equal(manifest.docs.length, 1, "同名重传不能另建文档");
+  assert.equal(manifest.docs[0].version, 2, "同名重传应原位更新并版本 +1");
 });
