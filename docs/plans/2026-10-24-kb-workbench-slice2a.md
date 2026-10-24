@@ -4447,3 +4447,10 @@ npm run check:client
 ## 与 spec 的偏差记录（实现时如发生，写回 spec）
 
 - 无。若实现中发现 `conversation.*`/宿主 API 无关的约束变化，只更新本计划的“风险”与 spec 的偏差章节，不要静默扩大范围。
+
+### Task 15 合并记录（2026-10-24，已执行）
+
+- `feat/kb-upload-std` 以 **fast-forward** 合并入 `main`：`01bf43e..bd7b987`（50+ commits，无 merge commit）。
+- 合并后 `main` 验证：`npm test` **296/296**、`npm run typecheck` / `npm run check:client` / `node scripts/check-ui.mjs` 全绿；`package.json`/`package-lock.json`/`lib/version.js` 均为 **0.20.0**。
+- 真实 API 级 e2e 在合并后再次通过（创建批次→嵌套目录上传→导入→逐文件结果→资料/原件→失败保留→重复跳过→std 状态/检查→features）。
+- 已知待办：浏览器/桌面端手工验收（spec §15.2）；非阻塞 backlog 见最终门禁记录（API 500 文案、重试导入死路、report 缺失兜底、`ui-batches` 内 `.part` 清扫、starting 期关闭 resum、`startStd` finally token、std settle 详情头刷新、`jobs?limit=0`）。
