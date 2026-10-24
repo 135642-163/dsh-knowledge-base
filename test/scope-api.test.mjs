@@ -3,7 +3,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { chmod, mkdtemp } from "node:fs/promises";
+import { chmod, mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { handleApi } from "../lib/web/api.js";
@@ -91,6 +91,22 @@ test("PUT saves a selected scope and GET reflects it with resolved counts", asyn
   assert.ok(get.json.updatedAt);
 });
 
+test("GET trims the session id so updatedAt matches the stored entry", async () => {
+  const kbRoot = await setup();
+  const put = await call(kbRoot, makeReq({
+    method: "PUT",
+    body: { session: "s1", mode: "selected", kbs: ["甲库"] },
+  }));
+  assert.equal(put.res.status, 200);
+  const get = await call(kbRoot, makeReq({ url: "/kb/api/scope?session=%20s1%20" }));
+  assert.equal(get.res.status, 200);
+  assert.deepEqual(get.json.scope, put.json.scope);
+  assert.equal(get.json.updatedAt, put.json.updatedAt);
+  // 带空白的 session 不能另写条目
+  const data = JSON.parse(await readFile(join(kbRoot, ".scopes.json"), "utf8"));
+  assert.deepEqual(Object.keys(data.scopes), ["s1"]);
+});
+
 test("PUT mode=all clears kbs", async () => {
   const kbRoot = await setup();
   await call(kbRoot, makeReq({ method: "PUT", body: { session: "s1", mode: "selected", kbs: ["甲库"] } }));
@@ -147,7 +163,9 @@ test("PUT rejects a cross-origin request", async () => {
   assert.equal(res.status, 403);
 });
 
-test("PUT reports SCOPE_WRITE_FAILED when the scopes file cannot be written", async () => {
+test("PUT reports SCOPE_WRITE_FAILED when the scopes file cannot be written", {
+  skip: process.platform === "win32" || (typeof process.getuid === "function" && process.getuid() === 0),
+}, async () => {
   const kbRoot = await setup();
   await chmod(kbRoot, 0o555);
   try {
