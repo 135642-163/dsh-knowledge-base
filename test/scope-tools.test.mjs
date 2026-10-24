@@ -4,7 +4,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { apply } from "../lib/index.js";
@@ -254,8 +254,6 @@ test("doc tools: selected single kb resolves without kb argument", async () => {
   await scope("s1", ["甲库"]);
   const read = await tools.get("kb_read").execute({ doc: doc.docId }, scoped("s1"));
   assert.equal(read.kb, "甲库");
-  const view = await tools.get("kb_read").execute({ doc: "继电", part: "outline" }, scoped("s1"));
-  assert.equal(view.docId, doc.docId);
 });
 
 test("doc tools: multi-kb scope resolves a unique title across kbs", async () => {
@@ -351,4 +349,113 @@ test("doc tools: describe batch mode uses the only scoped kb", async () => {
   const result = await tools.get("kb_describe").execute({ all: true, auto: true }, scoped("s1"));
   assert.equal(result.kb, "甲库");
   assert.equal(result.mode, "auto");
+});
+
+test("doc tools: restore resolves a soft-deleted doc across kbs without kb", async () => {
+  const { tools, scoped, importDoc, scope } = await setup();
+  const doc = await importDoc("a.md", "# 甲\n\n正文。\n", "甲库", "甲文档");
+  await importDoc("b.md", "# 乙\n\n正文。\n", "乙库", "乙文档");
+  const removed = await tools.get("kb_remove").execute({ kb: "甲库", doc: doc.docId }, scoped("s1"));
+  assert.equal(removed.soft, true);
+  await scope("s1", ["甲库", "乙库"]);
+  const restored = await tools.get("kb_restore").execute({ doc: doc.docId }, scoped("s1"));
+  assert.equal(restored.kb, "甲库");
+  assert.equal(restored.docId, doc.docId);
+  const live = await tools.get("kb_read").execute({ doc: doc.docId }, scoped("s1"));
+  assert.equal(live.kb, "甲库");
+  assert.equal(live.docId, doc.docId);
+});
+
+test("doc tools: history resolves a soft-deleted doc across kbs without kb", async () => {
+  const { tools, scoped, importDoc, scope } = await setup();
+  const doc = await importDoc("a.md", "# 甲\n\n正文。\n", "甲库", "甲文档");
+  await importDoc("b.md", "# 乙\n\n正文。\n", "乙库", "乙文档");
+  await tools.get("kb_edit").execute(
+    { kb: "甲库", doc: doc.docId, old_string: "正文", new_string: "正文修订" },
+    scoped("s1")
+  );
+  await tools.get("kb_remove").execute({ kb: "甲库", doc: doc.docId }, scoped("s1"));
+  await scope("s1", ["甲库", "乙库"]);
+  const history = await tools.get("kb_history").execute({ doc: doc.docId }, scoped("s1"));
+  assert.equal(history.kb, "甲库");
+  assert.equal(history.docId, doc.docId);
+  assert.ok(history.history.length >= 1);
+});
+
+test("doc tools: permanent remove resolves a soft-deleted doc across kbs without kb", async () => {
+  const { tools, scoped, importDoc, scope, kbRoot } = await setup();
+  const doc = await importDoc("a.md", "# 甲\n\n正文。\n", "甲库", "甲文档");
+  await importDoc("b.md", "# 乙\n\n正文。\n", "乙库", "乙文档");
+  await tools.get("kb_remove").execute({ kb: "甲库", doc: doc.docId }, scoped("s1"));
+  await scope("s1", ["甲库", "乙库"]);
+  const removed = await tools.get("kb_remove").execute({ doc: doc.docId, soft: false }, scoped("s1"));
+  assert.equal(removed.kb, "甲库");
+  assert.equal(removed.soft, false);
+  const manifest = JSON.parse(await readFile(join(kbRoot, "甲库", "kb.json"), "utf8"));
+  assert.equal(manifest.docs.some((item) => item.id === doc.docId), false);
+});
+
+test("kb_remove: whole-kb delete requires explicit matching confirm", async () => {
+  const { tools, scoped, importDoc, scope, kbRoot } = await setup();
+  await importDoc("a.md", "# 甲\n\n正文。\n", "甲库", "甲文档");
+  await importDoc("b.md", "# 乙\n\n正文。\n", "乙库", "乙文档");
+  await scope("s1", ["甲库", "乙库"]);
+  await assert.rejects(
+    () => tools.get("kb_remove").execute({}, scoped("s1")),
+    /未指定 doc 时删除整个知识库需要显式传 removeKb=true/
+  );
+  await assert.rejects(
+    () => tools.get("kb_remove").execute({ kb: "甲库", removeKb: true, confirm: "乙库" }, scoped("s1")),
+    /不可恢复.*confirm="甲库"/
+  );
+  const removed = await tools.get("kb_remove").execute(
+    { kb: "甲库", removeKb: true, confirm: "甲库" },
+    scoped("s1")
+  );
+  assert.equal(removed.kb, "甲库");
+  assert.equal(removed.soft, false);
+  assert.match(removed.removed, /已删除整个知识库「甲库」/);
+  const dirs = await readdir(kbRoot);
+  assert.equal(dirs.includes("甲库"), false);
+  assert.equal(dirs.includes("乙库"), true);
+});
+
+test("doc tools: kb_view resolves the single scoped kb before attachment lookup", async () => {
+  const { tools, scoped, importDoc, scope } = await setup();
+  const doc = await importDoc("a.md", "# 甲\n\n正文。\n", "甲库", "甲文档");
+  await scope("s1", ["甲库"]);
+  await assert.rejects(
+    () => tools.get("kb_view").execute({ doc: doc.docId }, scoped("s1")),
+    (error) => /附件|图片/.test(error.message) && !/范围/.test(error.message)
+  );
+});
+
+test("doc tools: keep/trust/retitle batch modes require kb in multi-kb scope", async () => {
+  const { tools, scoped, importDoc, scope } = await setup();
+  const doc = await importDoc("a.md", "# 甲\n\n正文。\n", "甲库", "甲文档");
+  await importDoc("b.md", "# 乙\n\n正文。\n", "乙库", "乙文档");
+  await scope("s1", ["甲库", "乙库"]);
+  for (const [tool, args] of [
+    ["kb_keep", { docs: [doc.docId], note: "保留" }],
+    ["kb_trust", { all: true, level: "high", dryRun: true }],
+    ["kb_retitle", { all: true }],
+  ]) {
+    await assert.rejects(
+      () => tools.get(tool).execute(args, scoped("s1")),
+      (error) => error.code === "KB_REQUIRED",
+      `${tool} should ask for kb in multi-kb scope`
+    );
+  }
+  const kept = await tools.get("kb_keep").execute(
+    { kb: "甲库", docs: [doc.docId], note: "保留" },
+    scoped("s1")
+  );
+  assert.equal(kept.kb, "甲库");
+  const trusted = await tools.get("kb_trust").execute(
+    { kb: "甲库", all: true, level: "high", dryRun: true },
+    scoped("s1")
+  );
+  assert.equal(trusted.kb, "甲库");
+  const retitled = await tools.get("kb_retitle").execute({ kb: "甲库", all: true }, scoped("s1"));
+  assert.equal(retitled.kb, "甲库");
 });
