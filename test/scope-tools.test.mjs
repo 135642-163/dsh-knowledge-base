@@ -6,13 +6,14 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdtemp, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { apply } from "../lib/index.js";
 import { writeScopes } from "../lib/scope-store.js";
+import { sanitizeKbName } from "../lib/store.js";
 
 const SIGNAL = new AbortController().signal;
 
-async function setup() {
+async function setup(config = {}) {
   const root = await mkdtemp(join(tmpdir(), "kb-scope-tools-"));
   const kbRoot = join(root, "kb");
   await mkdir(kbRoot, { recursive: true });
@@ -38,7 +39,7 @@ async function setup() {
       },
     },
   };
-  await apply(ctx, { kbRoot, defaultKb: "default", partMaxChars: 500 });
+  await apply(ctx, { kbRoot, defaultKb: "default", partMaxChars: 500, scopeTtlDays: 30, ...config });
   const unscoped = { agent: { session: { header: { cwd: root } } }, signal: SIGNAL };
   const scoped = (sessionId, parentSession) => ({
     agent: { session: { id: sessionId, header: { cwd: root, parentSession } } },
@@ -527,4 +528,135 @@ test("single-kb tools: snapshot and export honour the scope", async () => {
   assert.equal(snap.kb, "甲库");
   const exported = await tools.get("kb_export").execute({ format: "md" }, scoped("s1"));
   assert.equal(exported.kb, "甲库");
+});
+
+test("single-kb dedup: out-of-scope kbs neither block nor annotate imports", async () => {
+  const { tools, scoped, importDoc, scope, root } = await setup();
+  await importDoc("a.md", "# 甲\n\n正文。\n", "甲库", "甲文档");
+  await importDoc("b.md", "# 乙\n\n正文。\n", "乙库", "GB/T 1234-2020 范围外查重");
+  await scope("s1", ["甲库"]);
+  await mkdir(join(root, "in"), { recursive: true });
+  const path = join(root, "in", "dup.md");
+  await writeFile(path, "# 范围外查重\n\n同一标题的新文件。\n", "utf8");
+  const result = await tools.get("kb_import").execute(
+    { path, title: "GB/T 1234-2020 范围外查重" },
+    scoped("s1")
+  );
+  assert.equal(result.kb, "甲库");
+  assert.equal(result.files, 1);
+  assert.equal(result.imported.length, 1);
+  assert.deepEqual(result.duplicates, []);
+});
+
+test("single-kb dedup: all mode still scans every kb", async () => {
+  const { tools, unscoped, importDoc, root } = await setup();
+  await importDoc("a.md", "# 乙\n\n正文。\n", "乙库", "GB/T 1234-2020 范围外查重");
+  const path = join(root, "blocked.md");
+  await writeFile(path, "# 范围外查重\n\n同一标题的另一个文件。\n", "utf8");
+  const result = await tools.get("kb_import").execute(
+    { path, kb: "甲库", title: "GB/T 1234-2020 范围外查重" },
+    unscoped
+  );
+  assert.equal(result.files, 0);
+  assert.equal(result.duplicates.length, 1);
+  assert.equal(result.duplicates[0].scope, "cross-kb");
+  assert.equal(result.duplicates[0].matched[0].kb, "乙库");
+});
+
+test("single-kb tools: reparse in multi-kb scope asks for kb", async () => {
+  const { tools, scoped, importDoc, scope } = await setup();
+  await importDoc("a.md", "# 甲\n\n正文。\n", "甲库", "甲文档");
+  await importDoc("b.md", "# 乙\n\n正文。\n", "乙库", "乙文档");
+  await scope("s1", ["甲库", "乙库"]);
+  await assert.rejects(
+    () => tools.get("kb_reparse").execute({ all: true }, scoped("s1")),
+    (error) => error.code === "KB_REQUIRED"
+  );
+});
+
+test("single-kb tools: export honours the scope in every format", async () => {
+  const { tools, scoped, importDoc, scope, kbRoot } = await setup();
+  await importDoc("a.md", "# 甲\n\n正文。\n", "甲库", "甲文档");
+  await importDoc("b.md", "# 乙\n\n正文。\n", "乙库", "乙文档");
+  await scope("s1", ["甲库"]);
+  const exportsDir = join(kbRoot, "甲库", "exports");
+  assert.ok(tools.get("kb_export").output.schema.required.includes("kb"), "kb is part of the export output contract");
+  for (const format of ["md", "jsonl", "zip", "vault"]) {
+    const exported = await tools.get("kb_export").execute({ format }, scoped("s1"));
+    assert.equal(exported.kb, "甲库", format);
+    assert.equal(dirname(exported.path), exportsDir, format);
+  }
+});
+
+test("single-kb tools: add_note writes to the only scoped kb", async () => {
+  const { tools, scoped, importDoc, scope } = await setup();
+  await importDoc("a.md", "# 甲\n\n正文。\n", "甲库", "甲文档");
+  await importDoc("b.md", "# 乙\n\n正文。\n", "乙库", "乙文档");
+  await scope("s1", ["甲库"]);
+  const note = await tools.get("kb_add_note").execute(
+    { title: "范围笔记", content: "## 要点\n\n范围内容。" },
+    scoped("s1")
+  );
+  assert.equal(note.kb, "甲库");
+  assert.equal(note.updated, false);
+});
+
+test("single-kb tools: expired scope falls back to all mode via scopeTtlDays", async () => {
+  const { tools, scoped, importDoc, kbRoot } = await setup();
+  await importDoc("a.md", "# 甲\n\n正文。\n", "甲库", "甲文档");
+  await importDoc("d.md", "# 默认\n\n正文。\n", "default", "默认文档");
+  await writeScopes(kbRoot, {
+    scopes: {
+      s1: {
+        mode: "selected",
+        kbs: ["甲库"],
+        updatedAt: new Date(Date.now() - 40 * 86400000).toISOString(),
+      },
+    },
+  });
+  const snap = await tools.get("kb_snapshot").execute({}, scoped("s1"));
+  assert.equal(snap.kb, "default");
+
+  // 真正钉住 ttlDays 透传：scopeTtlDays=0 表示不过期。若没有把 scopeTtlDays 传给解析器，
+  // resolveScope 会退回自己的 30 天默认值并剔掉 40 天前的条目，结果落到 default。
+  const noExpiry = await setup({ scopeTtlDays: 0 });
+  await noExpiry.importDoc("a.md", "# 甲\n\n正文。\n", "甲库", "甲文档");
+  await noExpiry.importDoc("d.md", "# 默认\n\n正文。\n", "default", "默认文档");
+  await writeScopes(noExpiry.kbRoot, {
+    scopes: {
+      s1: {
+        mode: "selected",
+        kbs: ["甲库"],
+        updatedAt: new Date(Date.now() - 40 * 86400000).toISOString(),
+      },
+    },
+  });
+  const kept = await noExpiry.tools.get("kb_snapshot").execute({}, noExpiry.scoped("s1"));
+  assert.equal(kept.kb, "甲库");
+});
+
+test("scope names: single-kb resolution sanitizes hand-edited scope entries", async () => {
+  const { tools, scoped, importDoc, kbRoot } = await setup();
+  await importDoc("a.md", "# 甲\n\n正文。\n", "../evil", "恶意库文档");
+  await writeScopes(kbRoot, {
+    scopes: {
+      s1: { mode: "selected", kbs: ["../evil"], updatedAt: new Date().toISOString() },
+    },
+  });
+  const sanitized = sanitizeKbName("../evil");
+  assert.notEqual(sanitized, "../evil");
+  const snap = await tools.get("kb_snapshot").execute({}, scoped("s1"));
+  assert.equal(snap.kb, sanitized);
+});
+
+test("scope names: doc resolution sanitizes hand-edited scope entries", async () => {
+  const { tools, scoped, importDoc, kbRoot } = await setup();
+  await importDoc("a.md", "# 甲\n\n正文。\n", "../evil", "恶意库文档");
+  await writeScopes(kbRoot, {
+    scopes: {
+      s1: { mode: "selected", kbs: ["../evil"], updatedAt: new Date().toISOString() },
+    },
+  });
+  const read = await tools.get("kb_read").execute({ doc: "schema" }, scoped("s1"));
+  assert.equal(read.kb, sanitizeKbName("../evil"));
 });
