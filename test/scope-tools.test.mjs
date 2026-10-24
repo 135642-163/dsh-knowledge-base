@@ -660,3 +660,30 @@ test("scope names: doc resolution sanitizes hand-edited scope entries", async ()
   const read = await tools.get("kb_read").execute({ doc: "schema" }, scoped("s1"));
   assert.equal(read.kb, sanitizeKbName("../evil"));
 });
+
+test("scope names: multi-kb resolution sanitizes names at the normalize root", async () => {
+  const { tools, scoped, importDoc, kbRoot } = await setup();
+  await importDoc("evil.md", "# 恶意\n\n正文。\n", "../evil", "恶意库唯一文档");
+  await importDoc("a.md", "# 甲\n\n正文。\n", "甲库", "甲文档");
+  await importDoc("evil-shared.md", "# 共用\n\n正文。\n", "../evil", "共用标题");
+  await importDoc("a-shared.md", "# 共用\n\n正文。\n", "甲库", "共用标题", { allowCrossDuplicates: true });
+  await writeScopes(kbRoot, {
+    scopes: {
+      s1: { mode: "selected", kbs: ["../evil", "甲库"], updatedAt: new Date().toISOString() },
+    },
+  });
+  const sanitized = sanitizeKbName("../evil");
+  assert.equal(sanitized, ".. evil");
+  const read = await tools.get("kb_read").execute({ doc: "恶意库唯一文档" }, scoped("s1"));
+  assert.equal(read.kb, sanitized);
+  assert.notEqual(read.kb, "../evil");
+  await assert.rejects(
+    () => tools.get("kb_read").execute({ doc: "共用标题" }, scoped("s1")),
+    (error) => {
+      assert.equal(error.code, "KB_AMBIGUOUS");
+      assert.ok(error.message.includes(sanitized), "candidates use sanitized dir names");
+      assert.ok(!error.message.includes("../"), "candidates never expose raw traversal names");
+      return true;
+    }
+  );
+});
