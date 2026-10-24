@@ -111,8 +111,11 @@ test("sweepStaging keeps ui-batches while removing other stale temp files", asyn
     await mkdir(batchDir, { recursive: true });
     const staleFile = join(tmp, "worker-old.json");
     await writeFile(staleFile, "{}", "utf8");
+    const orphanPart = join(batchDir, ".upload-deadbeef.part");
+    await writeFile(orphanPart, "partial", "utf8");
     const twoDaysAgo = new Date(Date.now() - 2 * 24 * 3600 * 1000);
     await utimes(staleFile, twoDaysAgo, twoDaysAgo);
+    await utimes(orphanPart, twoDaysAgo, twoDaysAgo);
     await utimes(batchDir, twoDaysAgo, twoDaysAgo);
     // sweepStaging 只看 import-tmp 顶层条目的 mtime，必须把 ui-batches 本身也做旧，
     // 否则顶层目录仍是新的，旧实现也会“通过”，测试没有区分力。
@@ -124,6 +127,8 @@ test("sweepStaging keeps ui-batches while removing other stale temp files", asyn
     // ui-batches 批次目录由 sweepOldBatches 负责，不能被 sweepStaging 删掉
     await access(batchesRoot);
     await access(batchDir);
+    // 中断上传留下的 .part 会被清掉，但批次目录本身保留。
+    await assert.rejects(access(orphanPart), "orphan .part should be removed");
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

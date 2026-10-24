@@ -524,3 +524,13 @@ test("GET /jobs 支持 kb/kind/limit 过滤，列表行省略 result", async () 
   assert.equal(detail.res.status, 200);
   assert.deepEqual(detail.json.job.result, { checked: 2 });
 });
+
+
+test("非上传路由的未预期错误返回 500 INTERNAL，不回显路径", async () => {
+  const kbRoot = join(await mkdtemp(join(tmpdir(), "kb-jobs-broken-")), "kb");
+  const { res, json } = await call({ kbRoot }, makeReq({ method: "GET", url: "/kb/api/jobs" }));
+  assert.equal(res.status, 500);
+  assert.equal(json.error.code, "INTERNAL");
+  assert.equal(json.error.message, "服务器内部错误");
+  assert.equal(res.body.includes(kbRoot), false);
+});

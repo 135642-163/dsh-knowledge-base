@@ -58,6 +58,7 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
     abort: null,
     closed: false,
     importStarted: false,
+    batchStatus: "",
     resumeChecked: false,
     resumeJob: false,
     restoredJob: false,
@@ -187,7 +188,7 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
     } else if (state.phase === "importing") {
       actions.push(`<button type="button" class="btn" data-close>关闭（后台继续导入）</button>`);
     } else if (state.phase === "done" || state.phase === "error") {
-      if (state.phase === "error" && state.batchId && !state.jobId) {
+      if (state.phase === "error" && state.batchId && !state.jobId && state.batchStatus === "open") {
         actions.push(`<button type="button" class="btn" data-action="retry-import">重试导入</button>`);
       }
       if (!jobRunning && retryable.length > 0) {
@@ -375,6 +376,7 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
           return;
         }
         state.batchId = created.batch.id;
+        state.batchStatus = "open";
         state.limits = mapLimits(created.limits) ?? state.limits;
       }
       const queue = createQueue(2);
@@ -421,6 +423,7 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
       state.phase = "error";
       state.error = errorText(error);
       render();
+      void refreshBatchStatus();
     }
   }
 
@@ -464,9 +467,21 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
     void pollJob();
   }
 
+  /** 失败后核对批次状态：只有仍为 open 的批次才能原地重试导入。 */
+  async function refreshBatchStatus() {
+    if (!state.batchId) return;
+    try {
+      const payload = await api.batch(state.batchId);
+      state.batchStatus = payload?.batch?.status ?? "";
+    } catch {
+      state.batchStatus = "";
+    }
+    if (!state.closed) render();
+  }
+
   /** 导入请求失败后复用同一个批次重试，不重新上传文件。 */
   async function retryImport() {
-    if (state.closed || !state.batchId || state.jobId || state.importStarted) return;
+    if (state.closed || !state.batchId || state.jobId || state.importStarted || state.batchStatus !== "open") return;
     state.error = "";
     state.warning = "";
     state.pollRetry = 0;
@@ -479,6 +494,7 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
       state.phase = "error";
       state.error = errorText(error);
       render();
+      void refreshBatchStatus();
     }
   }
 
