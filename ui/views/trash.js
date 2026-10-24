@@ -12,6 +12,7 @@ export function renderTrash(state, { icons, fmtNumber }) {
           <p class="muted">归档的库不在总览和检索里；恢复后回到正常使用。${fmtNumber(items.length)} 个归档库。</p>
         </div>
       </div>
+      <p class="muted trash-help">彻底删除不可撤销；仅对回收站中的库生效。</p>
       ${items.length === 0 ? `
         <div class="empty-card">
           <div class="empty-icon">${icons.trash}</div>
@@ -31,9 +32,12 @@ export function renderTrash(state, { icons, fmtNumber }) {
                 <td class="muted">${fmtNumber(item.notes)}</td>
                 <td class="muted">${formatDate(item.archivedAt)}</td>
                 <td class="right">
-                  ${item.restorable
-                    ? `<button class="btn" data-action="restore-kb" data-dir="${escapeAttr(item.dir)}" data-name="${escapeAttr(item.name)}">恢复</button>`
-                    : `<button class="btn" disabled>不可恢复</button>`}
+                  <div class="trash-actions">
+                    ${item.restorable
+                      ? `<button class="btn" data-action="restore-kb" data-dir="${escapeAttr(item.dir)}" data-name="${escapeAttr(item.name)}">恢复</button>`
+                      : `<button class="btn" disabled>不可恢复</button>`}
+                    <button class="btn danger" data-action="purge-kb" data-dir="${escapeAttr(item.dir)}" data-name="${escapeAttr(item.name)}">彻底删除</button>
+                  </div>
                 </td>
               </tr>`).join("")}
             </tbody>

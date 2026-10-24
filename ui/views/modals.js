@@ -12,23 +12,44 @@ function overlay(html) {
 
 /**
  * 通用确认弹窗。body 按纯文本渲染（内部统一 escapeHtml），
- * requireCheckbox=true 时需勾选确认才能提交；onConfirm 可同步或异步。
+ * requireCheckbox=true 时需勾选确认才能提交；
+ * requireText 传入库名时需逐字输入，danger 用危险色确认按钮。
+ * onConfirm 可同步或异步。
  */
-export function openConfirmModal({ title, body = "", confirmText = "确认", requireCheckbox = false, onConfirm } = {}) {
+export function openConfirmModal({ title, body = "", confirmText = "确认", requireCheckbox = false, requireText, danger = false, onConfirm } = {}) {
+  const required = requireText === undefined || requireText === null ? "" : String(requireText);
+  const needsText = required !== "";
   const node = overlay(`
     <form class="modal-form">
       <h2>${escapeHtml(title)}</h2>
       <div class="confirm-body"><p class="muted">${escapeHtml(body)}</p></div>
       ${requireCheckbox ? `<label class="check"><input type="checkbox" name="ack" /> 我已知晓</label>` : ""}
+      ${needsText ? `<label class="field"><span>输入库名「${escapeHtml(required)}」以确认</span><input name="confirm" autocomplete="off" /></label>` : ""}
       <p class="form-error" hidden></p>
       <div class="modal-actions">
         <button type="button" class="btn" data-close>取消</button>
-        <button type="submit" class="btn primary">${escapeHtml(confirmText)}</button>
+        <button type="submit" class="btn ${danger ? "danger" : "primary"}"${needsText ? " disabled" : ""}>${escapeHtml(confirmText)}</button>
       </div>
     </form>
   `);
   const form = node.querySelector("form");
   const error = node.querySelector(".form-error");
+  const button = form.querySelector("button[type=submit]");
+  const confirmInput = form.querySelector("input[name='confirm']");
+  const syncConfirmState = () => {
+    if (!needsText) {
+      button.disabled = false;
+      return;
+    }
+    button.disabled = String(confirmInput?.value ?? "") !== required;
+  };
+  if (needsText) {
+    confirmInput?.addEventListener("input", () => {
+      syncConfirmState();
+      if (!button.disabled) error.hidden = true;
+    });
+    syncConfirmState();
+  }
   form.onsubmit = async (event) => {
     event.preventDefault();
     if (requireCheckbox && !form.querySelector("input[name='ack']")?.checked) {
@@ -36,7 +57,11 @@ export function openConfirmModal({ title, body = "", confirmText = "确认", req
       error.hidden = false;
       return;
     }
-    const button = form.querySelector("button[type=submit]");
+    if (needsText && String(new FormData(form).get("confirm") ?? "") !== required) {
+      error.textContent = "库名不匹配";
+      error.hidden = false;
+      return;
+    }
     button.disabled = true;
     try {
       await onConfirm?.();
@@ -44,7 +69,7 @@ export function openConfirmModal({ title, body = "", confirmText = "确认", req
     } catch (failure) {
       error.textContent = failure instanceof ApiError ? failure.message : String(failure?.message ?? failure);
       error.hidden = false;
-      button.disabled = false;
+      syncConfirmState();
     }
   };
   return node;

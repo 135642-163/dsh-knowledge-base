@@ -85,6 +85,7 @@ export const api = {
   archiveKb: (name, confirm) => request("POST", `/kbs/${encodeURIComponent(name)}/archive`, { confirm }),
   trash: () => request("GET", "/trash"),
   restoreKb: (dir, name) => request("POST", `/trash/${encodeURIComponent(dir)}/restore`, name ? { name } : {}),
+  purgeTrash: (dir) => request("DELETE", `/trash/${encodeURIComponent(dir)}`),
   sourceUrl: (name, id) => `${BASE}/kbs/${encodeURIComponent(name)}/docs/${encodeURIComponent(id)}/source`,
   createBatch: (body) => request("POST", "/upload-batches", body),
   batch: (id) => request("GET", `/upload-batches/${encodeURIComponent(id)}`),

@@ -309,15 +309,19 @@ function render() {
   const current = route();
   app.innerHTML = `
     <header class="topbar">
-      <a class="brand" href="${hrefForOverview()}">${icons.database}<span>知识库工作台</span></a>
+      <a class="brand" href="${hrefForOverview()}"><span>知识库工作台</span></a>
       <div class="topbar-actions">
         ${!EMBED && window.history.length > 1 ? `<button class="btn" data-action="back">${icons.back}<span>返回</span></button>` : ""}
-        <button class="btn primary" data-action="create-kb">${icons.plus}<span>新建知识库</span></button>
+        <button class="btn primary topbar-create" data-action="create-kb">${icons.plus}<span>新建</span></button>
       </div>
     </header>
     <div class="layout">
       <aside class="sidebar">
-        <div class="side-title">知识库 <span class="muted">${state.kbs.length}</span></div>
+        <a class="side-title" href="${hrefForOverview()}" aria-label="返回知识库总览">
+          ${icons.database}
+          <span>知识库</span>
+          <span class="muted">${state.kbs.length}</span>
+        </a>
         <nav class="side-list">
           ${state.kbs.map((kb) => `
             <a class="side-item ${current.page === "detail" && current.name === kb.name ? "active" : ""}"
@@ -327,7 +331,13 @@ function render() {
               <span class="side-count">${fmtNumber(kb.docs.ready + kb.docs.importing + kb.docs.failed)}</span>
             </a>`).join("")}
         </nav>
-        <div class="side-foot muted">${icons.archive}<a href="${hrefForTrash()}">回收站</a><a href="/kb/" target="_blank" rel="noreferrer">在新标签打开</a></div>
+        <div class="side-foot">
+          <button class="btn primary side-create" data-action="create-kb">${icons.plus}<span>新建知识库</span></button>
+          <div class="side-foot-row muted">
+            ${icons.archive}<a href="${hrefForTrash()}">回收站</a>
+            <a href="/kb/" target="_blank" rel="noreferrer">在新标签打开</a>
+          </div>
+        </div>
       </aside>
       <main class="main">
         ${state.loading ? `<div class="state">加载中…</div>` : ""}
@@ -446,6 +456,23 @@ function bind() {
       }
     } else if (action === "reload-trash") {
       await loadTrash();
+    } else if (action === "purge-kb") {
+      const dir = target.dataset.dir ?? "";
+      const item = state.trash.items.find((entry) => entry.dir === dir);
+      if (!item) return;
+      openConfirmModal({
+        title: `彻底删除「${item.name}」`,
+        body: "彻底删除后，磁盘上的资料与原件将不可恢复。",
+        confirmText: "彻底删除",
+        requireText: item.name,
+        danger: true,
+        onConfirm: async () => {
+          const result = await api.purgeTrash(dir);
+          await loadTrash();
+          await loadKbs();
+          showToast(`已彻底删除「${result?.name ?? item.name}」`);
+        },
+      });
     } else if (action === "restore-kb") {
       const dir = target.dataset.dir;
       const name = target.dataset.name;
@@ -478,16 +505,37 @@ function bind() {
   // 过滤器/搜索
   const search = app.querySelector("[data-filter='query']");
   if (search) {
-    search.oninput = () => {
+    let composing = false;
+    search.oncompositionstart = () => { composing = true; };
+    search.oncompositionend = () => {
+      composing = false;
       state.query = search.value;
       render();
-      const next = app.querySelector("[data-filter='query']");
-      if (next) { next.focus(); next.setSelectionRange(next.value.length, next.value.length); }
+      focusQueryInput();
+    };
+    search.oninput = (event) => {
+      const value = search.value;
+      if (composing || event.isComposing) {
+        state.query = value;
+        return;
+      }
+      if (value === state.query) return;
+      state.query = value;
+      render();
+      focusQueryInput();
     };
   }
   app.querySelectorAll("[data-filter='status']").forEach((button) => {
     button.onclick = () => { state.filter = button.dataset.value; render(); };
   });
+}
+
+/** 搜索框整页重绘后聚焦并把光标放回末尾（输入法组合结束也走这里）。 */
+function focusQueryInput() {
+  const next = app.querySelector("[data-filter='query']");
+  if (!next) return;
+  next.focus();
+  next.setSelectionRange(next.value.length, next.value.length);
 }
 
 function colorFor(name) {
