@@ -3,7 +3,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -16,6 +16,7 @@ import {
   scopeForSessionSync,
 } from "../lib/scope.js";
 import { readScopes, scopeFilePath, writeScopes } from "../lib/scope-store.js";
+import { archiveKb } from "../lib/kbmeta.js";
 
 async function tmpRoot() {
   return join(await mkdtemp(join(tmpdir(), "kb-scope-")), "kb");
@@ -26,7 +27,17 @@ async function makeKb(root, name, docs = []) {
   await mkdir(dir, { recursive: true });
   await writeFile(
     join(dir, "kb.json"),
-    JSON.stringify({ schemaVersion: 5, name, docs: docs.map((d, i) => ({ id: d.id ?? `d${i}`, title: d.title, status: "ready", type: "source" })) }),
+    JSON.stringify({
+      schemaVersion: 5,
+      name,
+      docs: docs.map((d, i) => ({
+        id: d.id ?? `d${i}`,
+        title: d.title,
+        status: d.status ?? "ready",
+        type: d.type ?? "source",
+        ...(d.deletedAt !== undefined ? { deletedAt: d.deletedAt } : {}),
+      })),
+    }),
     "utf8"
   );
   return dir;
@@ -65,6 +76,28 @@ test("explicit entry is returned and stale kb names are pruned", async () => {
   assert.deepEqual(scope.kbs, ["A"]);
   const data = await readScopes(root);
   assert.deepEqual(data.scopes.s1.kbs, ["A"]);
+});
+
+test("prune keeps a corrupt-manifest kb name and leaves the scopes file untouched", async () => {
+  const root = await tmpRoot();
+  await makeKb(root, "A");
+  await makeKb(root, "B");
+  await writeScopes(root, { scopes: { s1: { mode: "selected", kbs: ["A", "B"], updatedAt: new Date().toISOString() } } });
+  const file = scopeFilePath(root);
+  const before = await readFile(file, "utf8");
+  await writeFile(join(root, "B", "kb.json"), "{broken", "utf8");
+  const scope = await resolveScope(root, { sessionId: "s1" });
+  assert.deepEqual(scope.kbs, ["A", "B"]);
+  assert.equal(await readFile(file, "utf8"), before);
+});
+
+test("prune drops a stored name whose directory is gone and empty scope reads as all", async () => {
+  const root = await tmpRoot();
+  await writeScopes(root, { scopes: { s1: { mode: "selected", kbs: ["已删除"], updatedAt: new Date().toISOString() } } });
+  const scope = await resolveScope(root, { sessionId: "s1" });
+  assert.equal(scope.mode, "all");
+  const data = await readScopes(root);
+  assert.deepEqual(data.scopes.s1.kbs, []);
 });
 
 test("selected with empty kbs reads as all", async () => {
@@ -132,6 +165,26 @@ test("resolveScope degrades to read-only when the snapshot write fails", CHMOD_G
   }
 });
 
+test("write-failure warning fires once per kbRoot", CHMOD_GUARD, async () => {
+  const root = await tmpRoot();
+  await makeKb(root, "A");
+  await writeScopes(root, { scopes: { parent: { mode: "selected", kbs: ["A"], updatedAt: new Date().toISOString() } } });
+  const originalWarn = console.warn;
+  const warnings = [];
+  console.warn = (...args) => {
+    warnings.push(args);
+  };
+  await chmod(root, 0o555);
+  try {
+    await resolveScope(root, { sessionId: "child", parentSession: "parent" });
+    await resolveScope(root, { sessionId: "child", parentSession: "parent" });
+  } finally {
+    console.warn = originalWarn;
+    await chmod(root, 0o755);
+  }
+  assert.equal(warnings.length, 1);
+});
+
 test("expired entries are pruned", async () => {
   const root = await tmpRoot();
   await makeKb(root, "A");
@@ -170,6 +223,43 @@ test("all mode clears kbs", async () => {
   const saved = await setScope(root, { sessionId: "s1", mode: "all", kbs: ["A"] });
   assert.equal(saved.mode, "all");
   assert.deepEqual(saved.kbs, []);
+});
+
+test("setScope rejects reserved session ids without writing them", async () => {
+  const root = await tmpRoot();
+  await makeKb(root, "A");
+  await setScope(root, { sessionId: "s1", mode: "all", kbs: [] });
+  await assert.rejects(
+    () => setScope(root, { sessionId: "__proto__", mode: "all", kbs: [] }),
+    (e) => e.code === "SCOPE_INVALID"
+  );
+  const data = await readScopes(root);
+  assert.equal(Object.hasOwn(data.scopes, "__proto__"), false);
+  assert.deepEqual(Object.keys(data.scopes), ["s1"]);
+  const raw = JSON.parse(await readFile(scopeFilePath(root), "utf8"));
+  assert.equal(Object.hasOwn(raw.scopes, "__proto__"), false);
+});
+
+test("setScope rejects a merged kb as archived", async () => {
+  const root = await tmpRoot();
+  await makeKb(root, "A");
+  const manifest = JSON.parse(await readFile(join(root, "A", "kb.json"), "utf8"));
+  manifest.mergedInto = "other";
+  await writeFile(join(root, "A", "kb.json"), JSON.stringify(manifest), "utf8");
+  await assert.rejects(
+    () => setScope(root, { sessionId: "s1", mode: "selected", kbs: ["A"] }),
+    (e) => e.code === "KB_ARCHIVED"
+  );
+});
+
+test("setScope rejects an archived kb as archived", async () => {
+  const root = await tmpRoot();
+  await makeKb(root, "A");
+  await archiveKb(root, "A");
+  await assert.rejects(
+    () => setScope(root, { sessionId: "s1", mode: "selected", kbs: ["A"] }),
+    (e) => e.code === "KB_ARCHIVED"
+  );
 });
 
 test("setScope reports SCOPE_WRITE_FAILED when the file cannot be written", CHMOD_GUARD, async () => {
@@ -245,6 +335,14 @@ test("resolveSingleKb: selected scope without 标准 blocks std", async () => {
   );
 });
 
+test("resolveSingleKb rejects unknown policies", async () => {
+  const root = await tmpRoot();
+  await assert.rejects(
+    () => resolveSingleKb(execFor("x"), undefined, { kbRoot: root, defaultKb: "default" }, { policy: "bogus" }),
+    (error) => error instanceof TypeError && /unknown scope policy/.test(error.message)
+  );
+});
+
 test("resolveDocTarget: single scope kb wins, multi-kb resolves uniquely by title", async () => {
   const root = await tmpRoot();
   await makeKb(root, "A", [{ id: "a1", title: "继电保护技术条件" }]);
@@ -288,16 +386,54 @@ test("resolveDocTarget: zero hits mention the scope", async () => {
   );
 });
 
-test("resolveDocTarget: virtual docs use single policy, never cross-kb", async () => {
+test("resolveDocTarget ignores soft-deleted docs in cross-kb resolution", async () => {
+  const root = await tmpRoot();
+  await makeKb(root, "A", [{ id: "a1", title: "已删除文档", status: "deleted" }]);
+  await makeKb(root, "B", [{ id: "b1", title: "其他文档" }]);
+  await writeScopes(root, { scopes: { s1: { mode: "selected", kbs: ["A", "B"], updatedAt: new Date().toISOString() } } });
+  const config = { kbRoot: root, defaultKb: "default" };
+  await assert.rejects(
+    () => resolveDocTarget(execFor("s1"), undefined, "已删除", config),
+    (error) => error.code === "KB_NOT_FOUND" && error.message.includes("A、B")
+  );
+});
+
+test("resolveDocTarget: virtual docs and aliases use single policy, never cross-kb", async () => {
   const root = await tmpRoot();
   await makeKb(root, "A");
   await makeKb(root, "B");
   await writeScopes(root, { scopes: { s1: { mode: "selected", kbs: ["A", "B"], updatedAt: new Date().toISOString() } } });
   const config = { kbRoot: root, defaultKb: "default" };
+  for (const ref of ["schema", "schema.md"]) {
+    await assert.rejects(
+      () => resolveDocTarget(execFor("s1"), undefined, ref, config),
+      (e) => e.code === "KB_REQUIRED"
+    );
+  }
+});
+
+test("resolveDocTarget rejects an empty document reference", async () => {
+  const root = await tmpRoot();
+  const config = { kbRoot: root, defaultKb: "default" };
   await assert.rejects(
-    () => resolveDocTarget(execFor("s1"), undefined, "schema", config),
-    (e) => e.code === "KB_REQUIRED"
+    () => resolveDocTarget(execFor("x"), undefined, "  ", config),
+    (error) => error.message === "请提供文档名称或 id"
   );
+});
+
+test("resolveDocTarget never creates missing kbs or manifests while scanning", async () => {
+  const root = await tmpRoot();
+  await makeKb(root, "A", [{ id: "a1", title: "甲" }]);
+  await mkdir(join(root, "无清单"), { recursive: true });
+  await writeScopes(root, {
+    scopes: { s1: { mode: "selected", kbs: ["A", "不存在", "无清单"], updatedAt: new Date().toISOString() } },
+  });
+  const config = { kbRoot: root, defaultKb: "default" };
+  const target = await resolveDocTarget(execFor("s1"), undefined, "甲", config);
+  assert.equal(target.kb, "A");
+  assert.deepEqual((await readScopes(root)).scopes.s1.kbs, ["A", "无清单"]);
+  await assert.rejects(() => access(join(root, "不存在")), { code: "ENOENT" });
+  await assert.rejects(() => access(join(root, "无清单", "kb.json")), { code: "ENOENT" });
 });
 
 test("scopeForSessionSync resolves child via parent without writing", async () => {
