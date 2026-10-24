@@ -101,10 +101,114 @@ test("renameScopeKb replaces and de-duplicates names", async () => {
     scopes: {
       s1: { mode: "selected", kbs: ["旧", "B"] },
       s2: { mode: "selected", kbs: ["B", "新"] },
+      s3: { mode: "selected", kbs: ["旧", "新"] },
     },
   });
   await renameScopeKb(root, "旧", "新");
   const data = await readScopes(root);
   assert.deepEqual(data.scopes.s1.kbs, ["新", "B"]);
   assert.deepEqual(data.scopes.s2.kbs, ["B", "新"]);
+  assert.deepEqual(data.scopes.s3.kbs, ["新"]);
+});
+
+test("mutateScopes refuses to overwrite a corrupt file", async () => {
+  const root = await tmpRoot();
+  await writeScopes(root, { scopes: {} });
+  const file = scopeFilePath(root);
+  await writeFile(file, "{oops", "utf8");
+  await assert.rejects(
+    () =>
+      mutateScopes(root, (data) => {
+        data.scopes.s1 = { mode: "all", kbs: [] };
+        return true;
+      }),
+    /unusable/
+  );
+  assert.deepEqual(await readScopes(root), { version: 1, scopes: {} });
+  assert.equal(await readFile(file, "utf8"), "{oops");
+});
+
+test("oversized file reads empty and mutateScopes refuses to overwrite", async () => {
+  const root = await tmpRoot();
+  await writeScopes(root, { scopes: {} });
+  const file = scopeFilePath(root);
+  const big = "x".repeat(1024 * 1024 + 10);
+  await writeFile(file, big, "utf8");
+  assert.deepEqual(readScopesSync(root), { version: 1, scopes: {} });
+  await assert.rejects(() => mutateScopes(root, () => true), /unusable/);
+  assert.equal((await stat(file)).size, big.length);
+});
+
+test("mutateScopes preserves unknown entry fields", async () => {
+  const root = await tmpRoot();
+  await writeScopes(root, {
+    scopes: {
+      s1: {
+        mode: "selected",
+        kbs: ["A"],
+        updatedAt: "2026-01-02T03:04:05.000Z",
+        inheritedFrom: "s0",
+      },
+    },
+  });
+  await mutateScopes(root, (data) => {
+    data.scopes.s2 = { mode: "all", kbs: [] };
+    return true;
+  });
+  const data = await readScopes(root);
+  assert.deepEqual(data.scopes.s1, {
+    mode: "selected",
+    kbs: ["A"],
+    updatedAt: "2026-01-02T03:04:05.000Z",
+    inheritedFrom: "s0",
+  });
+});
+
+test("malformed top-level shapes read as empty", async () => {
+  const root = await tmpRoot();
+  await writeScopes(root, { scopes: {} });
+  const file = scopeFilePath(root);
+  for (const raw of [null, [], "str", 42, { scopes: [] }, { scopes: "x" }]) {
+    await writeFile(file, JSON.stringify(raw), "utf8");
+    assert.deepEqual(await readScopes(root), { version: 1, scopes: {} });
+  }
+});
+
+test("readScopesSync refreshes when the file changes out of band", async () => {
+  const root = await tmpRoot();
+  await writeScopes(root, { scopes: { s1: { mode: "all", kbs: [] } } });
+  assert.equal(readScopesSync(root).scopes.s1.mode, "all");
+  const next = JSON.stringify({
+    version: 1,
+    scopes: {
+      s1: { mode: "selected", kbs: ["A"] },
+      s2: { mode: "all", kbs: [] },
+    },
+  });
+  await writeFile(scopeFilePath(root), next, "utf8");
+  const data = readScopesSync(root);
+  assert.deepEqual(data.scopes.s1.kbs, ["A"]);
+  assert.deepEqual(Object.keys(data.scopes).sort(), ["s1", "s2"]);
+});
+
+test("writeScopes replaces the file atomically via rename", async () => {
+  const root = await tmpRoot();
+  await writeScopes(root, { scopes: {} });
+  const file = scopeFilePath(root);
+  const first = await stat(file);
+  await writeScopes(root, { scopes: { s1: { mode: "all", kbs: [] } } });
+  const second = await stat(file);
+  assert.notEqual(second.ino, first.ino);
+  assert.deepEqual((await readdir(root)).filter((name) => name.endsWith(".tmp")), []);
+});
+
+test("readScopesSync returns a frozen view that cannot poison the cache", async () => {
+  const root = await tmpRoot();
+  await writeScopes(root, { scopes: { s1: { mode: "selected", kbs: ["A"] } } });
+  const view = readScopesSync(root);
+  assert.ok(Object.isFrozen(view));
+  assert.ok(Object.isFrozen(view.scopes.s1));
+  assert.ok(Object.isFrozen(view.scopes.s1.kbs));
+  assert.throws(() => view.scopes.s1.kbs.push("B"), TypeError);
+  assert.deepEqual(readScopesSync(root).scopes.s1.kbs, ["A"]);
 });
