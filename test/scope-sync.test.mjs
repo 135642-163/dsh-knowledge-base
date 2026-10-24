@@ -3,7 +3,6 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -56,20 +55,6 @@ async function setup() {
     tools: { register(def) { tools.set(def.name, def); } },
     systemPrompt: { section() {} },
     get() { return undefined; },
-    subprocess: {
-      spawn({ argv, cwd }) {
-        const child = spawn(argv[0], argv.slice(1), { cwd, stdio: ["ignore", "pipe", "pipe"] });
-        const done = new Promise((resolve) => child.on("close", (exitCode) => resolve({ exitCode })));
-        return {
-          done,
-          collected: {
-            stdout: { readFrom: () => ({ text: "", nextOffset: 0, lossy: false }) },
-            stderr: { readFrom: () => ({ text: "", nextOffset: 0, lossy: false }) },
-          },
-          terminate: () => child.kill(),
-        };
-      },
-    },
   };
   await apply(ctx, { kbRoot, defaultKb: "甲库" });
   const exec = { agent: { session: { id: "s1", header: { cwd: root } } }, signal: new AbortController().signal };
@@ -115,4 +100,36 @@ test("purgeKb removes the name from scopes", async () => {
   await purgeKb(kbRoot, entry.dir);
   const data = await readScopes(kbRoot);
   assert.deepEqual(data.scopes.s1.kbs, ["甲库"]);
+});
+
+test("purgeKb removes an archived name when no live library owns it", async () => {
+  const { kbRoot } = await setup();
+  await archiveKb(kbRoot, "乙库");
+  await writeScopes(kbRoot, {
+    scopes: {
+      s1: { mode: "selected", kbs: ["甲库"], updatedAt: new Date().toISOString() },
+      s2: { mode: "selected", kbs: ["乙库"], updatedAt: new Date().toISOString() },
+    },
+  });
+  const [entry] = await listTrash(kbRoot);
+  await purgeKb(kbRoot, entry.dir);
+  const data = await readScopes(kbRoot);
+  assert.deepEqual(data.scopes.s2.kbs, []);
+});
+
+test("purgeKb keeps a name reused by a live library", async () => {
+  const { kbRoot } = await setup();
+  await archiveKb(kbRoot, "乙库");
+  const liveDir = join(kbRoot, "乙库");
+  await mkdir(liveDir, { recursive: true });
+  await writeFile(join(liveDir, "kb.json"), JSON.stringify({ schemaVersion: 5, name: "乙库", docs: [] }), "utf8");
+  await writeScopes(kbRoot, {
+    scopes: {
+      s1: { mode: "selected", kbs: ["乙库"], updatedAt: new Date().toISOString() },
+    },
+  });
+  const [entry] = await listTrash(kbRoot);
+  await purgeKb(kbRoot, entry.dir);
+  const data = await readScopes(kbRoot);
+  assert.deepEqual(data.scopes.s1.kbs, ["乙库"]);
 });
