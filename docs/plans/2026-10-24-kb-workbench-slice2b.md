@@ -3548,18 +3548,18 @@ git checkout main
 git merge --ff-only feat/kb-scope-capsule
 git log --oneline -3
 ```
-Expected: `--ff-only` 成功；HEAD 是 `chore: release 0.21.0 …`。
+Expected: `--ff-only` 成功；HEAD 为 `chore: release 0.21.0 …`，其后还有 `chore: sync package-lock version to 0.21.0`（`990349c`），以及本次收尾提交 `fix: address final review follow-ups`。
 
 ---
 
 ## 收尾检查（执行者自检）
 
-- [ ] 21 个工具全部走 `resolveExecScope` / `resolveSingleKb` / `resolveDocTarget`；`grep -n "args.kb ?? defaultKb" lib/index.js` 应只剩 1 处（`kb_query` 的单库分支，`all` 模式的现状路径）。
-- [ ] `grep -n "removeScopesReferences" lib/*.js` 无输出（已迁移到 `scope-store.js`）。
-- [ ] `grep -n "scope" lib/web/api.js | grep features` 显示 `scope: true`。
-- [ ] `docs/specs/2026-10-24-kb-workbench-slice2b-design.md` 末尾有验收记录。
-- [ ] `npm test`、`npm run typecheck`、`npm run check:client`、`node scripts/check-ui.mjs` 全绿。
-- [ ] `git status --short` 干净；main 已 ff 到 `feat/kb-scope-capsule`。
+- [x] 21 个工具全部走 `resolveExecScope` / `resolveSingleKb` / `resolveDocTarget`；`grep -n "args.kb ?? defaultKb" lib/index.js` 应只剩 1 处（`kb_query` 的单库分支，`all` 模式的现状路径）。
+- [x] `grep -n "removeScopesReferences" lib/*.js` 无输出（已迁移到 `scope-store.js`）。
+- [x] `grep -n "scope" lib/web/api.js | grep features` 显示 `scope: true`。
+- [x] `docs/specs/2026-10-24-kb-workbench-slice2b-design.md` 末尾有验收记录。
+- [x] `npm test`、`npm run typecheck`、`npm run check:client`、`node scripts/check-ui.mjs` 全绿。
+- [x] `git status --short` 干净；main 已 ff 到 `feat/kb-scope-capsule`。
 
 ---
 
@@ -3571,7 +3571,7 @@ Expected: `--ff-only` 成功；HEAD 是 `chore: release 0.21.0 …`。
 - **导入查重限定范围**：`scanDuplicates` 增加 `kbNames` 白名单，`kb_import` 只与范围内库比对，范围外库不再误报跨库重合；`null` = 扫描全部。
 - **范围库名净化**：`.scopes.json` 里的库名统一 `sanitizeKbName`（落盘/提示/缓存路径都走净化后的名字），无法落盘或保留的条目在 prune 时摘掉，兼顾路径安全与提示注入。
 - **GET 父会话解析**：`GET /kb/api/scope` 通过 `ctx.get("agents")` 读 live agent 的 `parentSession`，继承范围无需落快照即可见；`updatedAt` 只在请求会话有自己条目时返回。
-- **5xx 脱敏**：`mapError` 对 `status >= 500` 剥离 `details`，避免内部路径/库名回传浏览器。
+- **5xx 脱敏（双重拦截）**：`mapError` 对 `ScopeError` 的 `status >= 500` 剥离 `details`；并在 `sendError` 集中对 `status >= 500` 丢弃 `details`（任何调用点都不会把内部路径/库名回传浏览器），4xx 的业务 `details`（如 `jobId`）照常返回。
 - **软删除文档解析**：`resolveDocTarget` 增加 `includeDeleted`，供 `kb_restore` / `kb_history` / `kb_remove(soft=false)` 跨库解析软删除文档。
 - **`kb_lint` 逐库隔离**：每个库单独 try/catch（失败条目 `{kb, error}` 不拖垮整轮），超出 `scopeLintMaxKbs` 时返回 `truncated` + `omittedKbs`；输出 schema 增加可选 `error`。
 - **`kb_std_check` 友好报错**：目标库缺 `kb.json` 时提示「不存在或缺少 kb.json，请先创建该库」，不再抛底层 ENOENT。
@@ -3579,5 +3579,13 @@ Expected: `--ff-only` 成功；HEAD 是 `chore: release 0.21.0 …`。
 - **胶囊面板位置与无障碍修正**：面板改为空间自适应（默认上方、贴近视口顶部时下方，动态 max-height）；toast portal 到 body、底部居中、`role="status"`；`aria-expanded` 仅在面板挂载时为 true；全部模式预勾选全部库；会话切换作废旧请求。
 - **Task 12 改为 effect-running harness**：用可执行 React effect 的 VM 桩替代计划里的非 effect stub，覆盖面板定位、勾选/应用、失败回滚与会话切换竞态（40 个用例）。
 - **修正计划中的实现笔误**：Task 3 的 `scope-view` 说明/导出措辞按实现校正；Task 5 的 import 语句去掉未使用的 `MAX_SCOPE_KBS`；Task 8 的 lint 渲染断言改用 `output.render`；Task 9 在 GET 路由内用局部 `new URL(...)` 解析（计划依赖了未声明的 `url`/`URL`）；Task 8 的 `kb_std_check` 测试改为显式造库，避免依赖临时库根里的既有库。
+- **purge 复用名保护**：`purgeKb` 只在库目录确已不存在（`existsSync` 为假）时才 `removeScopeKb`，避免刚被同名新库复用的范围引用被误删。
+- **`kb_query` all 模式跨库容错**：逐库读取改用 `tryReadManifest`，某库 `kb.json` 损坏/缺失时跳过该库，而不是让整轮查询报错。
+- **配置钳制**：`scopeTtlDays` 钳制 0–3650（默认 30），`scopeLintMaxKbs` 钳制 1–`MAX_SCOPE_KBS`（50，默认 20）。
+- **`lib/scope-view.d.ts` + tsconfig**：为 `lib/scope-view.js` 补 TypeScript 声明并加入 `tsconfig.json` 的 `include`，让 `npm run typecheck` 覆盖范围纯函数。
+- **`kb_list` 范围不可用文案**：范围内库全部不可用（已归档/删除/manifest 损坏）时返回「本会话范围（…）内的知识库当前不可用…」，而不是空列表。
+- **TTL / 空范围 fail-open 告警**：README 明示条目超 `scopeTtlDays`（默认 30 天）会静默过期退回「全部」（`scopeTtlDays: 0` 关闭）、范围内所有库被删除/归档/合并后 `selected` 变空按设计退回「全部」、库身份以目录名为准、子会话父 agent 不在线时胶囊暂显「全部」但首次 `kb_*` 调用仍按父范围落快照。
+- **0600 测试平台守卫**：Windows 与 root 下 `0600` 语义不成立，`writeScopes` 的 0600 用例加 `skip` 守卫（与其它 chmod 用例一致）。
+- **`kb_lint` 的 `staleDays` NaN 修复**：原写法 `Number(args.staleDays) ?? 90` 对缺省参数得到 NaN（NaN 不是 nullish），改为 `Number(args.staleDays ?? 90)`。
 - **验收结果**：`npm test` 500/500（新增 188 例：scope-store 17、scope 37、scope-tools 52、scope-prompt 10、scope-api 19、scope-sync 6、scope-view 7、scope-client 40）；真实宿主验收与截图见 spec §20。
 

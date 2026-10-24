@@ -26,7 +26,9 @@ test("missing file reads as empty", async () => {
   assert.deepEqual(readScopesSync(root), { version: 1, scopes: {} });
 });
 
-test("writeScopes is atomic and 0600, no tmp left", async () => {
+test("writeScopes is atomic and 0600, no tmp left", {
+  skip: process.platform === "win32" || (typeof process.getuid === "function" && process.getuid() === 0),
+}, async () => {
   const root = await tmpRoot();
   await writeScopes(root, { scopes: { s1: { mode: "all", kbs: [] } } });
   const file = scopeFilePath(root);

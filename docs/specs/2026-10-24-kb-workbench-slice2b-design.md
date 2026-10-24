@@ -359,14 +359,14 @@ ctx.systemPrompt.section({
 
 ### 15.1 自动化（`node:test`，最终新增 188 例；基线 312 → **500** 全绿）
 
-- `scope-store.test.mjs`（17）：结构校验（sessionId/mode/kbs/50 上限/去重）、TTL 清理、缺失与归档/合并库剔除、损坏/超限文件（读空、拒写 `SCOPE_UNUSABLE`）、原子写、串行并发、`0600`、清理回写只在变化时发生、同步视图 mtime+size 缓存与冻结。
+- `scope-store.test.mjs`（17）：**文件层**——缺失文件读空、原子写 + `0600`、进程内串行队列（20 并发）、mutator 返回 falsy 时不写盘、同步视图 mtime+size 缓存与冻结视图、损坏/超限文件（读空、拒写 `SCOPE_UNUSABLE`）、清理回写只在变化时发生、`removeScopeKb`/`renameScopeKb` 库名同步、未知条目字段保留。sessionId 校验、mode/kbs 结构校验、50 上限、TTL 过期与失效库 prune、归档/合并判定由 `scope.test.mjs` / `scope-api.test.mjs` 覆盖。
 - `scope.test.mjs`（37）：条目归一化/50 上限/非法 sessionId、子会话快照 + `inheritedFrom`、父无条目 → all、父变化不回溯、只读解析（GET）不落快照、写失败降级为只读解析、`setScope` 严格校验（不存在/归档/合并）、`resolveSingleKb`/`resolveDocTarget` 单测（含软删除与虚拟文档）。
 - `scope-tools.test.mjs`（52）：表驱动矩阵——每个 policy 选代表工具测「显式内/显式外/省略 0 库/省略 1 库/省略多库」；`kb_query` 的 `*`；跨库 doc 单命中/多候选/0 命中；`kb_restore`/`kb_history`/永久删除解析软删除文档；`kb_list` 过滤 + `scope` 字段；`kb_lint` 逐库分组与 `truncated`/`omittedKbs`；`kb_std_check` 默认「标准」与范围外；`kb_remove(removeKb=true)`；`kb_edit_batch` 单库事务；`mode=all` 回归（现有行为不变）。
 - `scope-prompt.test.mjs`（10）：selected/all/空/损坏/无 session/子继承/写完刷新/同步视图缓存（mtime+size）/超 20 个库名截断；函数永不抛错。
 - `scope-api.test.mjs`（19）：GET/PUT 正常、非法 session、非法 mode、缺 `x-kb-ui`、跨源拒绝、`features.scope`、写失败、归档库、`mode=all` 忽略 kbs、GET 从 live agent 注册表解析父会话且不落快照、`updatedAt` 为空。
 - `scope-sync.test.mjs`（6）：`kb_rename` 工具与 `PATCH /kbs/:name` 两个调用点都同步 `.scopes.json`；`archiveKb` / `purgeKb` 剔除库名（含名字被现存库复用的情况）。
 - `scope-view.test.mjs`（7）：`lib/scope-view.js` 纯函数（chipLabel/selectionPayload/isAllSelection/mergeSelection）。
-- `scope-client.test.mjs`（40）：effect-running VM 加载 `lib/client.js`（替代原计划的非 effect stub），断言注册 `conversation.input.left`、chip 状态/面板空间自适应/勾选与提交/失败回滚/`aria-expanded`；`check:client` 产物不漂移。
+- `scope-client.test.mjs`（40）：effect-running VM 加载 `lib/client.js`（替代原计划的非 effect stub），断言注册 `conversation.input.left`、chip 状态/面板空间自适应/勾选与提交/失败回滚/`aria-expanded`。产物与源码同步由**独立门禁** `npm run check:client` 校验，不属于本套件的用例数。
 - 现有 312 个用例全绿：除 `test/client-entry.test.mjs` 需要扩展注册断言（新增 `conversation.input.left`）外，其余断言不变（`mode=all` 行为与 0.20.4 一致；fake exec 无 session.id 走 fail-open）。
 
 ### 15.2 真实宿主验收（2026-10-24 已完成，记录见 §20）
@@ -423,5 +423,6 @@ ctx.systemPrompt.section({
   - 从胶囊「打开知识库工作台」可打开/关闭 DSH 内弹窗；
   - 只读 `.scopes.json` 注入：toast「范围保存失败，请重试」、chip 不变、面板保留；
   - 真实模型轮次要求模型调用 `kb_list`：只返回「验收甲库」，「验收乙库」不出现。
+  - 口径说明：范围化 `kb_list` 真实轮次只返回「验收甲库」；系统提示注入机制由设计 spike（§4.3）证明，Task 13 期间未重新读取实际渲染的 `[知识库范围]` 行。
 - 截图：`.acceptance/screenshot-2b-chip-all.png`、`screenshot-2b-chip-selected.png`、`screenshot-2b-workbench-modal.png`、`screenshot-2b-write-failed.png`、`screenshot-2b-scoped-tool-turn.png`。
 - 说明：「全部」模式打开面板时所有复选框预勾选，因此收窄范围靠**取消勾选**（第 12.3 节已记录）。
