@@ -978,7 +978,7 @@ Run:
 ```bash
 node --test test/scope.test.mjs
 ```
-Expected: `pass 24`、`fail 0`。
+Expected: `pass 22`、`fail 0`。
 
 - [ ] **Step 5: 提交**
 
@@ -1102,7 +1102,7 @@ Run:
 ```bash
 node --test test/scope-view.test.mjs
 ```
-Expected: `pass 8`、`fail 0`。
+Expected: `pass 6`、`fail 0`。
 
 - [ ] **Step 5: 提交**
 
@@ -3445,7 +3445,7 @@ Expected: 五项全部符合；任一项不符先修再继续。
 ```markdown
 ## 20. 2B 验收记录（YYYY-MM-DD，0.21.0）
 
-- [x] `npm test`：记录实际总数（形如 `401/401` pass、`0 fail`，含 `check:client`、`check-ui`）。
+- [x] `npm test`：记录实际总数（形如 `397/397` pass、`0 fail`，含 `check:client`、`check-ui`）。
 - [x] `npm run typecheck`、`npm run check:client` 通过。
 - [x] 真实宿主（临时 `dsh --profile web` + 临时 kbRoot + WKWebView）：胶囊初始「全部」→ 勾选 1 库 → 「1 个」→ 刷新保持 → 「打开知识库工作台」弹窗开关。
 - [x] 写盘失败注入：toast「范围保存失败，请重试」，chip 不变，面板保留。

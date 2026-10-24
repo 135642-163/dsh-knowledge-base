@@ -341,7 +341,7 @@ ctx.systemPrompt.section({
 
 ## 15. 测试计划
 
-### 15.1 自动化（`node:test`，计划细化到新增 89 例；基线 312 → 401 全绿）
+### 15.1 自动化（`node:test`，计划细化到新增 85 例；基线 312 → 397 全绿）
 
 - `scope-store.test.mjs`：结构校验（sessionId/mode/kbs/50 上限/去重）、TTL 清理、缺失与归档/合并库剔除、损坏文件、原子写、串行并发、`0600`、清理回写只在变化时发生。
 - `scope-inherit.test.mjs`：子会话快照 + `inheritedFrom`；父无条目 → all；父变化不回溯；孙链复制生效值；GET 不落快照；写失败降级为父范围。
