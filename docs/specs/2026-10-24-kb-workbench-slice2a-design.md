@@ -145,7 +145,7 @@ createJobRegistry({ retentionMs = 3600_000, maxJobs = 200, now = Date.now })
   "kb": "标准",
   "createdAt": "2026-10-24T01:00:00.000Z",
   "updatedAt": "2026-10-24T01:02:00.000Z",
-  "status": "open | importing | done | failed",
+  "status": "open | importing | failed",
   "files": [ { "path": "电气资料/GB∕T 1234.pdf", "size": 1234567 } ]
 }
 ```
@@ -153,7 +153,7 @@ createJobRegistry({ retentionMs = 3600_000, maxJobs = 200, now = Date.now })
 - 原子写：先写 `batch.json.tmp` 再 `rename` 覆盖（Windows 上 rename 覆盖不可靠时先 `rm`，与 `store.js` 现有做法一致）；同一批次内的更新走进程内串行队列（上传并发 2 不会丢文件条目）。
 - 覆盖同名文件时先 `rm` 再 `rename`（Windows 兼容），文件数不变。
 - `status` 迁移：`open → importing`（启动导入）→ 成功即删除批次目录（不再写 `done`）；结算有失败或跳过、或进程级失败 → `failed` 并保留目录。
-  - `done`：**立即删除整个批次目录**（文件已拷入 `sources/`），任务结果只存在于注册表的 `job.result`。
+  - 成功：**立即删除整个批次目录**（文件已拷入 `sources/`），不写 `done`；任务结果只存在于注册表的 `job.result`。
   - `failed`：保留目录与 `progress.json` 供排查，24 小时清扫兜底。
   - 清扫（`sweepOldBatches`）在批次锁内按状态判龄：`open` 取 `max(createdAt, updatedAt, batch.json mtime)`；`failed` 取 `max(updatedAt, mtime)`；`importing` 仅当 `batch.json` 与 `progress.json` 都超过 24h 才删（崩溃遗留）；未知元数据回退目录 mtime。
   - 「客户端并发 2」只是浏览器侧限流，服务端接受任意并发 PUT（批次内更新靠串行队列保证一致）。
@@ -287,7 +287,7 @@ createJobRegistry({ retentionMs = 3600_000, maxJobs = 200, now = Date.now })
 
 3. `scanDuplicates({ root, targetKb, files, allowCrossKb: allowCrossDuplicates })`：同库重合跳过；跨库重合默认跳过；仅标题前缀相似照常导入并回报 `similar`。
 4. 若 `kept.length === 0`：返回 `{jobId: null, status: "empty", duplicates, similar}`，批次保持 `open`。
-5. `markBatchImporting(kbDir, batchId, { expectedFiles: batch.files })` 在批次锁内完成 `open → importing`（防 dedup 期间新上传：409 `BATCH_CHANGED`）；写初始 `progress.json`，`jobs.start(...)`；`onSettle` 里：`ok > 0 && fail === 0 && skip === 0` → 删批次目录；否则保留并写 `status = "failed"`（进程级失败同样；skip 表示文件未进库，也要保留）。
+5. `markBatchImporting(kbDir, batchId, { expectedFiles: batch.files })` 在批次锁内完成 `open → importing`（防 dedup 期间新上传：409 `BATCH_CHANGED`）；写初始 `progress.json`，`jobs.start(...)`；`onSettle` 里：任务 `status === "succeeded"` 且 `fail === 0` 且 `skip === 0` → 删批次目录；否则保留并写 `status = "failed"`（进程级失败同样；skip 表示文件未进库，也要保留；真实 worker 下 succeeded+0/0 等价于 ok>0）。
 6. 成功返回 202 `{jobId, files: kept.length, duplicates, similar}`。
 
 ### 6.2 任务
@@ -498,7 +498,7 @@ select → uploading(并发 2) → starting → importing(1s 轮询) → done | 
 
 ### 15.1 自动化与 API 级端到端
 
-- `npm test`：**295/295 pass / 0 fail**（含 `check:client`、`check-ui` 11 个 UI 模块）。
+- `npm test`：**296/296 pass / 0 fail**（含 `check:client`、`check-ui` 11 个 UI 模块；含最终门禁后新增的“工作台重传 kb_import 旧文档原位更新”回归测试）。
 - `npm run typecheck`、`npm run check:client`、`node scripts/check-ui.mjs` 全部通过。
 - 真实 API 级端到端（临时 `kbRoot` + 真实 `worker/import-worker.mjs` + 真实 `lib/web/jobs.js` 注册表 + `handleApi`）11 项全过：
   1. 创建批次 201；2. 嵌套目录上传 2 个 `.md`；3. import 202；4. 任务 succeeded 且 `result.files[].path` 保留相对路径；
