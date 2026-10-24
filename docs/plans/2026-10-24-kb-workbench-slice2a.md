@@ -4258,7 +4258,7 @@ git commit -m "feat(ui): add std update panel with coin confirmation and job pol
 - Modify: `README.md`
 - Copy: spec/plan 到插件仓库 `docs/`
 
-- [ ] **Step 13.1: 升版本**
+- [x] **Step 13.1: 升版本**
 
 Run:
 ```bash
@@ -4266,13 +4266,13 @@ npm version 0.20.0 --no-git-tag-version
 ```
 Expected: `package.json` 与 `package-lock.json` 的 `version` 都是 `0.20.0`。
 
-- [ ] **Step 13.2: 改 `lib/version.js`**
+- [x] **Step 13.2: 改 `lib/version.js`**
 
 ```js
 export const VERSION = "0.20.0";
 ```
 
-- [ ] **Step 13.3: README 配置表加两行**
+- [x] **Step 13.3: README 配置表加两行**
 
 在 `importTimeoutMs` 之后加：
 
@@ -4281,7 +4281,7 @@ export const VERSION = "0.20.0";
 | `uiMaxBatchFiles` | `1000` | 工作台上传单批次文件数上限（1–5000） |
 ```
 
-- [ ] **Step 13.4: README 工作台章节补功能说明**
+- [x] **Step 13.4: README 工作台章节补功能说明**
 
 在 `/kb/` 工作台说明段落之后加：
 
@@ -4291,7 +4291,7 @@ export const VERSION = "0.20.0";
 「标准更新」面板（库详情 tab）：读取 `.std-check.json` 的检查时间、缓存有效期与待下载数；支持仅检查 / 检查并下载 / 补下载 / 强制全查 / 本轮上限；下载前必须勾选金币确认；`bzCookie` 只在状态里显示“已配置/未配置”，不会回传。
 ```
 
-- [ ] **Step 13.5: 同步文档**
+- [x] **Step 13.5: 同步文档**
 
 Run:
 ```bash
@@ -4302,7 +4302,7 @@ cp /Users/littlesun/workspace/deepseek/project/知识库/docs/superpowers/plans/
 
 > 两份文件必须与 workspace 的 `docs/superpowers/{specs,plans}/` 内容一致；提交前用 `diff` 核对。
 
-- [ ] **Step 13.6: 跑全套**
+- [x] **Step 13.6: 跑全套**
 
 Run:
 ```bash
@@ -4310,12 +4310,17 @@ npm test && npm run typecheck && npm run check:client
 ```
 Expected: 全绿。
 
-- [ ] **Step 13.7: Commit**
+- [x] **Step 13.7: Commit**
 
 ```bash
 git add package.json package-lock.json lib/version.js README.md docs
 git commit -m "chore: bump to 0.20.0 and document workbench upload/std"
 ```
+
+### Task 13 实现记录（2026-10-24，已执行）
+
+- 版本 0.20.0（package.json / package-lock / lib/version.js / README 标题一致）；README 增加上传与标准面板说明、两个配置项、0.20.0 已知限制；workspace 与插件仓库 spec/plan 同步。
+- 复核后追加修正：README 用例数 143 → 296；`ui/views/detail.js` 过期文案「Slice 2 增加全文预览」改为「全文预览在后续版本加入」；spec §5.1/§6.1 的批次状态与成功条件（`ok>0 && fail===0 && skip===0` 才删）对齐代码；§6.4 `features` 去掉未实现的 `scope` 字段。
 
 ---
 
@@ -4343,6 +4348,12 @@ Expected: `200`，`version: "0.20.0"`，`features.upload === true`、`features.s
 5. 构造 1 个损坏 `.docx` 制造失败 → 批次目录保留、`batch.json.status === "failed"`、报告显示失败原因。
 6. 关闭弹窗后重新打开 → 直接恢复到该任务进度/结果（若任务还在 1 小时内）。
 7. 页面刷新 → 重新打开上传弹窗仍能恢复。
+
+### Task 14 验收状态（2026-10-24，部分完成）
+
+- **已完成（API 级替代验收）**：真实 `kbRoot` + 真实 `worker/import-worker.mjs` + 真实 job registry + `handleApi` 端到端 11 项全过：创建批次、嵌套目录上传、import 202、任务 succeeded + 逐文件 path、2 篇入库 + sources 落盘 + 成功批次删除、资料 API、损坏文件 failed 且批次保留、标题重合返回 jobId null、std configured 且无 cookie、std-check 结果、`/status` features。详见 spec §15.1。
+- **未完成（浏览器/桌面端）**：当前 DSH 实例仍运行 0.19.1，重启会打断用户会话；本机也无 Playwright/jsdom。14.1、14.2 的视觉与交互项（上传行布局、拖拽、恢复、金币确认框、完成后面板不闪、`Cmd+R` 嵌入布局）留待重启后人工执行，清单见 spec §15.2。
+- 阻塞级缺陷 B1（工作台重传 `kb_import` 旧文档另建副本）已在最终门禁后修复并加回归测试（`8ff00d1`）。
 
 - [ ] **Step 14.3: 标准面板验收（不花金币）**
 
