@@ -119,7 +119,7 @@ function docs(name, state, { fmtNumber }) {
 }
 
 function notes(kb, { fmtNumber }) {
-  return `<div class="panel"><h3>笔记</h3><p class="muted">${fmtNumber(kb.docs.notes)} 篇编译页；Slice 2 增加全文预览。</p></div>`;
+  return `<div class="panel"><h3>笔记</h3><p class="muted">${fmtNumber(kb.docs.notes)} 篇编译页；全文预览在后续版本加入。</p></div>`;
 }
 
 function log(text) {

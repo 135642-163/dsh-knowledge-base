@@ -152,7 +152,7 @@ createJobRegistry({ retentionMs = 3600_000, maxJobs = 200, now = Date.now })
 
 - 原子写：先写 `batch.json.tmp` 再 `rename` 覆盖（Windows 上 rename 覆盖不可靠时先 `rm`，与 `store.js` 现有做法一致）；同一批次内的更新走进程内串行队列（上传并发 2 不会丢文件条目）。
 - 覆盖同名文件时先 `rm` 再 `rename`（Windows 兼容），文件数不变。
-- `status` 迁移：`open → importing`（启动导入）→ `done`（结算且 `fail===0`）或 `failed`（结算但有失败 / 进程级失败）。
+- `status` 迁移：`open → importing`（启动导入）→ 成功即删除批次目录（不再写 `done`）；结算有失败或跳过、或进程级失败 → `failed` 并保留目录。
   - `done`：**立即删除整个批次目录**（文件已拷入 `sources/`），任务结果只存在于注册表的 `job.result`。
   - `failed`：保留目录与 `progress.json` 供排查，24 小时清扫兜底。
   - 清扫（`sweepOldBatches`）在批次锁内按状态判龄：`open` 取 `max(createdAt, updatedAt, batch.json mtime)`；`failed` 取 `max(updatedAt, mtime)`；`importing` 仅当 `batch.json` 与 `progress.json` 都超过 24h 才删（崩溃遗留）；未知元数据回退目录 mtime。
@@ -287,7 +287,7 @@ createJobRegistry({ retentionMs = 3600_000, maxJobs = 200, now = Date.now })
 
 3. `scanDuplicates({ root, targetKb, files, allowCrossKb: allowCrossDuplicates })`：同库重合跳过；跨库重合默认跳过；仅标题前缀相似照常导入并回报 `similar`。
 4. 若 `kept.length === 0`：返回 `{jobId: null, status: "empty", duplicates, similar}`，批次保持 `open`。
-5. `markBatchImporting(kbDir, batchId, { expectedFiles: batch.files })` 在批次锁内完成 `open → importing`（防 dedup 期间新上传：409 `BATCH_CHANGED`）；写初始 `progress.json`，`jobs.start(...)`；`onSettle` 里：`fail === 0` → 删批次目录；否则保留并写 `status = "failed"`（进程级失败同样）。
+5. `markBatchImporting(kbDir, batchId, { expectedFiles: batch.files })` 在批次锁内完成 `open → importing`（防 dedup 期间新上传：409 `BATCH_CHANGED`）；写初始 `progress.json`，`jobs.start(...)`；`onSettle` 里：`ok > 0 && fail === 0 && skip === 0` → 删批次目录；否则保留并写 `status = "failed"`（进程级失败同样；skip 表示文件未进库，也要保留）。
 6. 成功返回 202 `{jobId, files: kept.length, duplicates, similar}`。
 
 ### 6.2 任务
@@ -316,7 +316,7 @@ createJobRegistry({ retentionMs = 3600_000, maxJobs = 200, now = Date.now })
 
 ### 6.4 status
 
-`GET /kb/api/status` 的 `features` 变为 `{ui:true, upload:true, std:true, jobs:true, merge:false, scope:false}`，并新增：
+`GET /kb/api/status` 的 `features` 变为 `{ui:true, upload:true, std:true, jobs:true, merge:false}`（`scope` 属 2B，不在本切片响应中），并新增：
 
 ```json
 { "limits": { "maxUploadBytes": 2147483648, "maxBatchFiles": 1000, "extensions": [".docx", "…"] } }
@@ -492,7 +492,7 @@ select → uploading(并发 2) → starting → importing(1s 轮询) → done | 
 3. 父会话 id 在会话元数据里的字段名（`session.meta.parentSession` 待验证）。
 4. 工具矩阵逐项接入的公共入口：现有 21 个 `kb_*` 工具各自解析 `kb`，需要一个共享的 `resolveScopeKb`/`assertInScope`，避免 21 处散改。
 
-2B 的 `.scopes.json`、API（`GET/PUT /kb/api/scope`）、胶囊 UI、`KB_OUT_OF_SCOPE` 语义按 M1 6.1–6.6 执行；本切片预留的 `/status.features.scope=false` 在 2B 打开。
+2B 的 `.scopes.json`、API（`GET/PUT /kb/api/scope`）、胶囊 UI、`KB_OUT_OF_SCOPE` 语义按 M1 6.1–6.6 执行；本切片不返回 `scope` 字段；2B 再在 `/status.features` 中加 `scope`。
 
 ## 15. 验收记录（2026-10-24，0.20.0）
 
