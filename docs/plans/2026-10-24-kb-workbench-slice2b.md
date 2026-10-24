@@ -3595,3 +3595,30 @@ Expected: `--ff-only` 成功；HEAD 为 `chore: release 0.21.0 …`，其后还�
   - **系统提示措辞**：order 106 静态提示的「当前库及全部知识库」改为「当前库及本会话范围内的知识库（未限定范围时为全部）」，其余长文本未动；工具描述（`kb_import`）不在本次范围。
   - **测试与版本**：`npm test` **508/508** 通过（较 0.21.0 新增 8 例：scope +2、scope-tools +2、scope-api 1、scope-client 1、dedup 1、scope-sync 1）；改写 scope 的过期用例为「工具续期/GET 过期/24h 不重写」三例，改写 scope-tools 的 `ttlDays` 透传用例为陈旧父条目继承；版本 0.21.1（`package.json` / `package-lock.json` / `lib/version.js` / README）。
 
+## 0.22.0 实施记录
+
+0.21.1 → 0.22.0 的交互完善轮（工作台资料页 + 原件预览 + 范围易用性）。任务按实际提交顺序记录：
+
+| # | 任务 | 提交 | 主要文件 |
+|---|---|---|---|
+| 1 | 范围「未启用」（`mode:"none"`）：空选择归一 `none`、21 个工具 `KB_DISABLED`、提示/API/胶囊/继承/清理 | `0733c59` | `lib/scope.js`、`lib/scope-store.js`、`lib/scope-view.js`、`lib/index.js`、`src/client/index.tsx`、`lib/client.js` |
+| 2 | 范围门先于参数校验：`kb_remove({})` / `kb_remove({removeKb:true})` / `kb_rename({})` 在 none 下也回 `KB_DISABLED`（`newName` 不再 schema-required） | `092506e` | `lib/index.js`、`test/scope-tools.test.mjs` |
+| 3 | 资料页分页/跳页/搜索：顶底分页、`第 X / Y 页 · 共 N 篇`、每页 50/100/200、标题+摘要+标签搜索、`全部/有失败/导入中` | `076f59d` | `ui/views/detail.js`、`ui/app.js`、`lib/web/data.js`、`ui/style.css` |
+| 4 | 可测试的资料工具栏与竞态防线：`ui/docs-controls.js`（防抖/IME/跳页/清除/焦点/detach）、`detailGate` + 请求代号丢弃旧响应、胶囊外部点击延迟还焦点 | `5563ee8` | `ui/docs-controls.js`、`ui/app.js`、`src/client/index.tsx`、`lib/client.js` |
+| 5 | 预览基础设施：`source?inline=1` 白名单、`preview.pdf`（LibreOfficeKit 转换/缓存/并发合并/超时杀进程组）、`/content`（笔记/文本/2 MB 截断）、`resolveOfficeCli` 探测与 `officeKitCli` 配置 | `f23714e` | `lib/web/preview.js`、`lib/web/api.js`、`lib/web/http.js`、`lib/web/server.js`、`lib/index.js` |
+| 6 | 预览 UI 与工作台补完：「查看原件」弹窗（PDF/图片/Office/文本/笔记/下载兜底）、笔记 tab 文本预览、状态徽标拆分与失败筛选、页头重命名入口 | `5d4afb0` | `ui/views/modals.js`、`ui/views/detail.js`、`ui/views/badges.js`、`ui/app.js`、`ui/style.css` |
+| 7 | 临时/锁文件：`~$*` / `.~lock.*` / `Thumbs.db` / `desktop.ini` / `.DS_Store` 在导入与上传跳过并计数，`kb_lint` 新增 `temp-files` 组 | `5bb98f6` | `lib/temp-files.js`、`lib/pipeline.js`、`lib/web/upload.js`、`lib/lint.js`、`ui/upload-core.js`、`ui/views/upload.js` |
+
+- **此前已记录的工作**：0.21.1 复审跟进（库身份目录名、文档解析单一来源、TTL 活跃续期、提示措辞）见本文件
+  「实施记录（偏差与追加）」末尾，不再重复；0.22.0 的范围/胶囊行为已写进 README「0.22.0 交互完善」。
+- **测试**：`npm test` **612/612**（0.21.1 基线 508，净增 104：原有文件 +24、新文件 +80）；
+  `npm run typecheck`、`npm run check:client`、`node scripts/check-ui.mjs` 全绿。
+  逐文件明细见 spec §15.3，本轮说明见 spec §21。
+- **发布**：版本 0.22.0（`package.json`、`package-lock.json` 根与 `packages[""]`、`lib/version.js`），
+  README 新增 `## 0.22.0 交互完善`，更新配置表（`officeKitCli`）与测试段（612）。
+- **已知跟进**：
+  - 笔记预览弹窗沿用原件弹窗，底部仍显示「下载原件」——笔记没有原件，该链接无效，后续按 kind 隐藏；
+  - 真实浏览器自动化仍缺失：UI 仅由 fake DOM / 纯函数单测 + `scripts/check-ui.mjs` 覆盖，
+    胶囊外部点击的真实焦点顺序、预览样式仍需手工验收；
+  - Office 预览手工验收待补：已装 / 未装 LibreOfficeKit 两条路径、首次转换耗时、字体替换、
+    超大表格与扫描件附件各验一次。

@@ -4,6 +4,10 @@
 > 基线：`dsh-knowledge-wiki` 0.20.4，`npm test` 312/312，`git 8af72cf`。
 > 关联：`2026-10-24-kb-workbench-slice2-brief.md`（范围与交接）、`2026-10-24-kb-workbench-slice2a-design.md` §14（2B 待验证项）、`2026-10-23-kb-workbench-design.md` §6（胶囊与范围）、`2026-10-24-kb-workbench-sidebar-entry-design.md`（客户端 bundle/弹窗模式）。
 > 本文所有“已实测”结论来自第 4 节的宿主 spike，证据可复现。
+>
+> **0.22.0 更新（2026-10-24）**：空选择语义改为「未启用」（`mode:"none"`，破坏性变更），并补齐资料
+> 分页/搜索、原件预览、笔记/徽标/重命名与临时文件过滤；详见 **§21**。§2.1/§6/§7/§8/§10.2/§12.3/§15 中
+> 旧的「`selected` + 空 = `all`」规则已就地更正。
 
 ## 1. 背景与目标
 
@@ -22,7 +26,7 @@ Slice 2A 已交付工作台上传/导入任务与标准更新面板（0.20.x）�
 ### 2.1 本切片做
 
 - `lib/scope.js`（存储/校验/清理/继承/解析/错误类型）、`lib/scope-view.js`（纯函数）。
-- `.scopes.json` v1：`mode: all|selected`、TTL 惰性清理、原子写、串行队列、重命名/归档同步。
+- `.scopes.json` v1：`mode: all|selected|none`（0.22.0 起新增 `none`，见 §21.1）、TTL 惰性清理、原子写、串行队列、重命名/归档同步。
 - 懒解析 + 首次使用时快照继承（子会话）。
 - 21 个 `kb_*` 工具按矩阵接入；`kb_list`/`kb_query` 输出带 `scope`。
 - 动态系统提示段（order 120，仅 `selected` 注入）。
@@ -140,12 +144,14 @@ package.json / README.md   改
 
 规则：
 
-- `mode`: `all | selected`；`selected` 且 `kbs: []` 视为 `all`。
+- `mode`: `all | selected | none`（0.22.0 起，见 §21.1）。**只有显式 `all` 表示全部库**；
+  `selected` 且 `kbs: []` 归一化为 `none`（= 本会话未启用知识库），不再视为 `all`；
+  未知/缺失 `mode` 的条目按 `none` 处理（fail closed）。
 - `kbs`：字符串数组，≤50；逐项 `sanitizeKbName`；去重保序；必须存在且未归档（`listKbs` 不含 `.trash/`）；`mergedInto != null` 的库剔除。
 - `updatedAt`：ISO 时间；`inheritedFrom`：父 sessionId 或 `null`。
 - 写入：临时文件（`<path>.<pid>.<ts>.tmp`）+ `rename` 原子替换，权限 `0600`；**按 kbRoot 的进程内串行队列**（模块级 `Map<root, Promise>`），并发 PUT 不互相覆盖。
 - 读取：JSON 解析失败、结构非法、读取 EACCES → 按空库处理并保留原文件（不删）；单条条目结构非法跳过该条。
-- 清理（惰性，仅读路径发现变化才回写）：`updatedAt` 超过 `scopeTtlDays`（默认 30）的条目删除；`kbs` 中已不存在/已归档/已合并的库名剔除；剔除后 `selected` 且空 → `all`。
+- 清理（惰性，仅读路径发现变化才回写）：`updatedAt` 超过 `scopeTtlDays`（默认 30）的条目删除；`kbs` 中已不存在/已归档/已合并的库名剔除；剔除后 `selected` 且空 → `none`（0.22.0 起；0.21.x 曾回退 `all`）。
 - 归档/重命名同步：现有 `removeScopesReferences(root, name)` 只在**彻底删除归档库**（`purgeKb`）时调用，归档与重命名都没接。2B 把它迁移到 `lib/scope-store.js`（`removeScopeKb` / `renameScopeKb`）：`archiveKb` / `purgeKb` 内 best-effort 剔除库名；重命名由 `kb_rename` 工具与 `PATCH /kbs/:name` 两个入口在 `renameKb` 之后调用 `renameScopeKb`（`lib/store.js` 的 `renameKb` 保持纯目录操作）。
 - 隐私：只含 sessionId 与库名，无对话内容。
 
@@ -162,6 +168,8 @@ package.json / README.md   改
 
 - 父条目本身是继承来的：复制其**生效值**，`inheritedFrom` 写直接父 id（不追到更早）。
 - 父范围后续变化不回溯（快照已落盘）。
+- 归一化只在 `selected` 且 `kbs` 非空时成立：`selected` + 空 `kbs` 解析为 `none`（0.22.0 起，见 §21.1），
+  与「`sessionId` 为空 → `all`」的 fail-open 是两件事，后者保持不变。
 
 ### 7.2 同步只读视图（系统提示用）
 
@@ -222,7 +230,8 @@ assertInScope(scope, name) -> name（范围外抛 ScopeError）
 如需使用，请在输入框旁的知识库选择器里调整范围。
 ```
 
-- 范围为空（`selected` 且 `kbs=[]`）= `all`，不报错。
+- 范围为空（`selected` 且 `kbs=[]`）→ 归一化为 `none`：21 个工具统一报 `KB_DISABLED`，不再等价 `all`
+  （0.22.0 起，见 §21.1；0.21.x 曾按「空范围 = all，不报错」处理）。
 - `mode=all` 时所有工具保持现有行为（含 `defaultKb` 语义），只多一个 `scope` 输出字段。
 
 ## 9. 系统提示
@@ -278,8 +287,9 @@ ctx.systemPrompt.section({
 - 请求体：`{ "session": "…", "mode": "selected", "kbs": ["标准", "变电试验"] }`。
 - 非 GET → 已有中间件 `requireUiHeader`（`x-kb-ui: 1`）+ `assertSameOrigin`；不满足 403。
 - 校验：`mode` 非法 → `SCOPE_INVALID` 400；`kbs` 含不存在 → `KB_NOT_FOUND` 404；含已归档/已合并 → `KB_ARCHIVED` 409；写失败 → `SCOPE_WRITE_FAILED` 500。
-- 响应同 GET；`mode=all` 时忽略并清空 `kbs`。
-- 服务端不做「全选→all」规范化：胶囊在“全选”时直接提交 `mode=all`（以后新增库自动包含）。
+- 响应同 GET；`mode=all` 或 `mode=none` 时忽略并清空 `kbs`（0.22.0 起接受 `none`，见 §21.1）。
+- 服务端不做「全选→all」规范化：胶囊在“全选”时直接提交 `mode=all`（以后新增库自动包含）；
+  空 `selected` 落盘成 `none`，不再回退 `all`。
 
 ### 10.3 `/kb/api/status`
 
@@ -329,7 +339,7 @@ ctx.systemPrompt.section({
   - 底部：`应用` / `取消` / `打开知识库工作台`（打开 `WorkbenchModal`）。
 - 列表里没有任何可用库时：显示「暂无知识库」+「去工作台新建」。
 - 应用：
-  - `全选` → 提交 `mode: "all"`；`清空` → 提交 `mode: "all"`（M1：`selected`+空视为 all）。
+  - `全选` → 提交 `mode: "all"`；`清空` → 提交 `mode: "none"`（0.22.0 起；0.21.x 曾按 M1「`selected` + 空视为 all」提交 `all`，见 §21.1）。
   - 其余 → `mode: "selected"` + 勾选列表。
   - 成功：toast（自绘，portal 到 `document.body`，底部居中，`role="status"` + `aria-live="polite"`，2.4s 消失，不依赖宿主 API）「已限定为 N 个知识库」/「已改为全部知识库」；关闭面板；chip 更新。
   - 失败：面板保留、同一 toast 报错、chip 不变（等价回滚）。
@@ -357,7 +367,7 @@ ctx.systemPrompt.section({
 
 ## 15. 测试计划
 
-### 15.1 自动化（`node:test`，最终新增 188 例；基线 312 → **500** 全绿）
+### 15.1 自动化（`node:test`；0.21.0 新增 188 例，312 → **500**；0.21.1 复审后 **508**；0.22.0 **612**——见 §15.3 与 §21.8）
 
 - `scope-store.test.mjs`（17）：**文件层**——缺失文件读空、原子写 + `0600`、进程内串行队列（20 并发）、mutator 返回 falsy 时不写盘、同步视图 mtime+size 缓存与冻结视图、损坏/超限文件（读空、拒写 `SCOPE_UNUSABLE`）、清理回写只在变化时发生、`removeScopeKb`/`renameScopeKb` 库名同步、未知条目字段保留。sessionId 校验、mode/kbs 结构校验、50 上限、TTL 过期与失效库 prune、归档/合并判定由 `scope.test.mjs` / `scope-api.test.mjs` 覆盖。
 - `scope.test.mjs`（37）：条目归一化/50 上限/非法 sessionId、子会话快照 + `inheritedFrom`、父无条目 → all、父变化不回溯、只读解析（GET）不落快照、写失败降级为只读解析、`setScope` 严格校验（不存在/归档/合并）、`resolveSingleKb`/`resolveDocTarget` 单测（含软删除与虚拟文档）。
@@ -376,6 +386,27 @@ ctx.systemPrompt.section({
 - 失败注入：`.scopes.json` 只读 → toast「范围保存失败，请重试」、chip 不变、面板保留。
 - 真实模型轮次里让模型调用 `kb_list`：只返回「验收甲库」，「验收乙库」不出现。
 - 降级：没有 `webServer` 时胶囊不渲染（由 `features.scope` / status 探测决定）。
+
+### 15.3 0.22.0 新增与变更用例（`npm test` 612/612）
+
+- 0.21.1（`e3b5ad8`）基线 **508**；0.22.0 净增 **104** 例（原有文件 +24，新文件 +80）。
+- 新增文件：
+  - `web-preview.test.mjs`（27）：`source?inline=1` 白名单/响应头/路径穿越、HTML/SVG 415、
+    `preview.pdf` 引擎缺失 501、非 Office 415、转换一次后命中缓存、并发合并、失败 500 不带路径、
+    `/content` 笔记/文本/截断/415、缓存路径与旧缓存清理、`resolveOfficeCli` 探测顺序。
+  - `ui-preview.test.mjs`（8）：预览 URL、`previewKindFor` 类型判定、PDF/Office/图片/文本/笔记正文渲染与转义、
+    失败与未知格式的下载兜底、重命名输入校验。
+  - `ui-docs.test.mjs`（19）：工具栏/顶底分页/页码收敛/每页条数/空态/搜索中/状态筛选/笔记 tab/
+    `statusBadges`/页头重命名入口。
+  - `ui-docs-controls.test.mjs`（10）：防抖合并、IME 组合、Enter、每页条数、跳页收敛、清除、`detach`、
+    请求门与旧响应丢弃。
+  - `web-docs-search.test.mjs`（4）：标题/摘要/标签命中、大小写、与状态/可信度/类型过滤及分页共存。
+  - `temp-files.test.mjs`（12）：`~$*` / `.~lock.*` / 系统垃圾文件识别、大小写、basename、目录收集跳过计数、
+    上传校验与批次排除、`kb_lint` 分组、`kb_import` 报告数量。
+- 变更文件（0.21.1 → 0.22.0）：`scope.test.mjs` 39 → 47、`scope-tools.test.mjs` 54 → 55、
+  `scope-api.test.mjs` 20 → 24、`scope-prompt.test.mjs` 10 → 12、`scope-sync.test.mjs` 7 → 8、
+  `scope-view.test.mjs` 7 → 9、`scope-client.test.mjs` 41 → 46、`ui-api.test.mjs` 9 → 10。
+- 全部用例使用临时目录，不依赖本机知识库；`check:client` / `check-ui` 为独立门禁，不计入用例数。
 
 ## 16. 验收标准
 
@@ -432,3 +463,164 @@ ctx.systemPrompt.section({
   - 范围 TTL 活跃续期：工具路径在 prune 前按 24h 粒度续期会话自己的条目；GET（`snapshot:false`）与系统提示的同步读不续期，`scopeTtlDays` 只淘汰从未被工具使用的会话。
   - 系统提示措辞：order 106 静态提示的导入查重范围改为「当前库及本会话范围内的知识库（未限定范围时为全部）」。
   - 测试：`npm test` **508/508** 通过（较 0.21.0 新增 8 例：scope +2、scope-tools +2、scope-api 1、scope-client 1、dedup 1、scope-sync 1）；`npm run typecheck`、`npm run check:client`、`node scripts/check-ui.mjs` 均通过。
+
+## 21. 0.22.0 交互完善
+
+> 版本：0.22.0（基线 0.21.1 / `npm test` 508/508；本版 **612/612**）。
+> 本轮把 §6/§7/§8/§12 里「`selected` + 空 = `all`」的旧规则改为「空 = `none`」（**破坏性变更**），
+> 并补齐工作台资料分页/搜索、原件预览、笔记、徽标、重命名与临时/锁文件过滤。
+> 相关提交：`0733c59`（none 模式）、`092506e`（范围门先于参数校验）、`076f59d` + `5563ee8`（资料页与工具栏）、
+> `f23714e`（预览基础设施）、`5d4afb0`（预览 UI/笔记/徽标/重命名）、`5bb98f6`（临时/锁文件）。
+
+### 21.1 破坏性变更：空选择 = 未启用（`none`）
+
+**语义修订**（覆盖 §6 第 1 条与 §8 末条）：
+
+- `mode` 取值 `all | selected | none`；`none` 表示「本会话不启用知识库」。
+- **只有显式 `all` 表示全部库**（以后新增的库自动包含）。
+- `selected` + 空 `kbs` 在读取（`normalizeScope`）与写入（`setScope`）两侧都归一化为 `none`；
+  未知/缺失 `mode` 的条目按 `none` 处理（fail closed）。
+- 清理：`selected` 的库名全部失效（删除/归档/合并）后写回 `none`（0.21.x 曾回退 `all`）；
+  手工写进 `none` 条目的 `kbs` 在清理时清空。
+
+**工具**（21 个 `kb_*` 全部）：
+
+- `lib/scope.js` 的 `assertScopeEnabled(scope)` 是统一门禁：`none` 下在读取/检索任何库之前抛
+  `ScopeError`（`code: "KB_DISABLED"`，message 逐字为 README 中的提示）。
+- `assertInScope` 先过 enabled 门，`resolveSingleKb` / `resolveDocTarget` / `kb_list` / `kb_query` /
+  `kb_lint` 都经过它；`kb_rename`、`kb_remove(removeKb=true)` 等库级管理把门禁放在参数校验之前，
+  因此 `kb_rename({})` / `kb_remove({})` 在 `none` 下也返回 `KB_DISABLED`，而不是参数形状错误。
+- 参数 schema 相应调整：`kb_rename` 的 `newName` 不再是 schema-required（由工具内校验），以便先报范围错误。
+
+**系统提示**（覆盖 §9 的行为）：
+
+- `all` → `""`（不注入）；`selected` → 原有范围说明；`none` → 固定一行
+  「[知识库范围] 本会话未启用知识库：不要调用 kb_* 工具，也不要检索知识库；…」。
+- `selected` 但没有可用库时也按 `none` 注入（服务端正常会先归一化）。
+- 文本仍逐字稳定，异常一律 `""`。
+
+**API**（覆盖 §10.2）：
+
+- `PUT /kb/api/scope` 接受 `{session, mode:"none"}`；`kbs` 被忽略（即使带已归档/不存在的名字也不报错）。
+- 空 `selected` 落盘为 `none`；响应里的 `scope.mode` 反映归一化后的值。
+- `GET` 原样返回 `none`；`features.scope` 不变。
+
+**胶囊**（覆盖 §12.2/§12.3）：
+
+- 新增收起态文案 `知识库：未启用`（`chipLabel`）；
+- `清空` + `应用` → `PUT {mode:"none"}`，toast 报「已关闭本会话的知识库」；
+- `全选` + `应用` → `PUT {mode:"all"}`；
+- 打开 `none` 范围的面板时所有复选框不勾选；不做修改直接应用仍提交 `none`（不回退 all）；
+- `none` 下不发起任何额外的 `kb_*` 请求（胶囊测试断言了这一点）。
+
+**继承与兼容**：父会话 `none` 快照为子会话 `none`；0.21.x 用「清空 + 应用」表达「全部」的会话升级后
+变为「未启用」，README 已写迁移提示（点「全选」恢复全部）。
+
+### 21.2 胶囊：外部点击与焦点时机
+
+- 关闭触发：`document` 级 `pointerdown` 捕获面板/胶囊之外的点击 → 立即 `setOpen(false)` 并丢弃草稿；
+  不提交范围、不触发 `kb_*`；`Esc` 走 `keydown`，同步关闭并还焦点。
+- 焦点归位：外部点击把 `chipRef.focus()` 放进 `setTimeout(…, 0)`，等浏览器完成这次点击的默认聚焦动作
+  之后再聚焦，避免被默认动作覆盖；`Esc` 立即聚焦。
+- 定时器生命周期：`focusTimerRef` 在卸载、重开面板、再次外部点击时清理，避免对已卸载节点调用 `focus()`。
+- 测试：`test/scope-client.test.mjs` 用 effect-running VM 断言「pointerdown 立即关面板 + 延迟聚焦」、
+  「Esc 同步聚焦并摘监听」、「卸载清理定时器」。
+
+### 21.3 工作台资料页：分页、搜索、状态筛选
+
+**服务端**（`lib/web/data.js#listDocs`）：
+
+- `query`：`trim().toLowerCase()` 后对 `title`、`summary`、`tags` 拼成的 haystack 做 `includes`
+  （标题 + 摘要 + 标签，不区分大小写；**不是全文检索**）。
+- `status`：`failed|importing`（以及 `ready|deleted`）过滤；删除文档默认排除。
+- `offset/limit`：`limit` 收敛到 1–200（默认 50）；排序仍为标题 `localeCompare("zh-Hans-CN")`；
+  返回 `{docs,total,offset,limit}`。
+
+**视图**（`ui/views/detail.js`）：
+
+- `DOCS_PAGE_SIZES = [50,100,200]`；`docsPageSize` 把其它值回落 50；`docsPageCount`、`clampDocsPage` 收敛页码。
+- 顶部/底部分页统一 `第 X / Y 页 · 共 N 篇` + 上一页/下一页 + 页码输入框（Enter 或按钮跳页）；
+  表格底部显示 `第 a–b 篇`；`total=0` 时不渲染分页。
+- 状态筛选 `全部/有失败/导入中` 渲染为按钮组（当前项高亮）；有筛选/搜索无结果时保留工具栏；
+  新条件结果未回来时显示「正在搜索…」，不把旧结果挂在新词下。
+
+**交互接线**（`ui/docs-controls.js`）：
+
+- `attachDocsControls({app, state, load, timers})` 在每次 render 后重新挂载，返回 `detach()`（清定时器 + 摘监听）。
+- 搜索 300ms 防抖（`DOCS_SEARCH_DELAY`）；`compositionstart` 取消计时、`compositionend` 立即应用；
+  `input` 事件在 `isComposing` 时忽略；Enter 立即搜索并 `preventDefault`。
+- 清除搜索同时取消挂起的防抖、清空 `query/offset`；重绘后把焦点与光标送回搜索框末尾。
+- 竞态：`createRequestGate()` 单调 token + `app.js` 的 `detailGate`；`attachDocsControls` 只允许最新一次
+  请求写 `state.docs.appliedQuery` 并恢复焦点；`loadDetail` 在 await 后复核 `query/status`，过期响应丢弃。
+- 每页条数变化/跳页/搜索/切筛选都会把 offset 归零或按页码换算。
+
+### 21.4 原件预览
+
+**路由**（`lib/web/api.js`，均在同源 + 可信围栏之后）：
+
+| 路由 | 行为 |
+|---|---|
+| `GET /kb/api/kbs/:name/docs/:id/source` | 附件下载（`content-disposition: attachment`） |
+| `GET …/source?inline=1` | 白名单内联：`.pdf/.png/.jpg/.jpeg/.webp/.gif/.txt/.md`；命中返回精确 `content-type` + `inline` + `x-content-type-options: nosniff` + `cache-control: private, no-store`；不在白名单（含 HTML/SVG）→ 415 `SOURCE_NOT_PREVIEWABLE`；原件缺失 → 404 |
+| `GET …/preview.pdf` | 仅 Office 扩展名（`.doc/.docx/.odt/.xls/.xlsx/.ods/.ppt/.pptx/.odp`）→ 转换后内联 PDF；非 Office → 415 `PREVIEW_UNSUPPORTED`；无引擎 → 501 `PREVIEW_ENGINE_MISSING`；转换失败 → 500 `PREVIEW_FAILED`（固定文案，细节只进日志） |
+| `GET …/content` | 笔记 → 合并版 `markdown/<docId>/<docId>.md`；txt/md 资料 → 原件；其它 → 415；返回 `{title, markdown, truncated?}`，上限 2 MB（超出截断并去尾部 U+FFFD） |
+
+**引擎探测**（`lib/web/preview.js#resolveOfficeCli`）：`officeKitCli` → `DSH_OFFICE_KIT_CLI` →
+`~/.dsh/tools/libreoffice-kit/node_modules/@deepseek-ai/libreoffice-kit/lib/cli.js` → PATH 的 `dsoffice`；
+支持裸命令名、`~` 与相对路径。CLI 为 `.js` 时用当前 Node 执行，否则直接 spawn
+（`convert --input <src> --output <tmp>`，默认 120s 超时，POSIX 下杀整个进程组）。
+
+**缓存**（`getOrCreateOfficePreview`）：
+
+- 路径 `<kbDir>/.preview/<safeDocId>-<mtimeMs>-<size>.pdf`；源文件变化自然换名。
+- 复用前校验文件非空且头 5 字节为 `%PDF-`；损坏缓存会被替换。
+- 进程内 `Map` 按目标路径合并并发转换；转换写 `.tmp-…` 临时文件，校验后原子 rename，
+  Windows 上先删旧目标再 rename；成功/失败都清理临时文件，并删除同 docId 的旧预览。
+
+**安全**：白名单只放行 PDF/位图/纯文本，HTML/SVG 仍只能下载（防同源 XSS）；5xx 与转换错误不回传
+本机路径；`preview.pdf` / `inline` 响应都带 `nosniff` 且不缓存。
+
+### 21.5 笔记、徽标、重命名
+
+- 笔记：`ui/app.js` 打开笔记 tab 时请求 `GET /docs?type=note&limit=200`；`ui/views/detail.js#notes`
+  渲染标题/更新日期/摘要（120 字截断）；点标题走 `openPreviewModal`（`previewKindFor` 对 `type=note`
+  返回 `note`），用 `/content` 的合并版 markdown 以 `<pre>` + HTML 转义展示（超过 2 MB 提示截断）。
+  笔记没有原件，列表本身不提供下载入口。
+- 徽标：`ui/views/badges.js#statusBadges` 输出 `导入中 N` / `有失败 N`（只渲染非零项），
+  `title` 为 `成功 X · 导入中 Y · 失败 Z`；详情页 `interactiveFailed=true` 时「有失败」是
+  `data-action="docs-status" data-docs-status="failed"` 按钮（跳资料 tab 并过滤），总览卡片保持 span。
+- 重命名：详情页页头新增 `data-action="rename-kb-modal"` 按钮；`openRenameModal` 校验空白/同名后
+  `PATCH /kbs/:name`，成功后刷新库列表并跳到新库名的同一 tab；设置页的旧表单保留。
+
+### 21.6 临时/锁文件
+
+- `lib/temp-files.js`：`isTempFileName`（只按 basename、大小写不敏感）识别 `~$*`、`.~lock.*`、
+  `Thumbs.db`、`desktop.ini`、`.DS_Store`；普通 `.tmp` **不**算；`TEMP_FILE_PATTERNS` 提供可读规则。
+- 导入：`lib/pipeline.js` 的 `collectSources` 跳过并计数（不占 `maxFiles` 额度），单文件是临时文件时报错，
+  目录里全是临时文件时抛「目录中没有可导入的文件（已跳过 N 个临时文件）」；报告渲染输出
+  「已跳过 N 个临时/锁文件」。
+- 工作台上传：`lib/web/upload.js` 的 `addBatchFile` 在读取批次前拒绝（415 `TEMP_FILE`）；
+  `ui/upload-core.js` 与服务端同一套分类；上传面板显示跳过数。
+- `kb_lint`：新增 `temp-files` 组（warning），列出清单里已是这类文件的文档，建议 `kb_remove`
+  （`soft=false` 彻底删除）；计数进 `counts.tempFiles`。
+
+### 21.7 破坏性变更说明
+
+- 升级前：0.21.x 中「限定 + 一个都不选」= 全部库。
+- 升级后：同样的操作 = 本会话**不启用知识库**（`none`），工具返回 `KB_DISABLED`。
+- 只有显式「全选」/「全部」才代表全部库。README「0.22.0 交互完善」与「会话知识库范围与胶囊（0.21.0）」
+  两处都已写明，并给迁移提示（点「全选」恢复）。
+- 其它 API/存储结构不变（`.scopes.json` 仍是 v1，只是多了一个合法 `mode` 值）。
+
+### 21.8 测试与验收
+
+- `npm test`：**612/612** 通过（0.21.1 基线 508，净增 104：原有文件 +24、新文件 +80），
+  含 `check:client` 与 `check-ui`；逐文件明细见 §15.3。
+- `npm run typecheck`、`npm run check:client`、`node scripts/check-ui.mjs` 全绿。
+- 本轮**未**做真实浏览器自动化验收；需要人工/真实宿主复核：胶囊外部点击后的焦点顺序、资料页布局与
+  跳页、Office 首次转换耗时与字体、笔记预览滚动。Office 预览建议分两条路径各验一次：
+  已装 `~/.dsh/tools/libreoffice-kit`（正常转换 + 缓存）与未装（501 固定文案 + 仍可下载）。
+- 已知跟进：
+  - 笔记预览弹窗沿用原件弹窗，底部仍有「下载原件」入口——笔记没有原件，该链接无效，后续隐藏；
+  - 真实浏览器自动化（Playwright/WKWebView）仍缺失，UI 只由 fake DOM / 纯函数单测与 `check-ui` 语法门禁覆盖；
+  - Office 预览在真实宿主上的手工验收（字体替换、超大表格、扫描件附件）待补。
