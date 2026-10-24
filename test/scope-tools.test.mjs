@@ -616,7 +616,7 @@ test("single-kb tools: add_note writes to the only scoped kb", async () => {
   assert.equal(note.updated, false);
 });
 
-test("single-kb tools: expired scope falls back to all mode via scopeTtlDays", async () => {
+test("single-kb tools: tool use renews a stale own scope instead of expiring", async () => {
   const { tools, scoped, importDoc, kbRoot } = await setup();
   await importDoc("a.md", "# 甲\n\n正文。\n", "甲库", "甲文档");
   await importDoc("d.md", "# 默认\n\n正文。\n", "default", "默认文档");
@@ -630,23 +630,42 @@ test("single-kb tools: expired scope falls back to all mode via scopeTtlDays", a
     },
   });
   const snap = await tools.get("kb_snapshot").execute({}, scoped("s1"));
-  assert.equal(snap.kb, "default");
+  assert.equal(snap.kb, "甲库");
+  const data = JSON.parse(await readFile(join(kbRoot, ".scopes.json"), "utf8"));
+  assert.ok(Date.now() - Date.parse(data.scopes.s1.updatedAt) < 60000, "tool use must renew updatedAt");
+});
 
-  // 真正钉住 ttlDays 透传：scopeTtlDays=0 表示不过期。若没有把 scopeTtlDays 传给解析器，
-  // resolveScope 会退回自己的 30 天默认值并剔掉 40 天前的条目，结果落到 default。
-  const noExpiry = await setup({ scopeTtlDays: 0 });
-  await noExpiry.importDoc("a.md", "# 甲\n\n正文。\n", "甲库", "甲文档");
-  await noExpiry.importDoc("d.md", "# 默认\n\n正文。\n", "default", "默认文档");
-  await writeScopes(noExpiry.kbRoot, {
+test("single-kb tools: scopeTtlDays controls a stale inherited parent entry", async () => {
+  const { tools, scoped, importDoc, kbRoot } = await setup();
+  await importDoc("a.md", "# 甲\n\n正文。\n", "甲库", "甲文档");
+  await importDoc("d.md", "# 默认\n\n正文。\n", "default", "默认文档");
+  await writeScopes(kbRoot, {
     scopes: {
-      s1: {
+      parent: {
         mode: "selected",
         kbs: ["甲库"],
         updatedAt: new Date(Date.now() - 40 * 86400000).toISOString(),
       },
     },
   });
-  const kept = await noExpiry.tools.get("kb_snapshot").execute({}, noExpiry.scoped("s1"));
+  const snap = await tools.get("kb_snapshot").execute({}, scoped("child", "parent"));
+  assert.equal(snap.kb, "default");
+
+  // 真正钉住 ttlDays 透传：scopeTtlDays=0 表示不过期。若没有把 scopeTtlDays 传给解析器，
+  // resolveScope 会退回自己的 30 天默认值并剔掉 40 天前的父条目，结果落到 default。
+  const noExpiry = await setup({ scopeTtlDays: 0 });
+  await noExpiry.importDoc("a.md", "# 甲\n\n正文。\n", "甲库", "甲文档");
+  await noExpiry.importDoc("d.md", "# 默认\n\n正文。\n", "default", "默认文档");
+  await writeScopes(noExpiry.kbRoot, {
+    scopes: {
+      parent: {
+        mode: "selected",
+        kbs: ["甲库"],
+        updatedAt: new Date(Date.now() - 40 * 86400000).toISOString(),
+      },
+    },
+  });
+  const kept = await noExpiry.tools.get("kb_snapshot").execute({}, noExpiry.scoped("child", "parent"));
   assert.equal(kept.kb, "甲库");
 });
 

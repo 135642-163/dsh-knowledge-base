@@ -3,7 +3,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { access, chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -200,15 +200,42 @@ test("write-failure warning fires once per kbRoot", CHMOD_GUARD, async () => {
   assert.equal(warnings.length, 1);
 });
 
-test("expired entries are pruned", async () => {
+test("tool use renews a stale own entry before pruning", async () => {
   const root = await tmpRoot();
   await makeKb(root, "A");
   const old = new Date(Date.now() - 40 * 86400000).toISOString();
   await writeScopes(root, { scopes: { s1: { mode: "selected", kbs: ["A"], updatedAt: old } } });
   const scope = await resolveScope(root, { sessionId: "s1", ttlDays: 30 });
+  assert.equal(scope.mode, "selected");
+  assert.deepEqual(scope.kbs, ["A"]);
+  const data = await readScopes(root);
+  assert.notEqual(data.scopes.s1.updatedAt, old);
+  assert.ok(Date.now() - Date.parse(data.scopes.s1.updatedAt) < 60000, "updatedAt should be refreshed");
+});
+
+test("GET-style resolve does not renew and prunes an expired entry", async () => {
+  const root = await tmpRoot();
+  await makeKb(root, "A");
+  const old = new Date(Date.now() - 40 * 86400000).toISOString();
+  await writeScopes(root, { scopes: { s1: { mode: "selected", kbs: ["A"], updatedAt: old } } });
+  const scope = await resolveScope(root, { sessionId: "s1", ttlDays: 30, snapshot: false });
   assert.equal(scope.mode, "all");
   const data = await readScopes(root);
   assert.equal(data.scopes.s1, undefined);
+});
+
+test("a recently renewed entry is not rewritten by tool use", async () => {
+  const root = await tmpRoot();
+  await makeKb(root, "A");
+  await writeScopes(root, {
+    scopes: { s1: { mode: "selected", kbs: ["A"], updatedAt: new Date(Date.now() - 3600000).toISOString() } },
+  });
+  const file = scopeFilePath(root);
+  const before = await stat(file);
+  const scope = await resolveScope(root, { sessionId: "s1", ttlDays: 30 });
+  assert.deepEqual(scope.kbs, ["A"]);
+  const after = await stat(file);
+  assert.equal(after.mtimeMs, before.mtimeMs, "1h-old entry must not be rewritten");
 });
 
 test("ttlDays 0 disables expiry", async () => {
