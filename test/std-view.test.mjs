@@ -151,6 +151,42 @@ test("摘要包含 TTL、可补下载，并本地化上次任务状态", () => {
   assert.doesNotMatch(html, /succeeded/);
 });
 
+test("运行中显示取消按钮，取消中禁用", () => {
+  const running = panel(std({
+    status: withStatus({ activeJobId: "job-1" }),
+    job: { id: "job-1", status: "running", progress: { phase: "check", done: 1, total: 2, current: "GB 1" } },
+  }));
+  assert.match(running, /data-action="std-cancel"/);
+  assert.match(running, /取消任务/);
+  assert.doesNotMatch(running, /data-action="std-cancel"[^>]*disabled/);
+
+  const cancelling = panel(std({
+    cancelling: true,
+    status: withStatus({ activeJobId: "job-1" }),
+    job: { id: "job-1", status: "running", progress: { phase: "check", done: 1, total: 2, current: "GB 1" } },
+  }));
+  assert.match(cancelling, /data-action="std-cancel"[^>]*disabled/);
+  assert.match(cancelling, /取消中…/);
+});
+
+test("帮助行说明 force/limit 语义", () => {
+  const html = panel(std());
+  assert.match(
+    html,
+    /默认只检查过期（TTL）或待下载项；「强制全查」忽略缓存重查全部；「本轮上限」限制本次检查组数，未查完的会顺延并在结果里提示。/
+  );
+});
+
+test("上次任务 cancelled 本地化为已取消", () => {
+  const html = panel(std({
+    status: withStatus({
+      lastJob: { id: "job-6", status: "cancelled", finishedAt: "2026-10-24T00:00:00.000Z", summary: {} },
+    }),
+  }));
+  assert.match(html, /上次任务：已取消/);
+  assert.doesNotMatch(html, /cancelled/);
+});
+
 test("stdStatusLabel 覆盖金币/认证/导入失败/已是最新", () => {
   assert.equal(stdStatusLabel("failed", "金币不足"), "金币不足");
   assert.equal(stdStatusLabel("failed", "认证失败"), "认证失败");

@@ -49,6 +49,10 @@ function getStd(opts) {
   return call(opts, makeReq({ method: "GET", url: `${KB_API}/std` }));
 }
 
+function cancelStdJob(opts, id) {
+  return call(opts, makeReq({ method: "POST", url: `/kb/api/jobs/${encodeURIComponent(id)}/cancel` }));
+}
+
 async function setup({ configured = true, runStdCheck, importDownloadedImpl } = {}) {
   const kbRoot = join(await mkdtemp(join(tmpdir(), "kb-std-")), "kb");
   await createKb(kbRoot, { name: "标准" });
@@ -412,4 +416,61 @@ test("limit 顺延时 result.hint 明确尚未查完", async () => {
   assert.match(settled.result.hint, /本轮达 limit 上限/);
   assert.match(settled.result.hint, /尚有 2 组未检查/);
   assert.match(settled.result.hint, /请再次检查续查/);
+});
+
+test("std 任务协作取消：状态 cancelled、保留部分结果、跳过导入", async () => {
+  let sawStop = false;
+  let importCalled = false;
+  const { opts, jobs } = await setup({
+    runStdCheck: async ({ onProgress, shouldStop }) => {
+      onProgress({ phase: "check", done: 0, total: 2 });
+      for (let i = 0; i < 400; i += 1) {
+        if (shouldStop?.() === true) {
+          sawStop = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      return { report: fakeReport(), cache: { items: {} } };
+    },
+    importDownloadedImpl: async () => {
+      importCalled = true;
+      return [];
+    },
+  });
+
+  const started = await postStd(opts, { action: "check-download" });
+  assert.equal(started.res.status, 202);
+  await waitFor(async () => {
+    const job = await jobs.get(started.json.jobId);
+    return job?.status === "running" ? job : null;
+  });
+
+  const cancelRes = await cancelStdJob(opts, started.json.jobId);
+  assert.equal(cancelRes.res.status, 200);
+  assert.equal(cancelRes.json.job.id, started.json.jobId);
+
+  const settled = await waitJob(jobs, started.json.jobId);
+  assert.equal(settled.status, "cancelled");
+  assert.equal(sawStop, true);
+  assert.equal(importCalled, false);
+  // 已完成部分保留：report 里的条目依然投影到 result。
+  assert.equal(settled.result.counts.checked, 2);
+  assert.ok(settled.result.entries.length > 0);
+  assert.match(settled.result.hint, /任务已取消/);
+  assert.match(settled.result.hint, /已完成的部分保留/);
+
+  // 已结算任务再取消：409 + jobId，不改变终态。
+  const again = await cancelStdJob(opts, started.json.jobId);
+  assert.equal(again.res.status, 409);
+  assert.equal(again.json.error.code, "JOB_NOT_RUNNING");
+  assert.equal(again.json.error.details.jobId, started.json.jobId);
+  assert.equal((await jobs.get(started.json.jobId)).status, "cancelled");
+});
+
+test("取消未知任务 404 JOB_NOT_FOUND", async () => {
+  const { opts } = await setup();
+  const missing = await cancelStdJob(opts, "kb-std-nope");
+  assert.equal(missing.res.status, 404);
+  assert.equal(missing.json.error.code, "JOB_NOT_FOUND");
 });

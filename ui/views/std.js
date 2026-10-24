@@ -67,8 +67,10 @@ export function renderStdPanel(state, kb, { escapeHtml = defaultEscapeHtml } = {
           <label class="check"><input type="checkbox" id="std-force" ${running ? "disabled" : ""} /> 强制全查</label>
           <label class="check">本轮上限 <input id="std-limit" type="number" min="0" step="1" value="0" style="width:70px" ${running ? "disabled" : ""} /></label>
         </div>
+        <p class="muted">默认只检查过期（TTL）或待下载项；「强制全查」忽略缓存重查全部；「本轮上限」限制本次检查组数，未查完的会顺延并在结果里提示。</p>
         ${running ? `<div class="progress-line"><strong>${escape(phaseLabel(progress?.phase))}</strong>
-          <span class="muted">${count(progress?.done)}/${count(progress?.total)} · ${escape(progress?.current ?? "")}</span></div>` : ""}
+          <span class="muted">${count(progress?.done)}/${count(progress?.total)} · ${escape(progress?.current ?? "")}</span>
+          <button class="btn danger" data-action="std-cancel" ${std.cancelling ? "disabled" : ""}>${std.cancelling ? "取消中…" : "取消任务"}</button></div>` : ""}
         ${std.error ? `<p class="form-error">${escape(std.error)} <button class="btn" data-action="std-reload">重试</button></p>` : ""}
         ${std.warning ? `<p class="muted">${escape(std.warning)}</p>` : ""}
         ${job?.status === "failed" ? `<p class="form-error">任务失败：${escape(job.detail || "未知错误")}</p>` : ""}

@@ -168,6 +168,17 @@ test("job/jobs 解包信封", async () => {
   assert.deepEqual(await api.jobs({ kb: "标准", kind: "kb-import" }), [{ id: "j1" }, { id: "j2" }]);
 });
 
+test("cancelJob 用 POST 打 /jobs/:id/cancel 并解包 job", async () => {
+  calls.length = 0;
+  payload = { job: { id: "kb-std-1", status: "running" } };
+  const job = await api.cancelJob("kb-std-1");
+  assert.deepEqual(job, { id: "kb-std-1", status: "running" });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, "/kb/api/jobs/kb-std-1/cancel");
+  assert.equal(calls[0].options.method, "POST");
+  assert.equal(calls[0].options.headers["x-kb-ui"], "1");
+});
+
 test("错误响应映射成 ApiError", async () => {
   globalThis.fetch = async () => ({
     ok: false,

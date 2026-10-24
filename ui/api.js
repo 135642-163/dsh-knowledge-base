@@ -93,6 +93,7 @@ export const api = {
   importBatch: (id, body) => request("POST", `/upload-batches/${encodeURIComponent(id)}/import`, body),
   uploadFile,
   job: async (id) => (await request("GET", `/jobs/${encodeURIComponent(id)}`)).job,
+  cancelJob: async (id) => (await request("POST", `/jobs/${encodeURIComponent(id)}/cancel`)).job,
   jobs: async (params = {}) => {
     const query = new URLSearchParams();
     for (const [key, value] of Object.entries(params)) {

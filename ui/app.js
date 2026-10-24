@@ -23,7 +23,7 @@ const state = {
   docs: { items: [], total: 0, offset: 0, limit: 50 },
   trash: { items: [], loading: false, error: "" },
   std: {
-    kb: "", loading: false, error: "", warning: "", starting: false,
+    kb: "", loading: false, error: "", warning: "", starting: false, cancelling: false,
     status: null, job: null, timer: null, pollRetry: 0, inFlight: null,
   },
 };
@@ -136,6 +136,7 @@ async function loadStd(name) {
     error: "",
     warning: "",
     starting: false,
+    cancelling: false,
     pollRetry: 0,
     ...(sameKb ? {} : { status: null, job: null }),
   };
@@ -197,6 +198,7 @@ async function pollStd(name, token) {
 
     // 结算：先清掉 stale running 状态，再做静默刷新 + 唯一一次 render。
     state.std.starting = false;
+    state.std.cancelling = false;
     let status = null;
     try {
       const fresh = await api.stdStatus(name);
@@ -257,6 +259,7 @@ async function startStd(mode) {
   state.std.error = "";
   state.std.warning = "";
   state.std.pollRetry = 0;
+  state.std.cancelling = false;
   state.std.starting = true;
   render();
   try {
@@ -286,6 +289,38 @@ async function startStd(mode) {
       state.std.starting = false;
       if (isStdRoute(name)) render();
     }
+  }
+}
+
+/**
+ * 取消运行中的标准任务：只发取消请求，不清理轮询计时器。
+ * 后端在下一个网络请求前协作停止，已发出的请求可能完成；状态由轮询自然结算。
+ */
+async function cancelStd() {
+  const name = state.std.kb;
+  const jobId = state.std.job?.id ?? state.std.status?.activeJobId;
+  if (!name || !jobId || state.std.cancelling) return;
+  const token = stdToken;
+  state.std.cancelling = true;
+  render();
+  try {
+    const job = await api.cancelJob(jobId);
+    if (token !== stdToken || state.std.kb !== name || !isStdRoute(name)) return;
+    if (job) state.std.job = job;
+    showToast("已请求取消，当前正在处理的标准完成后停止");
+    render();
+  } catch (error) {
+    if (state.std.kb !== name) return;
+    if (!isStdRoute(name)) return;
+    if (error instanceof ApiError && (error.status === 404 || error.status === 409 || error.code === "JOB_NOT_FOUND" || error.code === "JOB_NOT_RUNNING")) {
+      // 任务已结束/已过期：重新同步状态，取消态随 loadStd 复位。
+      showToast(stdErrorText(error), "error");
+      await loadStd(name);
+      return;
+    }
+    state.std.cancelling = false;
+    showToast(stdErrorText(error), "error");
+    render();
   }
 }
 
@@ -406,6 +441,8 @@ function bind() {
         requireCheckbox: true,
         onConfirm: () => startStd(mode),
       });
+    } else if (action === "std-cancel") {
+      await cancelStd();
     } else if (action === "reload") {
       await loadKbs();
     } else if (action === "back") {

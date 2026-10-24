@@ -171,18 +171,19 @@ test("run 抛错 → failed，onSettle 仍收到一次 failed", async () => {
   assert.equal(seen.result, null);
 });
 
-test("run 返回 cancelled → 任务失败", async () => {
+test("run 返回 cancelled → 任务取消并保留结果", async () => {
   const jobs = createJobRegistry();
   const id = jobs.start({
     kind: "kb-import",
     kb: "A",
     label: "a",
-    run: async () => ({ status: "cancelled", detail: "已取消" }),
+    run: async () => ({ status: "cancelled", detail: "已取消", result: { hint: "已取消，部分保留" } }),
   });
   await tick();
   const job = await jobs.get(id);
-  assert.equal(job.status, "failed");
+  assert.equal(job.status, "cancelled");
   assert.equal(job.detail, "已取消");
+  assert.deepEqual(job.result, { hint: "已取消，部分保留" });
 });
 
 test("run 返回 completed → 任务成功", async () => {
@@ -354,6 +355,70 @@ test("cancelAll 在 setHandle 之前请求时，挂载后立即取消", async ()
   gate.resolve();
   await tick();
   assert.equal(cancelled, true);
+});
+
+test("cancel 在 setHandle 之前请求时，挂载后立即触发取消", async () => {
+  const jobs = createJobRegistry();
+  const gate = deferred();
+  let cancelled = false;
+  const id = jobs.start({
+    kind: "kb-import",
+    kb: "A",
+    label: "a",
+    run: async (job) => {
+      await gate.promise;
+      job.setHandle({ cancel: () => { cancelled = true; } });
+      return { status: "succeeded" };
+    },
+  });
+  await tick();
+  assert.equal(jobs.cancel(id), true);
+  assert.equal(cancelled, false);
+
+  gate.resolve();
+  await tick();
+  assert.equal(cancelled, true);
+});
+
+test("cancel 已注册 handle 时立即调用且只调用一次", async () => {
+  const jobs = createJobRegistry();
+  const gate = deferred();
+  let calls = 0;
+  const id = jobs.start({
+    kind: "kb-import",
+    kb: "A",
+    label: "a",
+    run: async (job) => {
+      job.setHandle({ cancel: () => { calls += 1; gate.resolve(); } });
+      await gate.promise;
+      return { status: "cancelled" };
+    },
+  });
+  await tick();
+  assert.equal(jobs.cancel(id), true);
+  assert.equal(calls, 1);
+  const settled = await waitSettled(jobs, id);
+  assert.equal(settled.status, "cancelled");
+  // 已结算后再次取消：false，且不再触碰已清空的 handle。
+  assert.equal(jobs.cancel(id), false);
+  assert.equal(calls, 1);
+});
+
+test("cancel 未知/已结算任务返回 false 且不改变已结算结果", async () => {
+  const jobs = createJobRegistry();
+  assert.equal(jobs.cancel("kb-import-nope"), false);
+
+  const id = jobs.start({
+    kind: "kb-import",
+    kb: "A",
+    label: "a",
+    run: async () => ({ status: "succeeded", detail: "完成", result: { ok: 1 } }),
+  });
+  await tick();
+  const before = await jobs.get(id);
+  assert.equal(before.status, "succeeded");
+  assert.equal(jobs.cancel(id), false);
+  assert.deepEqual(await jobs.get(id), before);
 });
 
 test("hasRunning 按 kb/kind 过滤运行中任务", async () => {
