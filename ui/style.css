@@ -47,7 +47,6 @@ button { font: inherit; color: inherit; }
 .brand { display: flex; align-items: center; gap: 8px; font-weight: 650; }
 .brand svg { color: var(--accent); }
 .topbar-actions { display: flex; gap: 8px; }
-.topbar-create { display: none; }
 .layout {
   display: grid; grid-template-columns: 240px minmax(0, 1fr);
   height: calc(100vh - var(--topbar-h)); min-height: 0;
@@ -67,18 +66,26 @@ button { font: inherit; color: inherit; }
   display: flex; flex-direction: column; gap: 2px;
   flex: 1 1 auto; min-height: 0; overflow-y: auto;
 }
-.side-item { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 8px; border-radius: 8px; }
+.side-item { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 8px; border-radius: 8px; font-size: 13px; }
 .side-item:hover { background: var(--panel-2); }
 .side-item.active { background: var(--accent-soft); }
 .side-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .side-count { color: var(--muted); font-size: 12px; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dot, var(--accent)); }
 .side-foot {
-  margin-top: auto; padding: 12px 8px 4px; flex: 0 0 auto;
-  display: flex; flex-direction: column; gap: 8px; align-items: stretch; font-size: 12px;
+  margin-top: auto; padding: 8px 8px 4px; flex: 0 0 auto;
+  display: flex; flex-direction: column; gap: 2px; font-size: 13px;
+  border-top: 1px solid var(--line);
 }
-.side-create { justify-content: center; width: 100%; font-size: 14px; }
-.side-foot-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.side-action {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 8px; border: 0; border-radius: 8px; background: none;
+  color: var(--text); font: inherit; text-align: left; cursor: pointer;
+}
+.side-action svg { width: 16px; height: 16px; color: var(--muted); flex: 0 0 auto; }
+.side-action:hover { background: var(--panel-2); }
+.side-action.subtle { color: var(--muted); }
+.side-action.subtle svg { width: 14px; height: 14px; }
 .main { padding: 22px; min-width: 0; min-height: 0; overflow-y: auto; }
 .btn {
   display: inline-flex; align-items: center; gap: 6px;

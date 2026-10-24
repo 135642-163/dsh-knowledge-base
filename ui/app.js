@@ -17,6 +17,7 @@ const state = {
   error: "",
   filter: "all",
   query: "",
+  appliedQuery: "",
   detail: null,
   detailLoading: false,
   detailError: "",
@@ -347,7 +348,6 @@ function render() {
       <a class="brand" href="${hrefForOverview()}"><span>知识库工作台</span></a>
       <div class="topbar-actions">
         ${!EMBED && window.history.length > 1 ? `<button class="btn" data-action="back">${icons.back}<span>返回</span></button>` : ""}
-        <button class="btn primary topbar-create" data-action="create-kb">${icons.plus}<span>新建</span></button>
       </div>
     </header>
     <div class="layout">
@@ -367,11 +367,9 @@ function render() {
             </a>`).join("")}
         </nav>
         <div class="side-foot">
-          <button class="btn primary side-create" data-action="create-kb">${icons.plus}<span>新建知识库</span></button>
-          <div class="side-foot-row muted">
-            ${icons.archive}<a href="${hrefForTrash()}">回收站</a>
-            <a href="/kb/" target="_blank" rel="noreferrer">在新标签打开</a>
-          </div>
+          <button class="side-action" data-action="create-kb">${icons.plus}<span>新建知识库</span></button>
+          <a class="side-action" href="${hrefForTrash()}">${icons.archive}<span>回收站</span></a>
+          <a class="side-action subtle" href="/kb/" target="_blank" rel="noreferrer">${icons.external}<span>在新标签打开</span></a>
         </div>
       </aside>
       <main class="main">
@@ -543,23 +541,28 @@ function bind() {
   const search = app.querySelector("[data-filter='query']");
   if (search) {
     let composing = false;
-    search.oncompositionstart = () => { composing = true; };
-    search.oncompositionend = () => {
-      composing = false;
-      state.query = search.value;
+    let timer = 0;
+    const applyQuery = () => {
+      clearTimeout(timer);
+      const value = search.value;
+      state.query = value;
+      if (state.appliedQuery === value) return;
+      state.appliedQuery = value;
       render();
       focusQueryInput();
     };
+    search.oncompositionstart = () => { composing = true; clearTimeout(timer); };
+    search.oncompositionend = () => { composing = false; applyQuery(); };
     search.oninput = (event) => {
-      const value = search.value;
-      if (composing || event.isComposing) {
-        state.query = value;
-        return;
-      }
-      if (value === state.query) return;
-      state.query = value;
-      render();
-      focusQueryInput();
+      state.query = search.value;
+      if (composing || event.isComposing) return;
+      clearTimeout(timer);
+      timer = setTimeout(applyQuery, 180);
+    };
+    search.onkeydown = (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      applyQuery();
     };
   }
   app.querySelectorAll("[data-filter='status']").forEach((button) => {
