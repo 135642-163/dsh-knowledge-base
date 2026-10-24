@@ -7,9 +7,12 @@ import { access, chmod, mkdir, mkdtemp, readFile, stat, writeFile } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  KB_DISABLED,
+  KB_DISABLED_MESSAGE,
   ScopeError,
   normalizeSessionId,
   resolveDocTarget,
+  resolveExecScope,
   resolveScope,
   resolveSingleKb,
   setScope,
@@ -66,6 +69,46 @@ test("no session id resolves to all", async () => {
   assert.deepEqual({ mode: scope.mode, kbs: scope.kbs }, { mode: "all", kbs: [] });
 });
 
+test("explicit all stays all; explicit none stays none and clears stray kbs", async () => {
+  const root = await tmpRoot();
+  await makeKb(root, "A");
+  const now = new Date().toISOString();
+  await writeScopes(root, {
+    scopes: {
+      all: { mode: "all", kbs: ["A"], updatedAt: now },
+      none: { mode: "none", kbs: ["A"], updatedAt: now },
+    },
+  });
+  const all = await resolveScope(root, { sessionId: "all" });
+  assert.deepEqual({ mode: all.mode, kbs: all.kbs }, { mode: "all", kbs: [] });
+  const none = await resolveScope(root, { sessionId: "none" });
+  assert.deepEqual({ mode: none.mode, kbs: none.kbs }, { mode: "none", kbs: [] });
+  const data = await readScopes(root);
+  assert.equal(data.scopes.all.mode, "all");
+  assert.equal(data.scopes.none.mode, "none");
+  assert.deepEqual(data.scopes.none.kbs, []);
+});
+
+test("resolveExecScope reports none without touching any kb", async () => {
+  const root = await tmpRoot();
+  await makeKb(root, "A");
+  await writeScopes(root, { scopes: { s1: { mode: "none", kbs: [], updatedAt: new Date().toISOString() } } });
+  const scope = await resolveExecScope(execFor("s1"), { kbRoot: root, ttlDays: 30 });
+  assert.equal(scope.mode, "none");
+  assert.deepEqual(scope.kbs, []);
+});
+
+test("unknown stored modes fail closed to none", async () => {
+  const root = await tmpRoot();
+  await makeKb(root, "A");
+  await writeScopes(root, {
+    scopes: { s1: { mode: "typo", kbs: ["A"], updatedAt: new Date().toISOString() } },
+  });
+  const scope = await resolveScope(root, { sessionId: "s1" });
+  assert.equal(scope.mode, "none");
+  assert.deepEqual(scope.kbs, []);
+});
+
 test("explicit entry is returned and stale kb names are pruned", async () => {
   const root = await tmpRoot();
   await makeKb(root, "A");
@@ -91,12 +134,14 @@ test("prune keeps a corrupt-manifest kb name and leaves the scopes file untouche
   assert.equal(await readFile(file, "utf8"), before);
 });
 
-test("prune drops a stored name whose directory is gone and empty scope reads as all", async () => {
+test("prune drops a stored name whose directory is gone and rewrites the entry as none", async () => {
   const root = await tmpRoot();
   await writeScopes(root, { scopes: { s1: { mode: "selected", kbs: ["已删除"], updatedAt: new Date().toISOString() } } });
   const scope = await resolveScope(root, { sessionId: "s1" });
-  assert.equal(scope.mode, "all");
+  assert.equal(scope.mode, "none");
+  assert.deepEqual(scope.kbs, []);
   const data = await readScopes(root);
+  assert.equal(data.scopes.s1.mode, "none", "empty selected must not stay on disk as selected");
   assert.deepEqual(data.scopes.s1.kbs, []);
 });
 
@@ -115,11 +160,14 @@ test("poison scope names are pruned and child snapshots still persist", async ()
   assert.deepEqual(data.scopes.child.kbs, ["A"]);
 });
 
-test("selected with empty kbs reads as all", async () => {
+test("legacy selected with empty kbs now reads as none, never all", async () => {
   const root = await tmpRoot();
   await writeScopes(root, { scopes: { s1: { mode: "selected", kbs: [], updatedAt: new Date().toISOString() } } });
   const scope = await resolveScope(root, { sessionId: "s1" });
-  assert.equal(scope.mode, "all");
+  assert.equal(scope.mode, "none");
+  assert.deepEqual(scope.kbs, []);
+  const data = await readScopes(root);
+  assert.equal(data.scopes.s1.mode, "none", "tool-path prune should persist the downgrade");
 });
 
 test("child inherits parent scope as a snapshot and parent changes do not follow", async () => {
@@ -151,6 +199,21 @@ test("no child entry and no parent entry stays all without writing", async () =>
   await resolveScope(root, { sessionId: "child", parentSession: "parent" });
   const data = await readScopes(root);
   assert.equal(data.scopes.child, undefined);
+});
+
+test("a parent none scope snapshots as none, not all", async () => {
+  const root = await tmpRoot();
+  await makeKb(root, "A");
+  await writeScopes(root, {
+    scopes: { parent: { mode: "none", kbs: [], updatedAt: new Date().toISOString() } },
+  });
+  const child = await resolveScope(root, { sessionId: "child", parentSession: "parent" });
+  assert.equal(child.mode, "none");
+  assert.deepEqual(child.kbs, []);
+  assert.equal(child.inheritedFrom, "parent");
+  const data = await readScopes(root);
+  assert.equal(data.scopes.child.mode, "none");
+  assert.deepEqual(data.scopes.child.kbs, []);
 });
 
 test("read-only resolve (GET) shows parent scope without writing a snapshot", async () => {
@@ -303,6 +366,45 @@ test("all mode clears kbs", async () => {
   assert.deepEqual(saved.kbs, []);
 });
 
+test("setScope stores none with empty kbs and ignores the requested names", async () => {
+  const root = await tmpRoot();
+  await makeKb(root, "A");
+  await setScope(root, { sessionId: "s1", mode: "selected", kbs: ["A"] });
+  const saved = await setScope(root, { sessionId: "s1", mode: "none", kbs: ["A", "已删除"] });
+  assert.equal(saved.mode, "none");
+  assert.deepEqual(saved.kbs, []);
+  const data = await readScopes(root);
+  assert.equal(data.scopes.s1.mode, "none");
+  assert.deepEqual(data.scopes.s1.kbs, []);
+  assert.equal(data.scopes.s1.inheritedFrom, null);
+});
+
+test("setScope collapses an empty selected selection to none", async () => {
+  const root = await tmpRoot();
+  await makeKb(root, "A");
+  await setScope(root, { sessionId: "s1", mode: "selected", kbs: ["A"] });
+  const saved = await setScope(root, { sessionId: "s1", mode: "selected", kbs: [] });
+  assert.equal(saved.mode, "none");
+  assert.deepEqual(saved.kbs, []);
+  const data = await readScopes(root);
+  assert.equal(data.scopes.s1.mode, "none");
+  assert.deepEqual(data.scopes.s1.kbs, []);
+});
+
+test("setScope none still validates the request shape", async () => {
+  const root = await tmpRoot();
+  await assert.rejects(
+    () => setScope(root, { sessionId: "s1", mode: "none", kbs: "A" }),
+    (e) => e.code === "SCOPE_INVALID" && e.message === "kbs 必须是数组"
+  );
+  await assert.rejects(
+    () => setScope(root, { sessionId: "s1", mode: "none", kbs: [42] }),
+    (e) => e.code === "SCOPE_INVALID" && e.message === "知识库名称必须是字符串"
+  );
+  const saved = await setScope(root, { sessionId: "s1", mode: "none" });
+  assert.deepEqual(saved, { mode: "none", kbs: [], inheritedFrom: null, stored: true });
+});
+
 test("setScope rejects reserved session ids without writing them", async () => {
   const root = await tmpRoot();
   await makeKb(root, "A");
@@ -419,6 +521,25 @@ test("resolveSingleKb rejects unknown policies", async () => {
     () => resolveSingleKb(execFor("x"), undefined, { kbRoot: root, defaultKb: "default" }, { policy: "bogus" }),
     (error) => error instanceof TypeError && /unknown scope policy/.test(error.message)
   );
+});
+
+test("resolveSingleKb and resolveDocTarget reject none mode with KB_DISABLED", async () => {
+  const root = await tmpRoot();
+  await makeKb(root, "A");
+  await writeScopes(root, { scopes: { s1: { mode: "none", kbs: [], updatedAt: new Date().toISOString() } } });
+  const config = { kbRoot: root, defaultKb: "default" };
+  for (const run of [
+    () => resolveSingleKb(execFor("s1"), undefined, config),
+    () => resolveSingleKb(execFor("s1"), "A", config),
+    () => resolveSingleKb(execFor("s1"), "A", config, { policy: "kbAdmin" }),
+    () => resolveDocTarget(execFor("s1"), undefined, "A", config),
+    () => resolveDocTarget(execFor("s1"), "A", "A", config),
+  ]) {
+    await assert.rejects(run, (error) =>
+      error instanceof ScopeError
+      && error.code === KB_DISABLED
+      && error.message === KB_DISABLED_MESSAGE);
+  }
 });
 
 test("resolveDocTarget: single scope kb wins, multi-kb resolves uniquely by title", async () => {

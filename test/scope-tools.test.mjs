@@ -8,6 +8,7 @@ import { mkdtemp, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { apply } from "../lib/index.js";
+import { KB_DISABLED, KB_DISABLED_MESSAGE } from "../lib/scope.js";
 import { writeScopes } from "../lib/scope-store.js";
 import { sanitizeKbName } from "../lib/store.js";
 
@@ -57,7 +58,9 @@ async function setup(config = {}) {
     });
   const all = (sessionId) =>
     writeScopes(kbRoot, { scopes: { [sessionId]: { mode: "all", kbs: [], updatedAt: new Date().toISOString() } } });
-  return { root, kbRoot, tools, unscoped, scoped, importDoc, scope, all };
+  const none = (sessionId) =>
+    writeScopes(kbRoot, { scopes: { [sessionId]: { mode: "none", kbs: [], updatedAt: new Date().toISOString() } } });
+  return { root, kbRoot, tools, unscoped, scoped, importDoc, scope, all, none };
 }
 
 test("kb_list in all mode lists every kb and reports scope", async () => {
@@ -834,4 +837,61 @@ test("kb_rename: requires explicit kb and rejects out-of-scope targets", async (
   );
   const renamed = await tools.get("kb_rename").execute({ kb: "甲库", newName: "甲库2" }, scoped("s1"));
   assert.equal(renamed.kb, "甲库2");
+});
+
+test("none mode disables all 21 kb_* tools with KB_DISABLED", async () => {
+  const { tools, scoped, importDoc, none, root } = await setup();
+  const doc = await importDoc("a.md", "# 甲\n\n继电保护技术条件正文。\n", "甲库", "甲文档");
+  await importDoc("b.md", "# 乙\n\n乙库正文。\n", "乙库", "乙文档");
+  const path = join(root, "locked.md");
+  await writeFile(path, "# 锁定\n\n未启用时不应导入。\n", "utf8");
+  await none("s1");
+  assert.equal(tools.size, 21, "expected the full kb_* tool matrix");
+
+  const cases = [
+    ["kb_list", {}],
+    ["kb_import", { path }],
+    ["kb_reparse", { all: true }],
+    ["kb_query", { pattern: "正文" }],
+    ["kb_read", { doc: doc.docId }],
+    ["kb_view", { doc: doc.docId }],
+    ["kb_edit", { doc: doc.docId, old_string: "正文", new_string: "修订" }],
+    ["kb_describe", { doc: doc.docId, summary: "摘要" }],
+    ["kb_retitle", { all: true }],
+    ["kb_lint", {}],
+    ["kb_trust", { all: true, level: "high" }],
+    ["kb_keep", { docs: [doc.docId], note: "保留" }],
+    ["kb_edit_batch", { edits: [{ doc: doc.docId, old_string: "正文", new_string: "修订" }] }],
+    ["kb_snapshot", {}],
+    ["kb_add_note", { title: "笔记", content: "内容" }],
+    ["kb_remove", { doc: doc.docId }],
+    ["kb_restore", { doc: doc.docId }],
+    ["kb_history", { doc: doc.docId }],
+    ["kb_export", { format: "md" }],
+    ["kb_rename", { kb: "甲库", newName: "甲库2" }],
+    ["kb_std_check", { action: "check" }],
+  ];
+  const covered = new Set(cases.map(([name]) => name));
+  assert.deepEqual([...tools.keys()].filter((name) => !covered.has(name)), [], "tool matrix case missing");
+  for (const [name, args] of cases) {
+    await assert.rejects(
+      () => tools.get(name).execute(args, scoped("s1")),
+      (error) => error.code === KB_DISABLED && error.message === KB_DISABLED_MESSAGE,
+      `${name} must reject with KB_DISABLED`
+    );
+  }
+
+  // 整库删除是同一个 tool 的另一个分支，也必须先拒绝。
+  await assert.rejects(
+    () => tools.get("kb_remove").execute({ kb: "甲库", removeKb: true, confirm: "甲库" }, scoped("s1")),
+    (error) => error.code === KB_DISABLED && error.message === KB_DISABLED_MESSAGE
+  );
+
+  // 拒绝发生在任何读/写之前：库还在，文件没有导入。
+  const manifests = await Promise.all(
+    ["甲库", "乙库"].map(async (name) => JSON.parse(await readFile(join(join(root, "kb"), name, "kb.json"), "utf8")))
+  );
+  assert.deepEqual(manifests.map((manifest) => manifest.name), ["甲库", "乙库"]);
+  assert.equal(manifests[0].docs.length, 1);
+  assert.equal(manifests[1].docs.length, 1);
 });

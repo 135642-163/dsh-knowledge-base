@@ -71,6 +71,7 @@ test("kb_rename tool syncs the new name into scopes", async () => {
   const result = await tools.get("kb_rename").execute({ kb: "甲库", newName: "甲库2" }, exec);
   assert.equal(result.kb, "甲库2");
   const data = await readScopes(kbRoot);
+  assert.equal(data.scopes.s1.mode, "selected");
   assert.deepEqual(data.scopes.s1.kbs, ["甲库2", "乙库"]);
 });
 
@@ -90,6 +91,7 @@ test("archiveKb removes the name from scopes", async () => {
   const { kbRoot } = await setup();
   await archiveKb(kbRoot, "乙库");
   const data = await readScopes(kbRoot);
+  assert.equal(data.scopes.s1.mode, "selected");
   assert.deepEqual(data.scopes.s1.kbs, ["甲库"]);
 });
 
@@ -99,6 +101,7 @@ test("purgeKb removes the name from scopes", async () => {
   const [entry] = await listTrash(kbRoot);
   await purgeKb(kbRoot, entry.dir);
   const data = await readScopes(kbRoot);
+  assert.equal(data.scopes.s1.mode, "selected");
   assert.deepEqual(data.scopes.s1.kbs, ["甲库"]);
 });
 
@@ -114,6 +117,7 @@ test("purgeKb removes an archived name when no live library owns it", async () =
   const [entry] = await listTrash(kbRoot);
   await purgeKb(kbRoot, entry.dir);
   const data = await readScopes(kbRoot);
+  assert.equal(data.scopes.s2.mode, "none", "the last scoped kb going away must not fall back to all");
   assert.deepEqual(data.scopes.s2.kbs, []);
 });
 
@@ -133,6 +137,7 @@ test("purgeKb removes both the manifest name and the original directory name", a
   const [entry] = (await listTrash(kbRoot)).filter((item) => item.dir.startsWith("目录名-"));
   await purgeKb(kbRoot, entry.dir);
   const data = await readScopes(kbRoot);
+  assert.equal(data.scopes.s9.mode, "none");
   assert.deepEqual(data.scopes.s9.kbs, []);
 });
 
@@ -151,4 +156,17 @@ test("purgeKb keeps a name reused by a live library", async () => {
   await purgeKb(kbRoot, entry.dir);
   const data = await readScopes(kbRoot);
   assert.deepEqual(data.scopes.s1.kbs, ["乙库"]);
+});
+
+test("archiving the last scoped kb rewrites that entry as none", async () => {
+  const { kbRoot } = await setup();
+  await writeScopes(kbRoot, {
+    scopes: {
+      s3: { mode: "selected", kbs: ["乙库"], updatedAt: new Date().toISOString() },
+    },
+  });
+  await archiveKb(kbRoot, "乙库");
+  const data = await readScopes(kbRoot);
+  assert.equal(data.scopes.s3.mode, "none");
+  assert.deepEqual(data.scopes.s3.kbs, []);
 });

@@ -139,6 +139,65 @@ test("PUT mode=all clears kbs", async () => {
   assert.deepEqual(put.json.scope, { mode: "all", kbs: [], inheritedFrom: null });
 });
 
+test("PUT mode=none is accepted with empty kbs and returned by GET", async () => {
+  const kbRoot = await setup();
+  const put = await call(kbRoot, makeReq({
+    method: "PUT",
+    body: { session: "s1", mode: "none", kbs: [] },
+  }));
+  assert.equal(put.res.status, 200);
+  assert.deepEqual(put.json.scope, { mode: "none", kbs: [], inheritedFrom: null });
+  assert.deepEqual(put.json.resolved, []);
+  assert.ok(put.json.updatedAt);
+
+  const get = await call(kbRoot, makeReq({ url: "/kb/api/scope?session=s1" }));
+  assert.equal(get.res.status, 200);
+  assert.deepEqual(get.json.scope, { mode: "none", kbs: [], inheritedFrom: null });
+  assert.deepEqual(get.json.resolved, []);
+});
+
+test("PUT mode=none ignores non-empty kbs instead of 400", async () => {
+  const kbRoot = await setup();
+  const put = await call(kbRoot, makeReq({
+    method: "PUT",
+    body: { session: "s1", mode: "none", kbs: ["甲库", "不存在"] },
+  }));
+  assert.equal(put.res.status, 200);
+  assert.deepEqual(put.json.scope, { mode: "none", kbs: [], inheritedFrom: null });
+  const data = JSON.parse(await readFile(join(kbRoot, ".scopes.json"), "utf8"));
+  assert.deepEqual(data.scopes.s1, {
+    mode: "none",
+    kbs: [],
+    updatedAt: data.scopes.s1.updatedAt,
+    inheritedFrom: null,
+  });
+});
+
+test("PUT mode=selected with empty kbs collapses to none", async () => {
+  const kbRoot = await setup();
+  const put = await call(kbRoot, makeReq({
+    method: "PUT",
+    body: { session: "s1", mode: "selected", kbs: [] },
+  }));
+  assert.equal(put.res.status, 200);
+  assert.deepEqual(put.json.scope, { mode: "none", kbs: [], inheritedFrom: null });
+  assert.deepEqual(put.json.resolved, []);
+});
+
+test("GET normalizes a legacy selected+empty entry to none", async () => {
+  const kbRoot = await setup();
+  await writeFile(join(kbRoot, ".scopes.json"), JSON.stringify({
+    version: 1,
+    scopes: { s1: { mode: "selected", kbs: [], updatedAt: new Date().toISOString(), inheritedFrom: null } },
+  }), "utf8");
+  const { res, json } = await call(kbRoot, makeReq({ url: "/kb/api/scope?session=s1" }));
+  assert.equal(res.status, 200);
+  assert.deepEqual(json.scope, { mode: "none", kbs: [], inheritedFrom: null });
+  assert.deepEqual(json.resolved, []);
+  const data = JSON.parse(await readFile(join(kbRoot, ".scopes.json"), "utf8"));
+  assert.equal(data.scopes.s1.mode, "none", "legacy empty selected is pruned to none on disk");
+});
+
 test("PUT rejects an invalid mode", async () => {
   const kbRoot = await setup();
   const { res, json } = await call(kbRoot, makeReq({

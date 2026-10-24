@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { apply } from "../lib/index.js";
 import { writeScopes } from "../lib/scope-store.js";
+import { DISABLED_PROMPT_TEXT } from "../lib/scope-view.js";
 
 async function makeKb(root, name) {
   const dir = join(root, name);
@@ -72,6 +73,27 @@ test("selected mode injects one line with kb names", async () => {
   });
   const text = await textFor(section, "s1");
   assert.match(text, /本会话用户选定：标准、变电试验/);
+});
+
+test("none mode injects exactly the disabled line, not selected/all lines", async () => {
+  const { section } = await setup({
+    scopes: { s1: { mode: "none", kbs: [], updatedAt: new Date().toISOString() } },
+  });
+  const text = await textFor(section, "s1");
+  assert.equal(
+    text,
+    "[知识库范围] 本会话未启用知识库：不要调用 kb_* 工具，也不要检索知识库；用户需要时提示其在输入框旁的知识库选择器中选择库或「全部」。"
+  );
+  assert.equal(text, DISABLED_PROMPT_TEXT);
+  assert.doesNotMatch(text, /本会话用户选定/);
+  assert.doesNotMatch(text, /全部知识库/);
+});
+
+test("a none parent injects the disabled line in a child session", async () => {
+  const { section } = await setup({
+    scopes: { parent: { mode: "none", kbs: [], updatedAt: new Date().toISOString() } },
+  });
+  assert.equal(await textFor(section, "child", "parent"), DISABLED_PROMPT_TEXT);
 });
 
 test("child session shows parent scope without a snapshot", async () => {

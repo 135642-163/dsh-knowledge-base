@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ComponentType } from "react";
-import { chipLabel, isAllSelection, selectionPayload } from "../../lib/scope-view.js";
+import { chipLabel, selectionPayload } from "../../lib/scope-view.js";
 
 export const inject = ["slots"];
 
 type KbProps = { wide?: boolean };
-type Scope = { mode: "all" | "selected"; kbs: string[]; inheritedFrom?: string | null };
+type Scope = { mode: "all" | "selected" | "none"; kbs: string[]; inheritedFrom?: string | null };
 type KbDocs = { total?: number; deleted?: number };
 type KbSummary = {
   name: string;
@@ -105,6 +105,13 @@ function kbIdentity(kb: KbSummary): string {
   return kb.dir ?? kb.name;
 }
 
+/** 事件目标是否落在容器内；测试运行时没有 DOM contains，退化为同一节点。 */
+function isInside(container: Element | null, target: Node): boolean {
+  if (!container) return false;
+  if (container === target) return true;
+  return typeof container.contains === "function" && container.contains(target);
+}
+
 /** 文档数徽标：软删除的文档不算“在用”，避免只剩删除项的库显示 N 篇。 */
 function docsBadge(kb: KbSummary): string {
   const docs = kb.docs;
@@ -189,6 +196,7 @@ export function KbScopeCapsule({ sessionId }: ScopeSlotProps) {
   const [workbenchOpen, setWorkbenchOpen] = useState(false);
   const [position, setPosition] = useState<PanelPosition | null>(null);
   const chipRef = useRef<HTMLButtonElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
   const generationRef = useRef(0);
   const inflightRef = useRef<{ sessionId: string; promise: Promise<ScopeData> } | null>(null);
   const toastIdRef = useRef(0);
@@ -272,8 +280,19 @@ export function KbScopeCapsule({ sessionId }: ScopeSlotProps) {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") closeScopePanel(true);
     };
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event?.target as Node | null;
+      if (target && isInside(panelRef.current, target)) return;
+      if (target && isInside(chipRef.current, target)) return;
+      // 与相邻的权限/模型选择 popover 一致：点击外部关闭面板并丢弃草稿，不提交。
+      closeScopePanel(true);
+    };
     document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("pointerdown", onPointerDown);
+    };
   }, [open]);
 
   useEffect(() => {
@@ -344,9 +363,11 @@ export function KbScopeCapsule({ sessionId }: ScopeSlotProps) {
       setScope(data.scope);
       setKbs(data.kbs);
       setDraft(
-        data.scope.mode === "selected"
-          ? (data.scope.kbs ?? []).filter((name) => freshIdentities.includes(name))
-          : [...freshIdentities]
+        data.scope.mode === "none"
+          ? []
+          : data.scope.mode === "selected"
+            ? (data.scope.kbs ?? []).filter((name) => freshIdentities.includes(name))
+            : [...freshIdentities]
       );
       setPanelPhase("ready");
     } catch {
@@ -374,9 +395,8 @@ export function KbScopeCapsule({ sessionId }: ScopeSlotProps) {
   async function applySelection() {
     if (!sessionId || saving) return;
     const picked = draft.filter((name) => identities.includes(name));
-    const payload = picked.length === 0 || isAllSelection(picked, identities)
-      ? { mode: "all", kbs: [] as string[] }
-      : selectionPayload("selected", picked, identities);
+    // 一个都没选 = 关闭本会话知识库；全选 = 全部；其余按列表顺序提交 selected。
+    const payload = selectionPayload(picked, identities);
     // 先递增代号：PUT 期间返回的旧 GET 响应不能再覆盖已应用的范围。
     generationRef.current += 1;
     setSaving(true);
@@ -393,7 +413,13 @@ export function KbScopeCapsule({ sessionId }: ScopeSlotProps) {
       if (!data?.scope) throw new Error("范围保存失败，请重试");
       setScope(data.scope);
       closeScopePanel(true);
-      showToast(data.scope.mode === "selected" ? `已限定为 ${data.scope.kbs.length} 个知识库` : "已改为全部知识库");
+      showToast(
+        data.scope.mode === "selected"
+          ? `已限定为 ${data.scope.kbs.length} 个知识库`
+          : data.scope.mode === "none"
+            ? "已关闭本会话的知识库"
+            : "已改为全部知识库"
+      );
     } catch (error) {
       const message = error instanceof Error && error.message ? error.message : "范围保存失败，请重试";
       showToast(message);
@@ -404,6 +430,7 @@ export function KbScopeCapsule({ sessionId }: ScopeSlotProps) {
 
   const panel = panelVisible ? createPortal(
     <div
+      ref={panelRef}
       className="dsh-kb-scope-panel"
       role="dialog"
       aria-label="选择本会话知识库"

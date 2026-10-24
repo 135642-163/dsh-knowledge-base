@@ -798,6 +798,15 @@ test("chip shows 全部 for an all-mode scope", async () => {
   assert.doesNotMatch(chip.props.className, /dsh-kb-scope-chip-active/);
 });
 
+test("chip shows 未启用 for a none-mode scope", async () => {
+  const { rt, ui } = await loadReady({ mode: "none", kbs: [] }, [{ name: "Alpha" }]);
+  const chip = chipOf(rt, ui);
+  assert.equal(rt.text(chip), "知识库：未启用");
+  assert.equal(chip.props["aria-label"], "知识库：未启用");
+  assert.equal(chip.props.title, "知识库：未启用");
+  assert.doesNotMatch(chip.props.className, /dsh-kb-scope-chip-active/);
+});
+
 test("chip shows N 个 and the active style for a selected scope", async () => {
   const { rt, ui } = await loadReady(
     { mode: "selected", kbs: ["Alpha", "Beta"] },
@@ -919,6 +928,22 @@ test("draft is seeded from the fresh scope and drops scope names missing from th
   assert.equal(put.init.body.includes("Archived"), false, "archived name leaked into the PUT");
   assert.equal(rt.text(chipOf(rt, ui)), "知识库：1 个");
   assert.equal(rt.text(rt.findByClass(ui.tree, "dsh-kb-scope-toast")), "已限定为 1 个知识库");
+});
+
+test("reopening a none scope shows every checkbox unchecked", async () => {
+  const kbs = [{ name: "Alpha" }, { name: "Beta" }];
+  const { rt, ui } = await loadReady({ mode: "none", kbs: [] }, kbs);
+  await openPanel(rt, ui, { scope: { mode: "none", kbs: [] }, kbs });
+  assert.deepEqual(
+    rowsOf(rt, ui).map((row) => [rt.text(rt.findByClass(row, "dsh-kb-scope-name")), checkboxOf(rt, row).props.checked]),
+    [["Alpha", false], ["Beta", false]]
+  );
+  assert.deepEqual(draftOf(ui), []);
+
+  // 不做修改直接应用：仍然提交 none，不会因为草稿为空而退回 all。
+  const put = await applyAndRespond(rt, ui, { body: { scope: { mode: "none", kbs: [] } } });
+  assert.deepEqual(JSON.parse(put.init.body), { session: "s1", mode: "none", kbs: [] });
+  assert.equal(rt.text(chipOf(rt, ui)), "知识库：未启用");
 });
 
 test("selection uses the directory identity while the row shows the manifest name", async () => {
@@ -1106,7 +1131,7 @@ test("untouched all-mode applies {mode:'all',kbs:[]} with the UI header", async 
   assert.equal(rt.text(rt.findByClass(ui.tree, "dsh-kb-scope-toast")), "已改为全部知识库");
 });
 
-test("清空 applies an empty selection as mode=all", async () => {
+test("清空 applies an empty selection as mode=none and updates the chip/toast", async () => {
   const kbs = [{ name: "Alpha" }, { name: "Beta" }];
   const { rt, ui } = await loadReady({ mode: "all", kbs: [] }, kbs);
   await openPanel(rt, ui, { scope: { mode: "all", kbs: [] }, kbs });
@@ -1117,10 +1142,20 @@ test("清空 applies an empty selection as mode=all", async () => {
     [false, false]
   );
   rt.click(buttonByText(rt, ui, "应用"));
-  const put = rt.fetch.calls.find((call) => call.method === "PUT");
-  assert.deepEqual(JSON.parse(put.init.body), { session: "s1", mode: "all", kbs: [] });
-  rt.respondWhere({ method: "PUT" }, { body: { scope: { mode: "all", kbs: [] } } });
+  const puts = rt.fetch.calls.filter((call) => call.method === "PUT");
+  assert.equal(puts.length, 1);
+  assert.deepEqual(JSON.parse(puts[0].init.body), { session: "s1", mode: "none", kbs: [] });
+  rt.respondWhere({ method: "PUT" }, { body: { scope: { mode: "none", kbs: [] } } });
   await rt.flush();
+  assert.equal(panelOf(rt, ui), null);
+  assert.equal(rt.text(chipOf(rt, ui)), "知识库：未启用");
+  assert.doesNotMatch(chipOf(rt, ui).props.className, /dsh-kb-scope-chip-active/);
+  assert.equal(rt.text(rt.findByClass(ui.tree, "dsh-kb-scope-toast")), "已关闭本会话的知识库");
+  assert.deepEqual(
+    rt.fetch.calls.filter((call) => !["/kb/api/status", "/kb/api/scope", "/kb/api/kbs"].some((prefix) => call.url.startsWith(prefix))),
+    [],
+    "applying none must not issue any extra kb_* request"
+  );
 });
 
 test("全选 in a selected scope applies mode=all", async () => {
@@ -1474,6 +1509,55 @@ test("Escape closes the panel, removes the keydown listener and refocuses the ch
   assert.ok(focused, "chip was not focused");
   assert.equal(focused.type, "button");
   assert.match(focused.props.className, /dsh-kb-scope-chip/);
+});
+
+// ===========================================================================
+// 7.5 点击外部：关闭面板、丢弃草稿、不 PUT、焦点回到胶囊；面板内点击不关闭
+// ===========================================================================
+
+test("pointerdown outside closes the panel without saving and refocuses the chip", async () => {
+  const kbs = [{ name: "Alpha" }, { name: "Beta" }];
+  const { rt, ui } = await loadReady({ mode: "all", kbs: [] }, kbs);
+  await openPanel(rt, ui, { scope: { mode: "all", kbs: [] }, kbs });
+  const putsBefore = rt.fetch.calls.filter((call) => call.method === "PUT").length;
+  assert.equal(rt.documentListeners.filter((entry) => entry.type === "pointerdown").length, 1);
+
+  rt.emitDocument("pointerdown", { target: rt.document.body });
+  assert.equal(panelOf(rt, ui), null, "outside pointerdown must close the panel");
+  assert.equal(chipOf(rt, ui).props["aria-expanded"], false);
+  assert.equal(rt.fetch.calls.filter((call) => call.method === "PUT").length, putsBefore, "closing must not save the draft");
+  const focused = rt.focused.at(-1);
+  assert.ok(focused, "chip was not focused");
+  assert.match(focused.props.className, /dsh-kb-scope-chip/);
+  assert.equal(
+    rt.documentListeners.filter((entry) => entry.type === "pointerdown").length,
+    0,
+    "pointerdown listener must be removed on close"
+  );
+
+  // 重新打开确认不会从外部点击路径误开面板。
+  rt.click(chipOf(rt, ui));
+  await respondScopeData(rt, { scope: { mode: "all", kbs: [] }, kbs });
+  assert.ok(panelOf(rt, ui));
+});
+
+test("pointerdown inside the panel or on the chip does not close it", async () => {
+  const kbs = [{ name: "Alpha" }];
+  const { rt, ui } = await loadReady({ mode: "all", kbs: [] }, kbs);
+  await openPanel(rt, ui, { scope: { mode: "all", kbs: [] }, kbs });
+
+  const panel = panelOf(rt, ui);
+  rt.emitDocument("pointerdown", { target: panel });
+  assert.ok(panelOf(rt, ui), "pointerdown on the panel root must not close it");
+
+  const row = rowsOf(rt, ui)[0];
+  panel.contains = (target) => target === row;
+  rt.emitDocument("pointerdown", { target: row });
+  assert.ok(panelOf(rt, ui), "pointerdown on a child of the panel must not close it");
+
+  rt.emitDocument("pointerdown", { target: chipOf(rt, ui) });
+  assert.ok(panelOf(rt, ui), "pointerdown on the chip must not close it");
+  assert.equal(rt.fetch.calls.filter((call) => call.method === "PUT").length, 0);
 });
 
 // ===========================================================================
