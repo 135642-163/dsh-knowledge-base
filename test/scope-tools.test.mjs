@@ -267,6 +267,21 @@ test("doc tools: multi-kb scope resolves a unique title across kbs", async () =>
   assert.equal(read.docId, doc.docId);
 });
 
+test("doc tools: unique id prefix resolves to the resolver's document", async () => {
+  const { tools, scoped, importDoc, scope } = await setup();
+  const doc = await importDoc("a.md", "# 甲\n\n继电保护技术条件正文。\n", "甲库", "继电保护技术条件");
+  await importDoc("b.md", "# 乙\n\n变压器验收规范正文。\n", "乙库", "变压器验收规范");
+  await scope("s1", ["甲库", "乙库"]);
+  // 跨库只命中唯一 id 前缀；调用方应复用解析器返回的 doc，而不是再解析一次产生分歧。
+  const prefix = doc.docId.slice(0, 8);
+  const history = await tools.get("kb_history").execute({ doc: prefix }, scoped("s1"));
+  assert.equal(history.kb, "甲库");
+  assert.equal(history.docId, doc.docId);
+  const read = await tools.get("kb_read").execute({ doc: prefix }, scoped("s1"));
+  assert.equal(read.kb, "甲库");
+  assert.equal(read.docId, doc.docId);
+});
+
 test("doc tools: duplicate titles across kbs report candidates", async () => {
   const { tools, scoped, importDoc, scope } = await setup();
   await importDoc("a.md", "# 甲\n\n交接试验规程正文。\n", "甲库", "交接试验规程");
