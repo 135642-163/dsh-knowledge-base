@@ -100,6 +100,21 @@ test("prune drops a stored name whose directory is gone and empty scope reads as
   assert.deepEqual(data.scopes.s1.kbs, []);
 });
 
+test("poison scope names are pruned and child snapshots still persist", async () => {
+  const root = await tmpRoot();
+  await makeKb(root, "A");
+  await writeScopes(root, {
+    scopes: { s1: { mode: "selected", kbs: ["///", "A"], updatedAt: new Date().toISOString() } },
+  });
+  const scope = await resolveScope(root, { sessionId: "child", parentSession: "s1" });
+  assert.deepEqual(scope.kbs, ["A"]);
+  assert.equal(scope.inheritedFrom, "s1");
+  assert.equal(scope.stored, true);
+  const data = await readScopes(root);
+  assert.deepEqual(data.scopes.s1.kbs, ["A"]);
+  assert.deepEqual(data.scopes.child.kbs, ["A"]);
+});
+
 test("selected with empty kbs reads as all", async () => {
   const root = await tmpRoot();
   await writeScopes(root, { scopes: { s1: { mode: "selected", kbs: [], updatedAt: new Date().toISOString() } } });
@@ -214,6 +229,27 @@ test("setScope validates mode, kbs existence and archived kbs", async () => {
   await assert.rejects(() => setScope(root, { sessionId: "s1", mode: "selected", kbs: [""] }), (e) => e.code === "SCOPE_INVALID");
   const saved = await setScope(root, { sessionId: "s1", mode: "selected", kbs: ["A", "A"] });
   assert.deepEqual(saved.kbs, ["A"]);
+});
+
+test("setScope validates kb selection strictly", async () => {
+  const root = await tmpRoot();
+  await makeKb(root, "A");
+  await mkdir(join(root, "空目录"), { recursive: true });
+  await mkdir(join(root, ".trash"), { recursive: true });
+  const saved = await setScope(root, { sessionId: "s1", mode: "selected", kbs: ["A"] });
+  assert.equal(saved.mode, "selected");
+  assert.deepEqual(saved.kbs, ["A"]);
+  await assert.rejects(
+    () => setScope(root, { sessionId: "s2", mode: "selected", kbs: ["空目录"] }),
+    (e) => e.code === "KB_NOT_FOUND"
+  );
+  await assert.rejects(
+    () => setScope(root, { sessionId: "s3", mode: "selected", kbs: [".trash"] }),
+    (e) => e.code === "KB_NOT_FOUND"
+  );
+  const data = await readScopes(root);
+  assert.deepEqual(Object.keys(data.scopes), ["s1"]);
+  assert.deepEqual(data.scopes.s1.kbs, ["A"]);
 });
 
 test("all mode clears kbs", async () => {
