@@ -3611,14 +3611,19 @@ Expected: `--ff-only` 成功；HEAD 为 `chore: release 0.21.0 …`，其后还�
 
 - **此前已记录的工作**：0.21.1 复审跟进（库身份目录名、文档解析单一来源、TTL 活跃续期、提示措辞）见本文件
   「实施记录（偏差与追加）」末尾，不再重复；0.22.0 的范围/胶囊行为已写进 README「0.22.0 交互完善」。
+- **真实宿主验收（2026-10-24，临时 `dsh --profile web --port 55941` + 临时 kbRoot，WKWebView 脚本）**：
+  胶囊「全部」→ 清空+应用 = **未启用**（`.scopes.json` 写 `mode:"none"`），全选恢复「全部」；外部点击关闭面板；
+  资料页搜索命中 2 行、每页 100、分页文案正确；PDF 与 docx（约 0.7s 转 PDF）均在弹窗内预览；笔记列表与正文
+  预览正常且无「下载原件」；「有失败 1」徽标 hover 计数与筛选生效；页头重命名生效；`~$` 上传被 415 拒收；
+  真实一轮模型调用 `kb_list` 在 none 下返回「本会话未启用知识库…」，无库名泄漏。
+  截图见 `/Users/littlesun/workspace/deepseek/project/知识库/.acceptance/screenshot-22-*.png`。
+- **验收后小修**：`427cc03`（笔记预览隐藏「下载原件」；Office iframe 载入后移除「正在转换」提示）。
 - **测试**：`npm test` **612/612**（0.21.1 基线 508，净增 104：原有文件 +24、新文件 +80）；
   `npm run typecheck`、`npm run check:client`、`node scripts/check-ui.mjs` 全绿。
   逐文件明细见 spec §15.3，本轮说明见 spec §21。
 - **发布**：版本 0.22.0（`package.json`、`package-lock.json` 根与 `packages[""]`、`lib/version.js`），
   README 新增 `## 0.22.0 交互完善`，更新配置表（`officeKitCli`）与测试段（612）。
 - **已知跟进**：
-  - 笔记预览弹窗沿用原件弹窗，底部仍显示「下载原件」——笔记没有原件，该链接无效，后续按 kind 隐藏；
-  - 真实浏览器自动化仍缺失：UI 仅由 fake DOM / 纯函数单测 + `scripts/check-ui.mjs` 覆盖，
-    胶囊外部点击的真实焦点顺序、预览样式仍需手工验收；
-  - Office 预览手工验收待补：已装 / 未装 LibreOfficeKit 两条路径、首次转换耗时、字体替换、
-    超大表格与扫描件附件各验一次。
+  - 真实浏览器自动化（Playwright）尚未接入，本轮为一次性 WKWebView 脚本验收；
+  - Office 预览仅单页 docx 人工验过，大表格/扫描件附件/字体替换与超大文件耗时建议抽检；
+  - 笔记正文以纯文本渲染（不解析 markdown 样式），后续可按需加安全渲染。

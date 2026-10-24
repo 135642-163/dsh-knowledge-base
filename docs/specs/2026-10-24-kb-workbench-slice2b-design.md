@@ -617,10 +617,21 @@ ctx.systemPrompt.section({
 - `npm test`：**612/612** 通过（0.21.1 基线 508，净增 104：原有文件 +24、新文件 +80），
   含 `check:client` 与 `check-ui`；逐文件明细见 §15.3。
 - `npm run typecheck`、`npm run check:client`、`node scripts/check-ui.mjs` 全绿。
-- 本轮**未**做真实浏览器自动化验收；需要人工/真实宿主复核：胶囊外部点击后的焦点顺序、资料页布局与
-  跳页、Office 首次转换耗时与字体、笔记预览滚动。Office 预览建议分两条路径各验一次：
-  已装 `~/.dsh/tools/libreoffice-kit`（正常转换 + 缓存）与未装（501 固定文案 + 仍可下载）。
+- 真实宿主验收（2026-10-24，临时 `dsh --profile web --port 55941` + 临时 kbRoot，WKWebView 脚本）：
+  - 胶囊「全部」→ 清空 + 应用 → **未启用**（toast、`.scopes.json` 写 `mode:"none"`）→ 全选恢复「全部」；
+  - 面板打开时点击页面空白 → 关闭；焦点在事件完成后回到胶囊；
+  - 资料页：搜索「验收文档」得到 2 行；每页 100 生效；分页文案「第 1 / 1 页 · 共 5 篇」；
+  - 查看原件：PDF 内嵌浏览器阅读器；docx 首次约 0.7s 转 PDF 后内嵌，转换完成后「正在转换」提示消失；
+  - 笔记 Tab 列出「验收笔记」，点击显示正文；底部不再出现「下载原件」；
+  - 「有失败 1」徽标 hover 显示「成功 4 · 导入中 0 · 失败 1」，点击筛出失败文档（筛选 chip 高亮「有失败」）；
+  - 标题旁「重命名」弹窗改名为「验收库2」并生效（`PATCH` + `.scopes.json` 同步）；
+  - 服务端拒收 `~$` 临时文件（上传 415 `TEMP_FILE`）；真实一轮模型调用 `kb_list` 在 none 模式下返回
+    精确文案「本会话未启用知识库…」，全程无库名泄漏。
+  - 截图：`.acceptance/screenshot-22-scope-disabled.png`、`-scope-disabled`、`-docs-search`、
+    `-preview-pdf`、`-preview-office-fixed`、`-note-preview-fixed`、`-failed-filter`、`-renamed`、
+    `-none-tool-block`。
+- 真实浏览器自动化（Playwright）仍未接入；上述为一次性 WKWebView 脚本验收，UI 回归仍靠
+  fake DOM / 纯函数单测与 `check-ui` 语法门禁。
 - 已知跟进：
-  - 笔记预览弹窗沿用原件弹窗，底部仍有「下载原件」入口——笔记没有原件，该链接无效，后续隐藏；
-  - 真实浏览器自动化（Playwright/WKWebView）仍缺失，UI 只由 fake DOM / 纯函数单测与 `check-ui` 语法门禁覆盖；
-  - Office 预览在真实宿主上的手工验收（字体替换、超大表格、扫描件附件）待补。
+  - Office 预览仅在单页 docx 上人工验过；大表格、扫描件附件、字体替换与超大文件耗时仍建议抽检；
+  - 笔记预览内容以纯文本渲染（不解析 markdown 样式），如需排版后续再加安全渲染。
