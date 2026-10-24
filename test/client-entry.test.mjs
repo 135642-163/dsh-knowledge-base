@@ -96,15 +96,25 @@ function findChild(node, predicate) {
   return childrenOf(node).find(predicate);
 }
 
-function renderAction(mod, wide = true) {
+function componentFor(mod, name) {
   let component;
   mod.apply({
     slots: {
       inject(_name, callback) { callback(); },
-      register(_decl, value) { component = value; },
+      register(decl, value) { if (decl.name === name) component = value; },
     },
   });
-  return component({ wide });
+  return component;
+}
+
+function renderAction(mod, wide = true) {
+  const tree = componentFor(mod, "sidebar.footer.action")({ wide });
+  // 抽取 WorkbenchModal 后，侧栏树里的弹窗是子组件；这里展开一层，
+  // 让下面「open state ... portal」用例仍能遍历到弹窗渲染的 portal。
+  const children = childrenOf(tree).map((child) => (
+    typeof child?.type === "function" ? child.type(child.props) : child
+  ));
+  return { ...tree, props: { ...tree.props, children } };
 }
 
 test("bundle metadata exposes a web client entry for the sidebar", () => {
@@ -118,7 +128,7 @@ test("bundle metadata exposes a web client entry for the sidebar", () => {
   assert.doesNotMatch(bundle, /__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED/);
 });
 
-test("apply registers sidebar.footer.action with kb-workbench", () => {
+test("apply registers sidebar and composer slots", () => {
   const { mod } = loadClient();
   const calls = { inject: [], register: [] };
   const ctx = {
@@ -128,12 +138,13 @@ test("apply registers sidebar.footer.action with kb-workbench", () => {
     },
   };
   mod.apply(ctx);
-  assert.deepEqual(calls.inject, ["sidebar.footer.action"]);
-  assert.equal(calls.register.length, 1);
-  assert.equal(calls.register[0].decl.name, "sidebar.footer.action");
-  assert.equal(calls.register[0].decl.id, "kb-workbench");
-  assert.equal(calls.register[0].decl.order, 10);
+  assert.deepEqual(calls.inject, ["sidebar.footer.action", "conversation.input.left"]);
+  assert.deepEqual(calls.register.map((row) => [row.decl.name, row.decl.id, row.decl.order]), [
+    ["sidebar.footer.action", "kb-workbench", 10],
+    ["conversation.input.left", "kb-scope", 20],
+  ]);
   assert.equal(typeof calls.register[0].component, "function");
+  assert.equal(typeof calls.register[1].component, "function");
 });
 
 test("entry renders the label in wide mode and opens on click", () => {

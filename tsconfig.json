@@ -9,5 +9,5 @@
     "noEmit": true,
     "types": ["react"]
   },
-  "include": ["src/client/**/*.tsx"]
+  "include": ["src/client/**/*.tsx", "lib/scope-view.d.ts"]
 }
