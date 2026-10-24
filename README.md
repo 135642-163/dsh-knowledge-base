@@ -10,23 +10,23 @@
 | --- | --- |
 | `kb_import` | 导入文件或目录（.docx / .doc 自动转换 / .pptx / .xlsx / .xlsm / .pdf / .md / .txt / .epub / .mobi / .azw3，扫描版 PDF 自动逐页 OCR 中文，自动识别文字层损坏页并只对问题页 OCR，文字层双栏页自动重排；Word OMML 公式转 LaTeX；Excel 按工作表转 Markdown 表格；.txt 自动识别 UTF-8/UTF-16/GBK；MOBI/AZW3 自动经 Calibre 转 EPUB）。旧版 .doc/.ppt 与 MOBI/AZW3 一律在后台任务中转换；正在导入中的同名文档自动跳过。**导入前自动查重**：同库重合跳过、跨库重合默认跳过并报告（见下文） |
 | `kb_reparse` | 从库内 `sources/` 重新解析文档（无需重新上传），用于 OCR/解析器升级后刷新旧管线产物；`doc` 单个、`all=true` 批量，支持 `forceOcr`、`forceOcrPages`/`skipOcrPages`、后台任务 |
-| `kb_list` | 列出知识库 / 知识库内文档与状态（旧管线/已修订/文字层损坏/OCR 低置信会标注），每条带一行摘要与标签；默认最多 50 条，支持 `limit/offset/query/status/kind` 分页过滤（`kind=note` 只看笔记、`kind=source` 只看资料）；本库有维护规范时会提示 |
-| `kb_query` | 全文检索（ripgrep 正则，中文短语直接搜；标准号自动兼容 GBT=GB/T=GB_T=GB∕T 与年份分隔符变体）；按标题/标题行/命中密度/更新时间排序，每文档默认 5 条；`kb="*"` 跨库检索；命中项带 part、页码与笔记类型 |
+| `kb_list` | 列出知识库 / 知识库内文档与状态（旧管线/已修订/文字层损坏/OCR 低置信会标注），每条带一行摘要与标签；省略 `kb` 时只列本会话范围内的库；默认最多 50 条，支持 `limit/offset/query/status/kind` 分页过滤（`kind=note` 只看笔记、`kind=source` 只看资料）；本库有维护规范时会提示 |
+| `kb_query` | 全文检索（ripgrep 正则，中文短语直接搜；标准号自动兼容 GBT=GB/T=GB_T=GB∕T 与年份分隔符变体）；按标题/标题行/命中密度/更新时间排序，每文档默认 5 条；`kb="*"` 跨库检索；限定模式下省略 `kb` 检索范围内全部库；命中项带 part、页码与笔记类型 |
 | `kb_read` | 按分块精读、读大纲、读整篇；大纲条目带页码/部分，读取时返回页码范围；支持虚拟页 `doc="schema"`（维护规范）、`doc="index"`（内容索引）、`doc="log"`（操作日志），按 part 分页读取 |
 | `kb_view` | 查看原始页面图片（PDF 按页渲染；Word/PPT/EPUB/MOBI 提取内嵌图）——公式、原理图、电路图专用 |
 | `kb_edit` | 精确替换修订（持续修改完善）；`doc="schema"` 可修订该库维护规范（index/log 自动维护，不能编辑） |
 | `kb_describe` | 给文档写一行摘要与标签（编目）：摘要会显示在 `kb_list` 与 `index.md`，重解析/重导入不会覆盖模型写的摘要；存量文档可 `all=true` + `auto=true` 批量回填缺失摘要（抽取式，不递增版本号，`limit` 分批） |
 | `kb_retitle` | 修正标题：单篇传 `doc`（默认按 `cleanTitle` 去掉站点域名、`GB_T`、序号、span 残留等噪声），批量传 `all=true`（默认 `dryRun=true` 只预览，确认后 `dryRun=false` 应用）；会重建合并版首行标题、保留历史、版本+1 |
 | `kb_trust` | 标注来源可信度：`high`（已发布现行标准、正式教材）/ `medium`（企业文件、培训资料、报批稿）/ `low`（草案、征求意见稿、已废止标准）/ `unknown`（清除）；支持单篇、`docs` 列表、`all=true` + `query`/`stage` 过滤（批量默认 dryRun）。检索会优先高可信、标注低可信并提醒用户 |
-| `kb_lint` | 机械体检：导入失败、旧管线、文字层损坏/OCR 低置信、内容重复、同标准号同期同阶段重复、同号多版本、未编目、笔记无来源、续/修订版提示、无入链笔记、缺 schema；输出分组问题与建议动作（`kb_reparse`/`kb_describe`/`kb_remove`/`kb_edit`） |
+| `kb_lint` | 机械体检：导入失败、旧管线、文字层损坏/OCR 低置信、内容重复、同标准号同期同阶段重复、同号多版本、未编目、笔记无来源、续/修订版提示、无入链笔记、缺 schema；输出分组问题与建议动作（`kb_reparse`/`kb_describe`/`kb_remove`/`kb_edit`）；限定模式下省略 `kb` 逐库体检 |
 | `kb_edit_batch` | 批量精确修订（事务语义）：一次提交 1–50 条 `{doc, old_string, new_string, replaceAll?}`，**先全部校验再写入**；任一条失败整批不改并回滚已写分块；`dryRun=true` 只校验。适合“一次改 10–15 页”的跨文档维护；同一文档一批只允许一条编辑 |
 | `kb_snapshot` | 库级快照：把 `kb.json`、`schema/index/log`、派生 `markdown/`（可选 `sources/`）打包到知识库 `snapshots/`，用于批量编辑/重解析前留档；`list=true` 列出已有快照 |
 | `kb_add_note` | 写入编译页/笔记（单篇上限 2MB）：`kind=summary/entity/concept/topic/note`、`tags`、`sources`（docId#页码 或 [[标题]]）；**同一标题再次调用=更新同一篇**（版本+1、保留历史），不要用「续」「修订版」另起新页 |
-| `kb_remove` | 删除文档（默认软删除，可用 `kb_restore` 恢复；`soft=false` 永久删除）或整个知识库（删整库需 `removeKb=true` 且 `confirm` 逐字等于知识库名称） |
+| `kb_remove` | 删除文档（默认软删除，可用 `kb_restore` 恢复；`soft=false` 永久删除）或整个知识库（删整库需显式 `kb` + `removeKb=true` 且 `confirm` 逐字等于知识库名称） |
 | `kb_restore` | 恢复软删除文档（不带 `version`）或恢复历史版本（`version=N`，来自 `kb_history`） |
 | `kb_history` | 列出文档保存过的历史版本（覆盖导入/重解析/编辑前的快照，最多 10 个） |
 | `kb_export` | 导出 md（单文件）/ jsonl（分块，RAG 用；`chunkSize`/`chunkOverlap` 可切 RAG 小块）/ zip（完整包，内置 JSZip 打包，不依赖系统命令）/ **vault**（Obsidian Vault：`index.md` + `wiki/` 笔记与资料页 + `[[双链]]`，`includeSources=true` 时带 `raw/`） |
-| `kb_rename` | 重命名知识库 |
+| `kb_rename` | 重命名知识库（`kb` 必填，须在本会话范围内） |
 
 大文件（如整本扫描书）导入自动转为**后台任务**，与内置 `job_list` / `job_output` 联动查看进度；
 取消后台任务会在 `job_output` 中显示为 cancelled。后台任务会写逐文件统计：
@@ -90,9 +90,9 @@ exports/                   导出产物
 下载前必须勾选金币确认（每个标准约 6 金币，VIP 免金币）；`bzCookie` 只在状态里显示“已配置 / 未配置”，
 不会回传给浏览器。
 
-当前版本仍不支持合并、对话范围；这些在后续版本加入。
+当前版本仍不支持合并知识库；后续版本再加入。
 
-### 实现偏差 / 已知限制（0.20.4）
+### 实现偏差 / 已知限制（0.21.0）
 
 - 拖拽只接收**文件**，不做拖拽文件夹递归；整理整个目录请用「选择目录」。
 - 资料列表沿用按标题排序，不支持按更新时间排序；导入完成在弹窗内直接给出逐文件结果。
@@ -101,6 +101,49 @@ exports/                   导出产物
 - 批次 24 小时过期由「创建批次」触发清扫（create-triggered），不是后台定时任务。
 - `refreshKbIndex` 仍留在 `lib/import-job.js` 的导入收尾里，尚未拆成独立模块。
 - UI 没有自动化 DOM 测试，只有 `scripts/check-ui.mjs` 的语法门禁；页面交互需手工验收。
+- 范围只约束 `kb_*` 工具：工作台 HTTP API 与 UI 不受范围影响（范围不是权限边界）。
+- `kb_edit_batch` / `kb_add_note` 为单库策略：范围有多库时必须显式 `kb`，不做跨库事务。
+- 切换范围会改写一次 system prompt 前缀（同一范围下前缀稳定）；范围变更在下一轮模型步生效。
+- `restoreKb` / `removeKbDir` 未做范围同步；失效库名由读取时清理（prune）兜底。
+- 胶囊只注册在 `conversation.input.left`；`conversation.session.header.utilities` 未接入。
+
+## 会话知识库范围与胶囊（0.21.0）
+
+输入框左侧工具行新增「知识库」胶囊，为**当前会话**选定可用知识库；`kb_*` 工具按范围执行：
+
+- **胶囊状态**：`知识库：全部`（默认）/ `知识库：N 个`（限定时用强调色）/ `知识库：…`（加载中）/
+  `知识库：—`（加载失败，点击重试）。没有 `/kb/api/status`（无 webServer、旧版服务端）或
+  未声明 `features.scope` 时**不渲染**（静默降级，工具与提示照常）。
+- **全部 / 限定**：`全部` 不限制，以后新增的库也自动包含；面板在「全部」模式下**复选框全部勾选**，
+  取消勾选任意一个即切换为「限定」。`全选` / `清空` 都提交回「全部」（空选择等价全部）。
+- **工具硬约束**：显式指定范围外的库 → `KB_OUT_OF_SCOPE`（附当前范围与调整方式）；
+  单库语义工具（`kb_import` / `kb_reparse` / `kb_snapshot` / `kb_export` / `kb_edit_batch` /
+  `kb_add_note`）在限定模式多库且省略 `kb` 时 → `KB_REQUIRED`（提示用 `kb` 指定一个）。
+  `kb_list` / `kb_query` 输出带 `scope`；`kb_query` 在限定模式下省略 `kb` 时检索范围内全部库
+  （`kb="*"` 等价范围内全部；全部模式沿用 `defaultKb`）。
+- **跨库文档解析**：`kb_read` / `kb_view` / `kb_edit` / `kb_describe` / `kb_retitle` / `kb_trust` /
+  `kb_keep` / `kb_history` / `kb_restore` / `kb_remove`（文档级）省略 `kb` 时，在范围内按标题/id
+  解析：唯一命中直接用；命中多个报候选（`kb/docId/标题`）并提示指定 `kb`；`schema`/`index`/`log`
+  是库级维护文件，不跨库解析。
+- **`kb_lint` 逐库体检**：限定模式下省略 `kb` 会逐库执行并按库分组（单库失败不影响其它库），
+  最多 `scopeLintMaxKbs`（默认 20）个，超出时返回 `truncated` 与 `omittedKbs`。
+- **子会话继承**：subagent/fork 首次使用范围时把父会话的生效范围**快照**到自己的条目
+  （`inheritedFrom`），父会话之后改范围不回溯；只聊天、从未调用 `kb_*` 的子会话，系统提示仍跟随父范围。
+- **存储**：`<kbRoot>/.scopes.json`，权限 `0600`、临时文件 + rename 原子替换、按 kbRoot 进程内串行写；
+  条目默认 `scopeTtlDays`（30）天过期，读取时惰性剔除过期条目与已删除/已归档/已合并的库名。
+- **接口**：`GET /kb/api/scope?session=<id>`、`PUT /kb/api/scope`（`x-kb-ui: 1` + 同源）；
+  `/kb/api/status` 的 `features.scope` 声明能力。
+- **降级**：`.scopes.json` 损坏或超过 1MB → 读按「全部」，写入失败并提示
+  「范围文件已损坏或过大，无法保存；请备份后删除该文件再重试」；文件不可写但可读 →
+  工具按只读范围解析可用，胶囊应用报「范围保存失败，请重试」且 chip 不变、面板保留。
+- **生效时机**：范围变更在**下一轮模型步**生效；系统提示只在「限定」模式注入范围说明，
+  切换范围会改写一次 system prompt 前缀（同一范围下前缀稳定）。
+- **行为变化**：`kb_std_check` 省略 `kb` 时默认「标准」（不再用 `defaultKb`）；
+  `kb_rename` 与 `kb_remove(removeKb=true)` 必须显式传 `kb`。
+- **已知限制**：范围是产品约束，**不是权限边界**（工作台 API/UI 不受影响，`session` 由客户端提供，
+  不做身份认证）；`kb_edit_batch` / `kb_add_note` 是单库操作；`restoreKb` / `removeKbDir` 未做范围
+  同步（失效库名由读取时清理兜底）；胶囊只注册在 `conversation.input.left`；无 session 身份的
+  调用（非常规宿主路径、测试）fail-open 不限制。
 
 ## 侧栏入口（0.19.1）
 
@@ -406,6 +449,8 @@ kb_export({
 | `importTimeoutMs` | 600000 | kb_import 工具调用超时（内联导入） |
 | `uiMaxUploadBytes` | `2147483648`（2 GiB） | 工作台上传单文件上限（字节，1 MiB–16 GiB） |
 | `uiMaxBatchFiles` | `1000` | 工作台上传单批次文件数上限（1–5000） |
+| `scopeTtlDays` | `30` | 会话范围条目过期天数；0 = 不过期 |
+| `scopeLintMaxKbs` | `20` | `kb_lint` 在限定模式下最多检查多少个库 |
 
 > 引擎选择：默认只有内置 **tesseract.js（WASM）** 可用，零安装、全平台可移植。
 > 可选加速：`~/.dsh/tools/rapidocr-env` 装 RapidOCR（Python，中文印刷页最快）或
@@ -438,7 +483,7 @@ done
 ## 测试
 
 ```bash
-npm test          # node:test（296 个用例）；覆盖查重精度、同名文件保护、后台失败统计、检索截断/单文档上限、
+npm test          # node:test（500 个用例）；覆盖查重精度、同名文件保护、后台失败统计、检索截断/单文档上限、
                   # 相似导入提示、OCR 模型检查、流式 zip、心跳与锁回收、
                   # 清单 v1→v2→v3 迁移与备份、内容哈希跳过、kb_reparse、分块索引/页码锚点、
                   # kb_list 分页/过滤/kind、检索排序、跨库检索、文字层质量启发式、
@@ -451,7 +496,9 @@ npm test          # node:test（296 个用例）；覆盖查重精度、同名�
                   # kb_lint 分组与假阳性防护、kb_retitle 清洗/批量预览、标准号检索归一变体、
                   # Vault 导出结构/双链、批量事务编辑的回滚与 dryRun、库级快照创建/列表、
                   # 存量摘要回填（模型摘要保护/limit/remaining/表格兜底）、
-                  # 可信度标注/过滤/排序/低可信提醒
+                  # 可信度标注/过滤/排序/低可信提醒、
+                  # 会话范围存储/继承/工具矩阵/提示段/API/归档重命名同步、
+                  # 胶囊客户端（注册、面板、应用/失败回滚、可访问性）VM 测试
                   # （全部使用临时目录，不依赖本机知识库）
 ```
 
