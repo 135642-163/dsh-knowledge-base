@@ -1,5 +1,6 @@
 /**
  * 0.9.0 软删除/恢复：文件保留、默认列表可见但标记、检索/精读/导出排除。
+ * 0.23.0：失败文档也能软删除/恢复，并保留失败原因。
  */
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -8,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import JSZip from "jszip";
 import { apply } from "../lib/index.js";
+import { readManifest, writeManifestAtomic } from "../lib/store.js";
 
 async function setup() {
   const root = await mkdtemp(join(tmpdir(), "kb-soft-delete-"));
@@ -92,6 +94,42 @@ test("soft=false permanently removes the document", async () => {
       () => tools.get("kb_restore").execute({ kb: "软删除测试", doc: add.docId }, exec),
       /没有找到|已软删除/
     );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("failed documents can be soft-deleted and restored with the error preserved", async () => {
+  const { root, tools, exec } = await setup();
+  try {
+    const add = await tools.get("kb_add_note").execute(
+      { kb: "软删除测试", title: "失败文档", content: "这段内容暂时解析失败。" },
+      exec
+    );
+    const dir = join(root, "kb", "软删除测试");
+    const manifest = await readManifest(dir);
+    const doc = manifest.docs.find((item) => item.id === add.docId);
+    doc.status = "failed";
+    doc.error = "解析失败：测试用错误";
+    doc.errorAt = "2026-10-01T00:00:00.000Z";
+    await writeManifestAtomic(dir, manifest);
+
+    // kb_remove 默认软删除：失败文档不再被 store 拒绝。
+    const removed = await tools.get("kb_remove").execute({ kb: "软删除测试", doc: add.docId }, exec);
+    assert.equal(removed.soft, true);
+    const deleted = (await readManifest(dir)).docs.find((item) => item.id === add.docId);
+    assert.equal(deleted.status, "deleted");
+    assert.equal(deleted.deletedFromStatus, "failed");
+    assert.equal(deleted.error, "解析失败：测试用错误");
+    assert.ok(deleted.deletedAt);
+
+    const restored = await tools.get("kb_restore").execute({ kb: "软删除测试", doc: add.docId }, exec);
+    assert.equal(restored.docId, add.docId);
+    const after = (await readManifest(dir)).docs.find((item) => item.id === add.docId);
+    assert.equal(after.status, "failed");
+    assert.equal(after.error, "解析失败：测试用错误");
+    assert.equal(after.deletedAt, undefined);
+    assert.equal(after.deletedFromStatus, undefined);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
