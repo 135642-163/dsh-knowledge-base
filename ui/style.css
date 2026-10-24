@@ -209,8 +209,6 @@ code { background: var(--panel-2); border-radius: 4px; padding: 1px 4px; }
 .std-panel input[type="number"] { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; color: inherit; font: inherit; }
 
 /* 嵌入 DSH 弹窗时隐藏工作台品牌，只保留操作区 */
-body.embed { --topbar-h: 44px; }
-body.embed .topbar { padding: 0 12px; }
-body.embed .topbar .brand { display: none; }
-body.embed .topbar-actions { margin-left: auto; }
+body.embed { --topbar-h: 0px; }
+body.embed .topbar { display: none; }
 body.embed .side-foot a[target="_blank"] { display: none; }

@@ -38,11 +38,21 @@ test("cleanTitle removes scrape noise without damaging real titles", () => {
   assert.equal(cleanTitle("QGDW 10650.6-2019_报批稿"), "Q/GDW 10650.6-2019 报批稿");
   assert.equal(
     cleanTitle("220KV~500kV紧凑型架空输电线路设计技术规程 DLT 5217-2013"),
-    "220kV~500kV紧凑型架空输电线路设计技术规程 DL/T 5217-2013"
+    "DL/T 5217-2013 220kV~500kV紧凑型架空输电线路设计技术规程"
   );
   assert.equal(cleanTitle("35KV~220KV城市地下变电站设计规程"), "35kV~220kV城市地下变电站设计规程");
   assert.equal(cleanTitle("GB∕T 32346.2-2015 海底电缆"), "GB/T 32346.2-2015 海底电缆");
   assert.equal(cleanTitle("51 DL/T 5136-2012 火力发电厂、变电所二次接线设计技术规程"), "DL/T 5136-2012 火力发电厂、变电所二次接线设计技术规程");
+  assert.equal(
+    cleanTitle("火力发电厂、变电所二次接线设计技术规程 DL/T 5136-2012"),
+    "DL/T 5136-2012 火力发电厂、变电所二次接线设计技术规程"
+  );
+  assert.equal(
+    cleanTitle("220kV-500kV变电所计算机监控系统设计技术规程 DL/T 5149-2001"),
+    "DL/T 5149-2001 220kV-500kV变电所计算机监控系统设计技术规程"
+  );
+  assert.equal(cleanTitle("某标准 GB 50060-2008"), "GB 50060-2008 某标准");
+  assert.equal(cleanTitle("标准编号 TB 2798-1997"), "TB 2798-1997 标准编号");
   assert.equal(
     cleanTitle("DL_T 1368-2014[电能质量_span style=_color_ red;__标准源__span_校准规范]"),
     "DL/T 1368-2014 电能质量标准源校准规范"
