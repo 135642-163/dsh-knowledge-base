@@ -136,7 +136,9 @@ test("mutateScopes refuses to overwrite a corrupt file", async () => {
   assert.equal(await readFile(file, "utf8"), "{oops");
 });
 
-test("mutateScopes propagates read errors (EACCES) without touching the file", async () => {
+test("mutateScopes propagates read errors (EACCES) without touching the file", {
+  skip: process.platform === "win32" || (typeof process.getuid === "function" && process.getuid() === 0),
+}, async () => {
   const root = await tmpRoot();
   await writeScopes(root, { scopes: { s1: { mode: "all", kbs: [] } } });
   const file = scopeFilePath(root);
