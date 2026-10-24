@@ -141,7 +141,7 @@ package.json / README.md   改
 - 写入：临时文件（`<path>.<pid>.<ts>.tmp`）+ `rename` 原子替换，权限 `0600`；**按 kbRoot 的进程内串行队列**（模块级 `Map<root, Promise>`），并发 PUT 不互相覆盖。
 - 读取：JSON 解析失败、结构非法、读取 EACCES → 按空库处理并保留原文件（不删）；单条条目结构非法跳过该条。
 - 清理（惰性，仅读路径发现变化才回写）：`updatedAt` 超过 `scopeTtlDays`（默认 30）的条目删除；`kbs` 中已不存在/已归档/已合并的库名剔除；剔除后 `selected` 且空 → `all`。
-- 归档/重命名同步：已有 `removeScopesReferences(root, name)` 负责剔除库名；重命名路径已接，归档路径补齐；重命名时同步替换（保留现有实现方式，不新增文件格式）。
+- 归档/重命名同步：现有 `removeScopesReferences(root, name)` 只在**彻底删除归档库**（`purgeKb`）时调用，归档与重命名都没接。2B 把它迁移到 `lib/scope-store.js`（`removeScopeKb` / `renameScopeKb`），并在 `archiveKb`（归档）与 `renameKb`（重命名，`lib/store.js` 单一入口）补齐 best-effort 同步。
 - 隐私：只含 sessionId 与库名，无对话内容。
 
 ## 7. 范围解析与继承
@@ -193,7 +193,7 @@ resolveDocInScope(exec, requestedKb, docRef) -> { kb, doc }
 | `kb_edit_batch` | 必须在范围内 | 1 个库→用它；多个→报「请指定 kb」；0→`defaultKb` | `single` |
 | `kb_add_note` | 必须在范围内 | 1 个库→用它；多个→报「请指定 kb」；0→`defaultKb` | `single` |
 | `kb_import` / `kb_reparse` | 必须在范围内 | 1 个库→用它；多个→报「请指定 kb」；0→`defaultKb` | `single` |
-| `kb_std_check` | 必须在范围内 | 默认「标准」；不在范围 → `KB_OUT_OF_SCOPE` | `std` |
+| `kb_std_check` | 必须在范围内 | 默认「标准」（2B 顺手修正：原实现误用 `defaultKb`，与工具描述/M1 不一致）；该库必须在范围内 | `std` |
 | `kb_lint` | 必须在范围内 | `selected`：范围内逐库跑（≤ `scopeLintMaxKbs`，默认 20，按库分组）；`all`：现状 | `lint` |
 | `kb_snapshot` / `kb_export` | 必须在范围内 | 1 个库→用它；多个→报「请指定 kb」；0→`defaultKb` | `snapshot`/`export` |
 | `kb_rename` / `kb_remove(removeKb=true)` | 必须显式且范围内 | 无默认，保持现有报错 | `kbAdmin` |
@@ -202,6 +202,7 @@ resolveDocInScope(exec, requestedKb, docRef) -> { kb, doc }
 
 - `kb_list` 结果在最外层加 `scope: { mode, kbs }`；`kb_query` 输出加 `scope`（`searchedKbs` 保留）。两者 schema 为 additive 可选字段，旧断言不受影响。
 - `kb_edit_batch` 与 `kb_add_note` 是**单库事务/单库笔记**，因此按 `single` 处理（偏离 M1 §6.4 把它们并入 doc 组的字面表述，理由：跨库事务不在本切片范围）。
+- 虚拟文档（`doc` 为 `schema` / `index` / `log`，见 `VIRTUAL_DOCS`）也按 `single` 处理，不做跨库解析：这些是库级维护文件，必须落到确定的一个库。
 - 范围外统一文案（M1 §6.4）：
 
 ```text
@@ -279,6 +280,8 @@ ctx.systemPrompt.section({
 | `KB_ARCHIVED` | 409 | kbs 含已归档/已合并库 | 知识库已归档: X |
 | `SCOPE_WRITE_FAILED` | 500 | `.scopes.json` 写入失败 | 范围保存失败，请重试 |
 | `KB_OUT_OF_SCOPE` | —（工具） | 工具访问范围外库 | M1 §6.4 文案 |
+| `KB_REQUIRED` | —（工具） | 范围有多个库而工具是单库语义（import/add_note/edit_batch/snapshot/export、虚拟文档、库级管理），省略 `kb` | 本会话范围有 N 个知识库，请用 kb 参数指定一个：… |
+| `KB_AMBIGUOUS` | —（工具） | 跨库 doc 解析命中多个 | 列出候选（kb/docId/标题）+ 请指定 kb |
 
 `ScopeError` 属性：`code`、`message`、`details`（如 `{ scope: [...], requested: "电能质量" }`），工具直接抛出（DSH 以工具失败展示 message）。
 
@@ -295,7 +298,7 @@ ctx.systemPrompt.section({
 ### 12.2 收起态
 
 - 尺寸对齐 24px 工具行：14px 图标 + 12px 文本，`max-width` 限宽省略。
-- 文案：`知识库：全部` / `知识库：N 个`（`selected` 用强调色）/ 加载中 `知识库：…` / 失败 `知识库：—`（点击打开面板显示「重试」）。
+- 文案：`知识库：全部` / `知识库：N 个`（`selected` 用强调色）/ 加载中 `知识库：…` / 失败 `知识库：—`（点击即重试）。
 - 无 API（`/kb/api/status.features.scope` 不为 `true`，或 `/kb/api/status` 404/网络失败）→ **不渲染**（静默降级）。
 - `aria-expanded`、`title` 提示。
 
@@ -338,20 +341,21 @@ ctx.systemPrompt.section({
 
 ## 15. 测试计划
 
-### 15.1 自动化（`node:test`，目标新增约 45 例；基线 312 → 约 357 全绿）
+### 15.1 自动化（`node:test`，计划细化到新增 89 例；基线 312 → 401 全绿）
 
 - `scope-store.test.mjs`：结构校验（sessionId/mode/kbs/50 上限/去重）、TTL 清理、缺失与归档/合并库剔除、损坏文件、原子写、串行并发、`0600`、清理回写只在变化时发生。
 - `scope-inherit.test.mjs`：子会话快照 + `inheritedFrom`；父无条目 → all；父变化不回溯；孙链复制生效值；GET 不落快照；写失败降级为父范围。
 - `scope-tools.test.mjs`：表驱动矩阵——每个 policy 选代表工具测「显式内/显式外/省略 0 库/省略 1 库/省略多库」；`kb_query` 的 `*`；跨库 doc 单命中/多候选/0 命中；`kb_list` 过滤 + `scope` 字段；`kb_lint` 循环分组；`kb_std_check` 标准不在范围；`kb_remove(removeKb=true)`；`kb_edit_batch` 单库事务；`mode=all` 回归（现有行为不变）。
 - `scope-prompt.test.mjs`：selected/all/空/损坏/无 session/子继承/写完刷新/缓存 TTL/超 20 个库名截断；函数永不抛错。
 - `scope-api.test.mjs`：GET/PUT 正常、非法 session、非法 mode、缺 `x-kb-ui`、跨源拒绝、`features.scope`、写失败、归档库、`mode=all` 忽略 kbs。
-- `scope-client.test.mjs`：VM 加载 `lib/client.js`，断言同时注册 `sidebar.footer.action` 与 `conversation.input.left`；`lib/scope-view.js` 纯函数单测（chipLabel/selectionPayload/mergeSelection）；`check:client` 产物不漂移。
-- 现有 312 个用例**保持断言不变**全绿（`mode=all` 行为与 0.20.4 一致；fake exec 无 session.id 走 fail-open）。
+- `scope-sync.test.mjs`：`kb_rename` 工具与 `PATCH /kbs/:name` 两个调用点都同步 `.scopes.json`；`archiveKb` / `purgeKb` 剔除库名。
+- `scope-client.test.mjs`：VM 加载 `lib/client.js`，断言同时注册 `sidebar.footer.action` 与 `conversation.input.left`；`lib/scope-view.js` 纯函数单测（chipLabel/selectionPayload/isAllSelection）；`check:client` 产物不漂移。
+- 现有 312 个用例全绿：除 `test/client-entry.test.mjs` 需要扩展注册断言（新增 `conversation.input.left`）外，其余断言不变（`mode=all` 行为与 0.20.4 一致；fake exec 无 session.id 走 fail-open）。
 
 ### 15.2 真实宿主验收（沿用 spike 手法）
 
 - 临时 `dsh --profile web --port <port>` + 临时 `kbRoot` + 真实插件（探针式插入 profile，结束还原）。
-- WKWebView 流程：chip「全部」→ 开面板 → 搜索/勾选 2 库 → 应用 → toast + chip「2 个」→ `GET /kb/api/scope` 校验 → 刷新页面后仍为「2 个」→「打开知识库工作台」弹窗可开可关。
+- WKWebView 流程：chip「全部」→ 开面板 → 勾选 1 库 → 应用 → toast + chip「1 个」→ 重新打开面板勾选状态保持 → 读 `.scopes.json` 断言 →「打开知识库工作台」弹窗可开可关。
 - 失败注入：`.scopes.json` 所在目录只读 → 应用报错且 chip 不变；禁用 `webServer` → 胶囊不渲染。
 - 桌面端重启后人工清单：chip 可见；切换范围后一轮对话里 `kb_list` 只返回范围内库；范围外 `kb_query` 收到 `KB_OUT_OF_SCOPE`；子代理（`subagent`）继承。
 
