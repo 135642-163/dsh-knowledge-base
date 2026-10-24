@@ -1515,7 +1515,7 @@ test("Escape closes the panel, removes the keydown listener and refocuses the ch
 // 7.5 点击外部：关闭面板、丢弃草稿、不 PUT、焦点回到胶囊；面板内点击不关闭
 // ===========================================================================
 
-test("pointerdown outside closes the panel without saving and refocuses the chip", async () => {
+test("pointerdown outside closes the panel immediately and refocuses the chip after the tick", async () => {
   const kbs = [{ name: "Alpha" }, { name: "Beta" }];
   const { rt, ui } = await loadReady({ mode: "all", kbs: [] }, kbs);
   await openPanel(rt, ui, { scope: { mode: "all", kbs: [] }, kbs });
@@ -1523,11 +1523,19 @@ test("pointerdown outside closes the panel without saving and refocuses the chip
   assert.equal(rt.documentListeners.filter((entry) => entry.type === "pointerdown").length, 1);
 
   rt.emitDocument("pointerdown", { target: rt.document.body });
-  assert.equal(panelOf(rt, ui), null, "outside pointerdown must close the panel");
+  assert.equal(panelOf(rt, ui), null, "outside pointerdown must close the panel immediately");
   assert.equal(chipOf(rt, ui).props["aria-expanded"], false);
   assert.equal(rt.fetch.calls.filter((call) => call.method === "PUT").length, putsBefore, "closing must not save the draft");
+  assert.equal(
+    rt.focused.length,
+    0,
+    "focus must wait until the browser finishes the click's default focus action"
+  );
+  const deferred = rt.timers.pending.find((entry) => entry.delay === 0);
+  assert.ok(deferred, "outside pointerdown must schedule a deferred chip focus");
+  rt.timers.fireLatest();
   const focused = rt.focused.at(-1);
-  assert.ok(focused, "chip was not focused");
+  assert.ok(focused, "chip was not focused after the deferred timer");
   assert.match(focused.props.className, /dsh-kb-scope-chip/);
   assert.equal(
     rt.documentListeners.filter((entry) => entry.type === "pointerdown").length,
@@ -1539,6 +1547,23 @@ test("pointerdown outside closes the panel without saving and refocuses the chip
   rt.click(chipOf(rt, ui));
   await respondScopeData(rt, { scope: { mode: "all", kbs: [] }, kbs });
   assert.ok(panelOf(rt, ui));
+});
+
+test("unmount clears the deferred outside-click focus timer", async () => {
+  const kbs = [{ name: "Alpha" }];
+  const { rt, ui } = await loadReady({ mode: "all", kbs: [] }, kbs);
+  await openPanel(rt, ui, { scope: { mode: "all", kbs: [] }, kbs });
+
+  rt.emitDocument("pointerdown", { target: rt.document.body });
+  assert.equal(panelOf(rt, ui), null);
+  const deferred = rt.timers.pending.find((entry) => entry.delay === 0);
+  assert.ok(deferred, "outside pointerdown must schedule a deferred chip focus");
+  assert.equal(rt.focused.length, 0);
+
+  ui.unmount();
+  assert.ok(rt.timers.cleared.includes(deferred.id), "unmount must clear the deferred focus timer");
+  assert.equal(rt.timers.pending.length, 0);
+  assert.equal(rt.focused.length, 0, "unmounted capsule must not be refocused");
 });
 
 test("pointerdown inside the panel or on the chip does not close it", async () => {
@@ -1656,7 +1681,7 @@ test("unmount during the initial load is silent and ignores the late /status res
   assert.equal(rt.cleanupsRun, 0);
 
   ui.unmount();
-  assert.equal(rt.cleanupsRun, 1, "load effect cleanup did not run on unmount");
+  assert.equal(rt.cleanupsRun, 2, "load + deferred-focus-timer cleanups must run on unmount");
   rt.respond({ body: { features: { scope: true } } });
   await rt.flush();
   assert.equal(rt.renderCount, renders);

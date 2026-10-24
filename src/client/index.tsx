@@ -200,6 +200,14 @@ export function KbScopeCapsule({ sessionId }: ScopeSlotProps) {
   const generationRef = useRef(0);
   const inflightRef = useRef<{ sessionId: string; promise: Promise<ScopeData> } | null>(null);
   const toastIdRef = useRef(0);
+  // 点击外部后的延迟还焦点：浏览器的默认聚焦动作发生在事件之后，同步 focus 会被覆盖。
+  const focusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function clearFocusTimer() {
+    if (focusTimerRef.current === null) return;
+    clearTimeout(focusTimerRef.current);
+    focusTimerRef.current = null;
+  }
 
   function showToast(text: string) {
     toastIdRef.current += 1;
@@ -276,6 +284,16 @@ export function KbScopeCapsule({ sessionId }: ScopeSlotProps) {
   }, [toast?.id]);
 
   useEffect(() => {
+    // 重新打开面板时丢掉还没执行的外部点击还焦点，避免它把焦点从面板抢回胶囊。
+    if (open) clearFocusTimer();
+  }, [open]);
+
+  useEffect(() => () => {
+    // 卸载后不能再去 focus 已经不在文档里的胶囊。
+    clearFocusTimer();
+  }, []);
+
+  useEffect(() => {
     if (!open || typeof document === "undefined") return undefined;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") closeScopePanel(true);
@@ -284,8 +302,16 @@ export function KbScopeCapsule({ sessionId }: ScopeSlotProps) {
       const target = event?.target as Node | null;
       if (target && isInside(panelRef.current, target)) return;
       if (target && isInside(chipRef.current, target)) return;
-      // 与相邻的权限/模型选择 popover 一致：点击外部关闭面板并丢弃草稿，不提交。
-      closeScopePanel(true);
+      // 与相邻的权限/模型选择 popover 一致：点击外部立即关闭面板并丢弃草稿，不提交。
+      // 焦点不能同步还给胶囊——浏览器在处理完 pointerdown 后还会执行这次点击的默认
+      // 聚焦动作（例如聚焦被点中的元素），同步 focus 会被它覆盖。等本次事件结束
+      // （setTimeout 0）再聚焦，面板关闭本身仍然是即时的。
+      closeScopePanel(false);
+      clearFocusTimer();
+      focusTimerRef.current = setTimeout(() => {
+        focusTimerRef.current = null;
+        chipRef.current?.focus();
+      }, 0);
     };
     document.addEventListener("keydown", onKeyDown);
     document.addEventListener("pointerdown", onPointerDown);
@@ -341,6 +367,7 @@ export function KbScopeCapsule({ sessionId }: ScopeSlotProps) {
   if (phase === "hidden") return null;
 
   function closeScopePanel(restoreFocus: boolean) {
+    if (restoreFocus) clearFocusTimer();
     setOpen(false);
     setPosition(null);
     if (restoreFocus) chipRef.current?.focus();
@@ -353,6 +380,7 @@ export function KbScopeCapsule({ sessionId }: ScopeSlotProps) {
 
   async function openPanel() {
     if (!sessionId) return;
+    clearFocusTimer();
     const gen = ++generationRef.current;
     setPanelPhase("loading");
     setQuery("");

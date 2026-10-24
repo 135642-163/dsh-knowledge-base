@@ -57,7 +57,7 @@ test("资料工具栏渲染搜索框、每页条数和顶部/底部分页", () =
   assert.match(html, /<option value="200">200<\/option>/);
   assert.match(html, /第 1 \/ 3 页 · 共 120 篇/);
   assert.match(html, /type="number" min="1" max="3"/);
-  assert.match(html, /data-action="docs-jump"/);
+  assert.match(html, /data-docs-jump/);
   // 上下各一组上一页/下一页。
   assert.equal((html.match(/data-action="docs-page"/g) ?? []).length, 4);
   assert.equal((html.match(/data-docs-page/g) ?? []).length, 2);
@@ -97,7 +97,7 @@ test("空库显示「还没有资料」，不渲染工具栏和分页", () => {
 test("有搜索词无结果显示「没有匹配的资料」和清除搜索", () => {
   const html = render({ total: 0, query: "不存在的标准" });
   assert.match(html, /没有匹配的资料/);
-  assert.match(html, /data-action="docs-clear"/);
+  assert.match(html, /data-docs-clear/);
   assert.match(html, /data-docs-query/);
   assert.match(html, /value="不存在的标准"/);
   assert.doesNotMatch(html, /data-action="docs-page"/);
@@ -106,6 +106,24 @@ test("有搜索词无结果显示「没有匹配的资料」和清除搜索", ()
   const blank = render({ total: 0, query: "   " });
   assert.match(blank, /还没有资料/);
   assert.doesNotMatch(blank, /data-docs-query/);
+});
+
+test("新搜索还没有结果时显示「正在搜索…」，不把旧结果说成新词", () => {
+  const empty = render({ total: 0, query: "新词", appliedQuery: "旧词" });
+  assert.match(empty, /正在搜索…/);
+  assert.doesNotMatch(empty, /没有匹配的资料/);
+  assert.match(empty, /data-docs-query/);
+
+  const stale = render({
+    items: [makeDoc("old")],
+    total: 60,
+    offset: 0,
+    limit: 50,
+    query: "新词",
+    appliedQuery: "旧词",
+  });
+  assert.match(stale, /正在搜索…/);
+  assert.doesNotMatch(stale, /第 1–1 篇/);
 });
 
 test("表格列和行保持原样并显示条目区间", () => {

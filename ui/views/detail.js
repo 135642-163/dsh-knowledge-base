@@ -111,11 +111,23 @@ function overview(kb, detail, { fmtNumber }) {
 function docs(name, state, { fmtNumber, icons }) {
   const page = state.docs;
   const query = String(page.query ?? "");
+  // 输入框显示的是正在输入的词；结果属于真正应用过的 appliedQuery。
+  // 两者不一致时（防抖/请求在途）不把旧结果说成新词的结果。
+  const appliedQuery = String(page.appliedQuery ?? query);
+  const searching = query !== appliedQuery;
   const total = Math.max(0, Math.round(Number(page.total) || 0));
   const limit = docsPageSize(page.limit);
   const offset = Math.max(0, Math.round(Number(page.offset) || 0));
   const items = Array.isArray(page.items) ? page.items : [];
   if (total === 0) {
+    if (searching) {
+      return `
+        <div class="panel">
+          ${docsToolbar({ query, limit, total, pages: 1, pageNo: 1, fmtNumber, icons, showPager: false })}
+          <div class="state docs-empty"><p>正在搜索…</p></div>
+        </div>
+      `;
+    }
     if (query.trim() === "") {
       return `<div class="state">还没有资料，点右上角的「上传资料」开始导入。</div>`;
     }
@@ -125,7 +137,7 @@ function docs(name, state, { fmtNumber, icons }) {
         ${docsToolbar({ query, limit, total, pages: 1, pageNo: 1, fmtNumber, icons, showPager: false })}
         <div class="state docs-empty">
           <p>没有匹配的资料</p>
-          <button class="btn" data-action="docs-clear">清除搜索</button>
+          <button class="btn" data-docs-clear>清除搜索</button>
         </div>
       </div>
     `;
@@ -138,7 +150,11 @@ function docs(name, state, { fmtNumber, icons }) {
       ${docsToolbar({ query, limit, total, pages, pageNo, fmtNumber, icons, showPager: true })}
       <div class="table-head">
         <strong>${fmtNumber(total)} 篇</strong>
-        ${items.length > 0 ? `<span class="muted">第 ${fmtNumber(offset + 1)}–${fmtNumber(rangeEnd)} 篇</span>` : ""}
+        ${searching
+          ? `<span class="muted">正在搜索…</span>`
+          : items.length > 0
+            ? `<span class="muted">第 ${fmtNumber(offset + 1)}–${fmtNumber(rangeEnd)} 篇</span>`
+            : ""}
       </div>
       <table class="table">
         <thead><tr><th>标题</th><th>类型</th><th>页数</th><th>可信度</th><th>更新</th></tr></thead>
@@ -185,7 +201,7 @@ function docsPager({ pageNo, pages, total, limit, fmtNumber, label }) {
       <button class="btn" data-action="docs-page" data-offset="${nextOffset}" ${pageNo >= pages ? "disabled" : ""}>下一页</button>
       <span class="docs-jump">
         <input type="number" min="1" max="${pages}" step="1" value="${pageNo}" data-docs-page aria-label="页码" />
-        <button class="btn" data-action="docs-jump">跳转</button>
+        <button class="btn" data-docs-jump>跳转</button>
       </span>
     </div>
   `;
