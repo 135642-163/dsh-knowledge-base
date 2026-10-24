@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ComponentType } from "react";
 import { chipLabel, isAllSelection, selectionPayload } from "../../lib/scope-view.js";
@@ -7,10 +7,11 @@ export const inject = ["slots"];
 
 type KbProps = { wide?: boolean };
 type Scope = { mode: "all" | "selected"; kbs: string[]; inheritedFrom?: string | null };
+type KbDocs = { total?: number; deleted?: number };
 type KbSummary = {
   name: string;
   description?: string;
-  docs?: { total?: number };
+  docs?: number | KbDocs;
   mergedInto?: string | null;
 };
 type ScopeSlotProps = { sessionId?: string };
@@ -21,9 +22,15 @@ type SlotContext = {
     register(declaration: SlotDeclaration, component: ComponentType<any>): void;
   };
 };
+type Phase = "loading" | "ready" | "failed" | "hidden";
+type PanelPhase = "loading" | "ready";
+type PanelPosition = { left: number | string; bottom: number; transform?: string };
+type ScopeData = { scope: Scope; kbs: KbSummary[] };
+type Toast = { text: string; id: number };
 
 const API = "/kb/api";
 const CSS_ID = "dsh-knowledge-wiki/sidebar-entry.css";
+const FALLBACK_PANEL_POSITION: PanelPosition = { left: "50%", bottom: 24, transform: "translateX(-50%)" };
 const CSS = `
 .dsh-kb-entry { box-sizing: border-box; display: flex; flex: 1 1 0; align-items: center; gap: 8px; width: 100%; min-width: 0; min-height: 36px; margin: 8px 2px 0; padding: 7px 8px; border: 0; border-radius: var(--dsw-radius-md, 8px); background: transparent; color: var(--dsw-alias-label-primary); font: inherit; font-size: 14px; line-height: 22px; text-align: left; text-decoration: none; cursor: pointer; }
 .dsh-kb-entry:hover, .dsh-kb-entry-active { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
@@ -56,7 +63,7 @@ const CSS = `
 .dsh-kb-scope-primary { background: var(--dsw-alias-state-business-primary, #4d6bfe) !important; color: #fff !important; }
 .dsh-kb-scope-primary:disabled { opacity: 0.5; cursor: default; }
 .dsh-kb-scope-link { margin-left: auto; color: var(--dsw-alias-label-secondary, #666) !important; }
-.dsh-kb-scope-toast { position: fixed; z-index: 1300; padding: 6px 12px; border-radius: 999px; background: rgba(0, 0, 0, 0.78); color: #fff; font-size: 12px; }
+.dsh-kb-scope-toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 1300; padding: 6px 12px; border-radius: 999px; background: rgba(0, 0, 0, 0.78); color: #fff; font-size: 12px; }
 `;
 
 function ensureCss() {
@@ -85,11 +92,24 @@ async function getJson<T>(path: string): Promise<T> {
   return (await response.json()) as T;
 }
 
+/** 文档数徽标：软删除的文档不算“在用”，避免只剩删除项的库显示 N 篇。 */
+function docsBadge(kb: KbSummary): string {
+  const docs = kb.docs;
+  const total = typeof docs === "number" ? docs : docs?.total ?? 0;
+  const deleted = typeof docs === "number" ? 0 : docs?.deleted ?? 0;
+  const live = Math.max(0, total - deleted);
+  return live === 0 ? "空库" : `${live} 篇`;
+}
+
 function WorkbenchModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
   useEffect(() => {
     if (!open || typeof document === "undefined") return undefined;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") onCloseRef.current();
     };
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -98,7 +118,7 @@ function WorkbenchModal({ open, onClose }: { open: boolean; onClose: () => void 
       document.body.style.overflow = previousOverflow;
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [open, onClose]);
+  }, [open]);
   if (!open || typeof document === "undefined") return null;
   return createPortal(
     <div
@@ -142,23 +162,49 @@ export function KbWorkbenchAction({ wide = false }: KbProps) {
   );
 }
 
-type Phase = "loading" | "ready" | "failed" | "hidden";
-
 export function KbScopeCapsule({ sessionId }: ScopeSlotProps) {
   const [phase, setPhase] = useState<Phase>("loading");
+  const [panelPhase, setPanelPhase] = useState<PanelPhase>("loading");
   const [scope, setScope] = useState<Scope | null>(null);
   const [kbs, setKbs] = useState<KbSummary[]>([]);
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<string[]>([]);
   const [query, setQuery] = useState("");
   const [saving, setSaving] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<Toast | null>(null);
   const [retry, setRetry] = useState(0);
   const [workbenchOpen, setWorkbenchOpen] = useState(false);
-  const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
+  const [position, setPosition] = useState<PanelPosition | null>(null);
   const chipRef = useRef<HTMLButtonElement | null>(null);
+  const generationRef = useRef(0);
+  const inflightRef = useRef<{ sessionId: string; promise: Promise<ScopeData> } | null>(null);
+  const toastIdRef = useRef(0);
 
-  const closePanel = useCallback(() => setOpen(false), []);
+  function showToast(text: string) {
+    toastIdRef.current += 1;
+    setToast({ text, id: toastIdRef.current });
+  }
+
+  /** 单飞：同一会话共享同一个进行中的 scope+kbs 请求。 */
+  function loadScopeData(sid: string): Promise<ScopeData> {
+    if (inflightRef.current?.sessionId === sid) return inflightRef.current.promise;
+    const promise = (async () => {
+      const [scopeResponse, kbsResponse] = await Promise.all([
+        getJson<{ scope: Scope }>(`/scope?session=${encodeURIComponent(sid)}`),
+        getJson<{ kbs: KbSummary[] }>("/kbs"),
+      ]);
+      return {
+        scope: scopeResponse.scope,
+        kbs: (kbsResponse.kbs ?? []).filter((kb) => kb.mergedInto == null),
+      };
+    })();
+    inflightRef.current = { sessionId: sid, promise };
+    const clear = () => {
+      if (inflightRef.current?.promise === promise) inflightRef.current = null;
+    };
+    void promise.then(clear, clear);
+    return promise;
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -182,13 +228,10 @@ export function KbScopeCapsule({ sessionId }: ScopeSlotProps) {
         return;
       }
       try {
-        const [scopeResponse, kbsResponse] = await Promise.all([
-          getJson<{ scope: Scope }>(`/scope?session=${encodeURIComponent(sessionId)}`),
-          getJson<{ kbs: KbSummary[] }>("/kbs"),
-        ]);
+        const data = await loadScopeData(sessionId);
         if (cancelled) return;
-        setScope(scopeResponse.scope);
-        setKbs((kbsResponse.kbs ?? []).filter((kb) => kb.mergedInto == null));
+        setScope(data.scope);
+        setKbs(data.kbs);
         setPhase("ready");
       } catch {
         if (!cancelled) setPhase("failed");
@@ -204,12 +247,12 @@ export function KbScopeCapsule({ sessionId }: ScopeSlotProps) {
     if (!toast) return undefined;
     const timer = setTimeout(() => setToast(null), 2400);
     return () => clearTimeout(timer);
-  }, [toast]);
+  }, [toast?.id]);
 
   useEffect(() => {
     if (!open || typeof document === "undefined") return undefined;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape") closeScopePanel(true);
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
@@ -223,10 +266,9 @@ export function KbScopeCapsule({ sessionId }: ScopeSlotProps) {
         setPosition(null);
         return;
       }
-      const width = 320;
-      const left = Math.min(Math.max(8, rect.left), Math.max(8, window.innerWidth - width - 8));
-      const top = Math.max(8, rect.top - 8 - 420);
-      setPosition({ top, left });
+      const left = Math.min(Math.max(8, rect.left), Math.max(8, window.innerWidth - 328));
+      const bottom = Math.max(8, window.innerHeight - rect.top + 8);
+      setPosition({ left, bottom });
     }
     place();
     window.addEventListener("resize", place);
@@ -246,37 +288,64 @@ export function KbScopeCapsule({ sessionId }: ScopeSlotProps) {
 
   if (phase === "hidden") return null;
 
-  async function refreshPanel() {
+  function closeScopePanel(restoreFocus: boolean) {
+    setOpen(false);
+    setPosition(null);
+    if (restoreFocus) chipRef.current?.focus();
+  }
+
+  function openWorkbench() {
+    closeScopePanel(false);
+    setWorkbenchOpen(true);
+  }
+
+  async function openPanel() {
     if (!sessionId) return;
+    const gen = ++generationRef.current;
+    setPanelPhase("loading");
+    setQuery("");
     try {
-      const [scopeResponse, kbsResponse] = await Promise.all([
-        getJson<{ scope: Scope }>(`/scope?session=${encodeURIComponent(sessionId)}`),
-        getJson<{ kbs: KbSummary[] }>("/kbs"),
-      ]);
-      setScope(scopeResponse.scope);
-      setKbs((kbsResponse.kbs ?? []).filter((kb) => kb.mergedInto == null));
+      const data = await loadScopeData(sessionId);
+      if (gen !== generationRef.current) return;
+      const freshNames = data.kbs.map((kb) => kb.name);
+      setScope(data.scope);
+      setKbs(data.kbs);
+      setDraft(
+        data.scope.mode === "selected"
+          ? (data.scope.kbs ?? []).filter((name) => freshNames.includes(name))
+          : [...freshNames]
+      );
+      setPanelPhase("ready");
     } catch {
-      /* 保留当前展示；点“应用”时服务端会再次校验 */
+      if (gen !== generationRef.current) return;
+      closeScopePanel(false);
+      setPhase("failed");
     }
   }
 
   function toggleOpen() {
+    if (saving) return;
+    if (open) {
+      closeScopePanel(false);
+      return;
+    }
     if (phase === "failed") {
       setRetry((value) => value + 1);
       return;
     }
     if (phase !== "ready") return;
-    setDraft(scope?.mode === "selected" ? [...(scope.kbs ?? [])] : [...names]);
-    setQuery("");
     setOpen(true);
-    void refreshPanel();
+    void openPanel();
   }
 
   async function applySelection() {
-    if (!sessionId) return;
-    const payload = isAllSelection(draft, names)
+    if (!sessionId || saving) return;
+    const picked = draft.filter((name) => names.includes(name));
+    const payload = picked.length === 0 || isAllSelection(picked, names)
       ? { mode: "all", kbs: [] as string[] }
-      : selectionPayload("selected", draft, names);
+      : selectionPayload("selected", picked, names);
+    // 先递增代号：PUT 期间返回的旧 GET 响应不能再覆盖已应用的范围。
+    generationRef.current += 1;
     setSaving(true);
     try {
       const response = await fetch(`${API}/scope`, {
@@ -284,24 +353,28 @@ export function KbScopeCapsule({ sessionId }: ScopeSlotProps) {
         headers: { "content-type": "application/json", "x-kb-ui": "1" },
         body: JSON.stringify({ session: sessionId, ...payload }),
       });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const body = (await response.json()) as { scope: Scope };
-      setScope(body.scope);
-      setOpen(false);
-      setToast(body.scope.mode === "selected" ? `已限定为 ${body.scope.kbs.length} 个知识库` : "已改为全部知识库");
-    } catch {
-      setToast("范围保存失败，请重试");
+      const data = (await response.json().catch(() => null)) as
+        | { scope?: Scope; error?: { message?: string } }
+        | null;
+      if (!response.ok) throw new Error(data?.error?.message || "范围保存失败，请重试");
+      if (!data?.scope) throw new Error("范围保存失败，请重试");
+      setScope(data.scope);
+      closeScopePanel(true);
+      showToast(data.scope.mode === "selected" ? `已限定为 ${data.scope.kbs.length} 个知识库` : "已改为全部知识库");
+    } catch (error) {
+      const message = error instanceof Error && error.message ? error.message : "范围保存失败，请重试";
+      showToast(message);
     } finally {
       setSaving(false);
     }
   }
 
-  const panel = open && phase === "ready" ? createPortal(
+  const panel = open && phase === "ready" && panelPhase === "ready" ? createPortal(
     <div
       className="dsh-kb-scope-panel"
       role="dialog"
       aria-label="选择本会话知识库"
-      style={position ? { top: position.top, left: position.left } : { top: 80, left: 8 }}
+      style={position ?? FALLBACK_PANEL_POSITION}
     >
       <div className="dsh-kb-scope-head">本会话使用哪些知识库？</div>
       <input
@@ -320,39 +393,38 @@ export function KbScopeCapsule({ sessionId }: ScopeSlotProps) {
               <button
                 type="button"
                 className="dsh-kb-scope-link"
-                onClick={() => { setOpen(false); setWorkbenchOpen(true); }}
+                disabled={saving}
+                onClick={openWorkbench}
               >
                 去工作台新建
               </button>
             ) : null}
           </div>
         ) : (
-          filtered.map((kb) => {
-            const docs = kb.docs?.total ?? 0;
-            return (
-              <label key={kb.name} className="dsh-kb-scope-row">
-                <input
-                  type="checkbox"
-                  checked={draft.includes(kb.name)}
-                  onChange={() => setDraft((current) => (
-                    current.includes(kb.name) ? current.filter((name) => name !== kb.name) : [...current, kb.name]
-                  ))}
-                />
-                <span className="dsh-kb-scope-name">{kb.name}</span>
-                <span className="dsh-kb-scope-meta">{docs === 0 ? "空库" : `${docs} 篇`}</span>
-              </label>
-            );
-          })
+          filtered.map((kb) => (
+            <label key={kb.name} className="dsh-kb-scope-row">
+              <input
+                type="checkbox"
+                checked={draft.includes(kb.name)}
+                disabled={saving}
+                onChange={() => setDraft((current) => (
+                  current.includes(kb.name) ? current.filter((name) => name !== kb.name) : [...current, kb.name]
+                ))}
+              />
+              <span className="dsh-kb-scope-name">{kb.name}</span>
+              <span className="dsh-kb-scope-meta">{docsBadge(kb)}</span>
+            </label>
+          ))
         )}
       </div>
       <div className="dsh-kb-scope-actions">
-        <button type="button" onClick={() => setDraft([...names])}>全选</button>
-        <button type="button" onClick={() => setDraft([])}>清空</button>
-        <button type="button" onClick={() => setOpen(false)}>取消</button>
+        <button type="button" disabled={saving} onClick={() => setDraft([...names])}>全选</button>
+        <button type="button" disabled={saving} onClick={() => setDraft([])}>清空</button>
+        <button type="button" disabled={saving} onClick={() => closeScopePanel(true)}>取消</button>
         <button type="button" className="dsh-kb-scope-primary" disabled={saving} onClick={() => void applySelection()}>
           应用
         </button>
-        <button type="button" className="dsh-kb-scope-link" onClick={() => { setOpen(false); setWorkbenchOpen(true); }}>
+        <button type="button" className="dsh-kb-scope-link" disabled={saving} onClick={openWorkbench}>
           打开知识库工作台
         </button>
       </div>
@@ -376,7 +448,10 @@ export function KbScopeCapsule({ sessionId }: ScopeSlotProps) {
       </button>
       {panel}
       {toast && typeof document !== "undefined"
-        ? createPortal(<div className="dsh-kb-scope-toast">{toast}</div>, document.body)
+        ? createPortal(
+            <div className="dsh-kb-scope-toast" role="status" aria-live="polite">{toast.text}</div>,
+            document.body
+          )
         : null}
       <WorkbenchModal open={workbenchOpen} onClose={() => setWorkbenchOpen(false)} />
     </>

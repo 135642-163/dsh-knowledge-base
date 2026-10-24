@@ -47,6 +47,11 @@ function requireStub(id, state) {
       useEffect(effect) {
         state.effects.push(effect);
       },
+      useRef(initial) {
+        const ref = { current: initial };
+        state.refs.push(ref);
+        return ref;
+      },
     };
   }
   if (id === "react/jsx-runtime") return { jsx, jsxs: jsx, Fragment };
@@ -68,6 +73,7 @@ function loadClient(overrides = {}) {
     setters: [],
     effects: [],
     portals: [],
+    refs: [],
     styles: [],
     document: undefined,
   };
