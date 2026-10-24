@@ -459,3 +459,72 @@ test("doc tools: keep/trust/retitle batch modes require kb in multi-kb scope", a
   const retitled = await tools.get("kb_retitle").execute({ kb: "甲库", all: true }, scoped("s1"));
   assert.equal(retitled.kb, "甲库");
 });
+
+test("single-kb tools: import uses the only scope kb", async () => {
+  const { tools, scoped, importDoc, scope, root } = await setup();
+  await importDoc("a.md", "# 甲\n\n正文。\n", "甲库", "甲文档");
+  await scope("s1", ["甲库"]);
+  await mkdir(join(root, "in"), { recursive: true });
+  const path = join(root, "in", "c.md");
+  await writeFile(path, "# C\n\n丙资料。\n", "utf8");
+  const result = await tools.get("kb_import").execute({ path }, scoped("s1"));
+  assert.equal(result.kb, "甲库");
+});
+
+test("single-kb tools: import with multi-kb scope asks for kb", async () => {
+  const { tools, scoped, importDoc, scope, root } = await setup();
+  await importDoc("a.md", "# 甲\n\n正文。\n", "甲库", "甲文档");
+  await importDoc("b.md", "# 乙\n\n正文。\n", "乙库", "乙文档");
+  await scope("s1", ["甲库", "乙库"]);
+  const path = join(root, "in", "d.md");
+  await mkdir(join(root, "in"), { recursive: true });
+  await writeFile(path, "# D\n\n丁资料。\n", "utf8");
+  await assert.rejects(
+    () => tools.get("kb_import").execute({ path }, scoped("s1")),
+    (error) => error.code === "KB_REQUIRED"
+  );
+});
+
+test("single-kb tools: explicit out-of-scope import is rejected", async () => {
+  const { tools, scoped, importDoc, scope, root } = await setup();
+  await importDoc("a.md", "# 甲\n\n正文。\n", "甲库", "甲文档");
+  await importDoc("b.md", "# 乙\n\n正文。\n", "乙库", "乙文档");
+  await scope("s1", ["甲库"]);
+  const path = join(root, "e.md");
+  await writeFile(path, "# E\n\n戊资料。\n", "utf8");
+  await assert.rejects(
+    () => tools.get("kb_import").execute({ path, kb: "乙库" }, scoped("s1")),
+    (error) => error.code === "KB_OUT_OF_SCOPE"
+  );
+});
+
+test("single-kb tools: add_note and edit_batch follow the same policy", async () => {
+  const { tools, scoped, importDoc, scope } = await setup();
+  await importDoc("a.md", "# 甲\n\nAAAA 旧内容。\n", "甲库", "甲文档");
+  await importDoc("b.md", "# 乙\n\n正文。\n", "乙库", "乙文档");
+  await scope("s1", ["甲库", "乙库"]);
+  await assert.rejects(
+    () => tools.get("kb_add_note").execute({ title: "笔记", content: "内容" }, scoped("s1")),
+    (error) => error.code === "KB_REQUIRED"
+  );
+  await assert.rejects(
+    () => tools.get("kb_edit_batch").execute({ edits: [{ doc: "甲文档", old_string: "AAAA", new_string: "BBBB" }] }, scoped("s1")),
+    (error) => error.code === "KB_REQUIRED"
+  );
+  const batch = await tools.get("kb_edit_batch").execute(
+    { kb: "甲库", edits: [{ doc: "甲文档", old_string: "AAAA", new_string: "BBBB" }] },
+    scoped("s1")
+  );
+  assert.equal(batch.kb, "甲库");
+});
+
+test("single-kb tools: snapshot and export honour the scope", async () => {
+  const { tools, scoped, importDoc, scope } = await setup();
+  await importDoc("a.md", "# 甲\n\n正文。\n", "甲库", "甲文档");
+  await importDoc("b.md", "# 乙\n\n正文。\n", "乙库", "乙文档");
+  await scope("s1", ["甲库"]);
+  const snap = await tools.get("kb_snapshot").execute({}, scoped("s1"));
+  assert.equal(snap.kb, "甲库");
+  const exported = await tools.get("kb_export").execute({ format: "md" }, scoped("s1"));
+  assert.equal(exported.kb, "甲库");
+});
