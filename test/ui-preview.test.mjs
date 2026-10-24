@@ -13,7 +13,15 @@ globalThis.fetch = async (url, options = {}) => {
 };
 
 const { api } = await import("../ui/api.js");
-const { normalizeRenameValue, previewKindFor, renderPreviewBody } = await import("../ui/views/modals.js");
+const {
+  cacheBustUrl,
+  installOfficeEngineAndWait,
+  normalizeRenameValue,
+  officePreviewMode,
+  previewKindFor,
+  renderOfficeInstallState,
+  renderPreviewBody,
+} = await import("../ui/views/modals.js");
 
 const URLS = {
   inline: "/kb/api/kbs/%E6%A0%87%E5%87%86/docs/d1/source?inline=1",
@@ -132,4 +140,216 @@ test("normalizeRenameValue 拒绝空值与原名，返回 trim 后的新名", ()
   assert.deepEqual(normalizeRenameValue(" 标准 ", "标准"), { ok: false, error: "名称没有变化" });
   assert.deepEqual(normalizeRenameValue("  新标准  ", "标准"), { ok: true, value: "新标准" });
   assert.deepEqual(normalizeRenameValue("标准 2", "标准"), { ok: true, value: "标准 2" });
+});
+
+// ---------------------------------------------------------------------------
+// Office 引擎一键安装（0.23.0）
+// ---------------------------------------------------------------------------
+
+test("renderOfficeInstallState 未安装：说明、同意勾选、初始禁用的安装按钮", () => {
+  const html = renderOfficeInstallState({ status: { canInstall: true } });
+  assert.match(html, /data-office-state="ready"/);
+  assert.match(html, /未安装 Office 转换引擎（LibreOfficeKit）/);
+  assert.match(html, /安装后可在此直接预览 docx\/pptx\/xlsx；约 300 MB，转换只在本机进行/);
+  assert.match(html, /data-office-consent/);
+  assert.match(html, /我同意下载并安装（约 300 MB）/);
+  assert.match(html, /data-office-install/);
+  assert.match(html, /安装转换引擎/);
+  assert.match(html, /data-office-install disabled/);
+  assert.doesNotMatch(html, /data-office-progress/);
+  assert.doesNotMatch(html, /缺少 Node\/npm/);
+  assert.doesNotMatch(html, /data-office-error/);
+});
+
+test("renderOfficeInstallState 安装中：不确定进度与阶段文案，隐藏勾选/按钮", () => {
+  const html = renderOfficeInstallState({
+    status: { canInstall: true },
+    installing: { phase: "download", text: "正在下载并安装…" },
+  });
+  assert.match(html, /data-office-state="installing"/);
+  assert.match(html, /data-office-progress/);
+  assert.match(html, /data-office-progress-text>正在下载并安装…/);
+  assert.match(html, /data-office-phase="download"/);
+  assert.match(html, /aria-valuetext="正在下载并安装…"/);
+  assert.match(html, /preview-install-bar/);
+  assert.doesNotMatch(html, /data-office-consent/);
+  assert.doesNotMatch(html, /data-office-install/);
+});
+
+test("renderOfficeInstallState 失败：错误转义、勾选保留、按钮变为重试", () => {
+  const html = renderOfficeInstallState({
+    status: { canInstall: true },
+    error: "安装包下载失败 <网络>",
+  });
+  assert.match(html, /data-office-state="error"/);
+  assert.match(html, /安装包下载失败 &lt;网络&gt;/);
+  assert.doesNotMatch(html, /<网络>/);
+  assert.match(html, /data-office-consent checked/);
+  assert.match(html, /data-office-install>重试</);
+  assert.doesNotMatch(html, /data-office-install disabled/);
+});
+
+test("renderOfficeInstallState canInstall=false：提示缺少 Node/npm，不渲染安装入口", () => {
+  const html = renderOfficeInstallState({ status: { canInstall: false, toolchain: null } });
+  assert.match(html, /缺少 Node\/npm，无法自动安装，请按 README 手动安装/);
+  assert.doesNotMatch(html, /data-office-install/);
+  assert.doesNotMatch(html, /data-office-consent/);
+  assert.doesNotMatch(html, /data-office-progress/);
+});
+
+// 勾选解锁按钮只存在于 openPreviewModal 的 DOM 事件里（本套件没有 DOM）；
+// 纯函数保证“未勾选时按钮初始 disabled”，交互部分由浏览器冒烟测试覆盖。
+test("installOfficeEngineAndWait 成功：轮询 running → 复查状态 → done", async () => {
+  const events = [];
+  const jobs = [
+    { id: "office-install-1", status: "running", progress: { phase: "download", text: "正在下载并安装…" } },
+    { id: "office-install-1", status: "succeeded", detail: "已安装 Office 转换引擎" },
+  ];
+  let statusCalls = 0;
+  const fakeApi = {
+    installOffice: async () => ({ jobId: "office-install-1" }),
+    job: async () => jobs.shift(),
+    officeStatus: async () => {
+      statusCalls += 1;
+      return { available: true, canInstall: true, running: false, version: "0.2.2" };
+    },
+  };
+  const result = await installOfficeEngineAndWait({
+    api: fakeApi,
+    onState: (state) => events.push(state),
+    pollMs: 5,
+    maxWaitMs: 1000,
+    timers: { setTimeout: (fn) => { fn(); return { unref() {} }; }, now: () => 0 },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.status.available, true);
+  assert.equal(statusCalls, 1, "成功结算后应复查一次 /office/status");
+  assert.deepEqual(events.map((state) => state.phase), [
+    "starting",
+    "installing",
+    "installing",
+    "verifying",
+    "done",
+  ]);
+  assert.equal(events.at(-1).status.available, true);
+});
+
+test("installOfficeEngineAndWait 成功但复查仍不可用 → error", async () => {
+  const events = [];
+  const fakeApi = {
+    installOffice: async () => ({ jobId: "j1" }),
+    job: async () => ({ id: "j1", status: "succeeded", detail: "已安装 Office 转换引擎" }),
+    officeStatus: async () => ({ available: false, canInstall: true, running: false }),
+  };
+  const result = await installOfficeEngineAndWait({
+    api: fakeApi,
+    onState: (state) => events.push(state),
+    timers: { setTimeout: (fn) => { fn(); return { unref() {} }; }, now: () => 0 },
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.error, /引擎仍不可用/);
+  assert.deepEqual(events.map((state) => state.phase), ["starting", "installing", "verifying", "error"]);
+});
+
+test("installOfficeEngineAndWait 任务失败：错误文案来自 job.detail", async () => {
+  const events = [];
+  const fakeApi = {
+    installOffice: async () => ({ jobId: "j1" }),
+    job: async () => ({ id: "j1", status: "failed", detail: "安装包下载失败" }),
+    officeStatus: async () => {
+      throw new Error("失败任务不应复查状态");
+    },
+  };
+  const result = await installOfficeEngineAndWait({
+    api: fakeApi,
+    onState: (state) => events.push(state),
+    timers: { setTimeout: (fn) => { fn(); return { unref() {} }; }, now: () => 0 },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.error, "安装包下载失败");
+  assert.deepEqual(events.map((state) => state.phase), ["starting", "installing", "error"]);
+});
+
+test("installOfficeEngineAndWait 安装入口被拒（缺同意）→ error", async () => {
+  const events = [];
+  const fakeApi = {
+    installOffice: async () => {
+      const failure = new Error("安装需要用户确认");
+      failure.code = "CONSENT_REQUIRED";
+      throw failure;
+    },
+    job: async () => {
+      throw new Error("不应轮询");
+    },
+    officeStatus: async () => null,
+  };
+  const result = await installOfficeEngineAndWait({
+    api: fakeApi,
+    onState: (state) => events.push(state),
+    timers: { setTimeout: (fn) => { fn(); return { unref() {} }; }, now: () => 0 },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.error, "安装需要用户确认");
+  assert.deepEqual(events.map((state) => state.phase), ["starting", "error"]);
+});
+
+test("installOfficeEngineAndWait 轮询超时：有次数上限并返回超时错误", async () => {
+  const events = [];
+  let polls = 0;
+  const fakeApi = {
+    installOffice: async () => ({ jobId: "j1" }),
+    job: async () => {
+      polls += 1;
+      return { id: "j1", status: "running", progress: { text: "正在下载并安装…" } };
+    },
+    officeStatus: async () => null,
+  };
+  const result = await installOfficeEngineAndWait({
+    api: fakeApi,
+    onState: (state) => events.push(state),
+    pollMs: 10,
+    maxWaitMs: 35,
+    timers: { setTimeout: (fn) => { fn(); return { unref() {} }; }, now: () => 0 },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.timedOut, true);
+  assert.match(result.error, /超时/);
+  assert.equal(polls, Math.ceil(35 / 10), "超时期间按 pollMs 轮询且不无限循环");
+  assert.equal(events.at(-1).phase, "error");
+});
+
+test("officeStatus/installOffice 打到 /office 路由并自动带确认体", async () => {
+  calls.length = 0;
+  payload = { available: true, canInstall: true };
+  assert.deepEqual(await api.officeStatus(), { available: true, canInstall: true });
+  assert.equal(calls[0].url, "/kb/api/office/status");
+  assert.equal(calls[0].options.method, "GET");
+
+  payload = { jobId: "office-install-1" };
+  assert.deepEqual(await api.installOffice(), { jobId: "office-install-1" });
+  assert.equal(calls[1].url, "/kb/api/office/install");
+  assert.equal(calls[1].options.method, "POST");
+  assert.equal(calls[1].options.headers["x-kb-ui"], "1");
+  assert.deepEqual(JSON.parse(calls[1].options.body), { confirm: true });
+});
+
+test("officePreviewMode 未确认可用时先走安装面板；cacheBustUrl 兼容有无查询串", () => {
+  assert.equal(officePreviewMode({ available: true }), "frame");
+  assert.equal(officePreviewMode({ available: false }), "install");
+  assert.equal(officePreviewMode({}), "install");
+  assert.equal(officePreviewMode(undefined), "install");
+  assert.equal(cacheBustUrl(URLS.pdf, 123), `${URLS.pdf}?v=123`);
+  assert.equal(cacheBustUrl("/x?a=1", 9), "/x?a=1&v=9");
+  assert.equal(cacheBustUrl("", 9), "");
+});
+
+test("Office 安装完成后的载入提示可覆盖默认转换文案", () => {
+  const html = renderPreviewBody({
+    kind: "office",
+    urls: { ...URLS, pdf: cacheBustUrl(URLS.pdf, 42) },
+    loadingText: "已安装，正在载入预览…",
+  });
+  assert.match(html, /src="[^"]*preview\.pdf\?v=42"/);
+  assert.match(html, /已安装，正在载入预览…/);
+  assert.doesNotMatch(html, /正在转换原件/);
 });

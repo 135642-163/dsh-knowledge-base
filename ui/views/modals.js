@@ -273,13 +273,16 @@ export function previewKindFor(doc) {
 
 /**
  * 预览弹窗正文（纯函数，便于单测）。urls = { inline, pdf, download }，
- * content 仅 note/text 需要：{ markdown, truncated } 或 { error }。
+ * content 仅 note/text 需要：{ markdown, truncated } 或 { error }；
+ * loadingText 覆盖 Office 转换中的提示（安装完成重新载入时用）。
  */
-export function renderPreviewBody({ kind, urls = {}, content } = {}) {
+export function renderPreviewBody({ kind, urls = {}, content, loadingText } = {}) {
   const download = escapeAttr(urls.download ?? "");
   if (kind === "pdf" || kind === "office") {
     const src = escapeAttr(kind === "pdf" ? urls.inline ?? "" : urls.pdf ?? "");
-    const loading = kind === "office" ? `<p class="muted preview-loading">正在转换原件，首次可能需要几秒…</p>` : "";
+    const loading = kind === "office"
+      ? `<p class="muted preview-loading">${escapeHtml(loadingText ?? "正在转换原件，首次可能需要几秒…")}</p>`
+      : "";
     return `${loading}<iframe class="preview-frame" src="${src}" title="原件预览"></iframe>`;
   }
   if (kind === "image") {
@@ -311,7 +314,144 @@ export function renderPreviewBody({ kind, urls = {}, content } = {}) {
 }
 
 /**
- * 打开原件预览。note/text 先拉 /content；pdf/image/office 直接内嵌。
+ * Office 引擎未安装 / 安装中 / 安装失败的正文（纯函数，便于单测）。
+ * status 来自 GET /office/status，installing 为 { phase, text }，error 为字符串。
+ * 初始 HTML 的安装按钮一律 disabled：勾选同意后由 DOM 事件解锁（交互不在纯函数里）。
+ */
+export function renderOfficeInstallState({ status, installing, error } = {}) {
+  const canInstall = status?.canInstall !== false;
+  const busy = Boolean(installing);
+  const failure = String(error ?? "").trim();
+  const phase = typeof installing === "object" && installing?.phase ? String(installing.phase) : "";
+  const phaseText = String(
+    (typeof installing === "object" && installing?.text) || "正在下载并安装…",
+  );
+  const progress = busy
+    ? `<div class="preview-install-progress" role="progressbar" aria-valuetext="${escapeAttr(phaseText)}" data-office-progress data-office-phase="${escapeAttr(phase)}">
+        <div class="preview-install-bar" aria-hidden="true"></div>
+        <p class="muted" data-office-progress-text>${escapeHtml(phaseText)}</p>
+      </div>`
+    : "";
+  const errorLine = failure
+    ? `<p class="form-error preview-install-error" data-office-error>${escapeHtml(failure)}</p>`
+    : "";
+  // 安装失败后保留同意状态（勾选 + 可点重试）；首次安装则必须由用户手动勾选。
+  const actions = !canInstall || busy
+    ? ""
+    : `<label class="check"><input type="checkbox" data-office-consent${failure ? " checked" : ""} /> 我同意下载并安装（约 300 MB）</label>
+      <div class="preview-install-actions">
+        <button type="button" class="btn primary" data-office-install${failure ? "" : " disabled"}>${failure ? "重试" : "安装转换引擎"}</button>
+      </div>`;
+  const manual = canInstall
+    ? ""
+    : `<p class="muted preview-install-hint" data-office-manual>缺少 Node/npm，无法自动安装，请按 README 手动安装</p>`;
+  return `
+    <div class="preview-install" data-office-state="${busy ? "installing" : failure ? "error" : "ready"}">
+      <p class="muted preview-install-desc">未安装 Office 转换引擎（LibreOfficeKit）。安装后可在此直接预览 docx/pptx/xlsx；约 300 MB，转换只在本机进行。</p>
+      ${errorLine}
+      ${progress}
+      ${actions}
+      ${manual}
+    </div>
+  `;
+}
+
+export function cacheBustUrl(url, version) {
+  const raw = String(url ?? "");
+  if (raw === "") return raw;
+  return `${raw}${raw.includes("?") ? "&" : "?"}v=${encodeURIComponent(String(version))}`;
+}
+
+/** Office 预览分支：只有状态明确可用才直接画 iframe，否则先走安装面板。 */
+export function officePreviewMode(status) {
+  return status?.available === true ? "frame" : "install";
+}
+
+/**
+ * 启动安装并轮询后台任务，直到成功（并复查 /office/status）、失败或超时。
+ * 纯逻辑 + 可注入 api/计时器，便于单测；onState 收到
+ * {phase: "starting"|"installing"|"verifying"|"done"|"error"} 状态。
+ */
+export async function installOfficeEngineAndWait({
+  api: apiClient,
+  onState = () => {},
+  pollMs = 1500,
+  maxWaitMs = 1200000,
+  timers = {},
+} = {}) {
+  const client = apiClient ?? api;
+  const setTimeoutFn = typeof timers.setTimeout === "function" ? timers.setTimeout : setTimeout;
+  const now = typeof timers.now === "function" ? timers.now : Date.now;
+  const interval = Number.isFinite(pollMs) && pollMs > 0 ? pollMs : 1500;
+  const waitLimit = Number.isFinite(maxWaitMs) && maxWaitMs > 0 ? maxWaitMs : 1200000;
+  // 不依赖 Date.now 也一定会终止：轮询次数上限与截止时间双重兜底。
+  const maxPolls = Math.max(1, Math.ceil(waitLimit / interval));
+  const sleep = (ms) => new Promise((resolvePromise) => {
+    let handle;
+    try {
+      handle = setTimeoutFn(resolvePromise, ms);
+    } catch {
+      resolvePromise();
+      return;
+    }
+    handle?.unref?.();
+  });
+  const fail = (message, extra = {}) => {
+    const state = { phase: "error", error: message, ...extra };
+    onState(state);
+    return { ok: false, error: message, ...extra };
+  };
+
+  onState({ phase: "starting", text: "正在启动安装…" });
+  let started;
+  try {
+    started = await client.installOffice();
+  } catch (failure) {
+    return fail(errorText(failure), { failure });
+  }
+  const jobId = typeof started === "string" ? started : started?.jobId;
+  if (!jobId) return fail("安装任务启动失败，请重试");
+
+  onState({ phase: "installing", text: "正在下载并安装…", jobId });
+  const deadline = now() + waitLimit;
+  for (let poll = 0; poll < maxPolls; poll += 1) {
+    if (now() >= deadline) break;
+    await sleep(interval);
+    let job;
+    try {
+      job = await client.job(jobId);
+    } catch (failure) {
+      return fail(`无法获取安装进度：${errorText(failure)}`, { jobId });
+    }
+    if (!job || job.status === "running") {
+      const progress = job?.progress !== null && typeof job?.progress === "object" ? job.progress : null;
+      const text = String(progress?.text ?? progress?.message ?? "正在下载并安装…");
+      onState({ phase: "installing", text, jobId, job });
+      continue;
+    }
+    if (job.status === "succeeded" || job.status === "completed") {
+      onState({ phase: "verifying", text: "正在确认安装结果…", jobId, job });
+      let status = null;
+      try {
+        status = await client.officeStatus();
+      } catch {
+        status = null;
+      }
+      if (status?.available === true) {
+        onState({ phase: "done", status, jobId, job });
+        return { ok: true, status, job };
+      }
+      return fail("安装已完成，但引擎仍不可用，请重试", { status, job });
+    }
+    const detail = String(job.detail ?? "").trim();
+    return fail(detail || "安装失败，请重试", { job });
+  }
+  return fail("安装超时，请稍后重试", { timedOut: true });
+}
+
+/**
+ * 打开原件预览。note/text 先拉 /content；pdf/image 直接内嵌；
+ * Office 先查引擎状态，已安装才内嵌 preview.pdf，未安装则显示一键安装面板。
  * 弹窗在请求返回前被关闭时，结果直接丢弃（不再写 DOM）。
  */
 export function openPreviewModal({ name, doc, icons } = {}) {
@@ -339,15 +479,87 @@ export function openPreviewModal({ name, doc, icons } = {}) {
     if (!node.isConnected || !body) return;
     body.innerHTML = html;
   };
+  const paintOfficeFrame = ({ loadingText, version } = {}) => {
+    const pdf = version === undefined ? urls.pdf : cacheBustUrl(urls.pdf, version);
+    paint(renderPreviewBody({ kind: "office", urls: { ...urls, pdf }, loadingText }));
+    // 转换/载入提示在 iframe 真正载入后隐藏。
+    body?.querySelector("iframe")?.addEventListener("load", () => {
+      body.querySelector(".preview-loading")?.remove();
+    }, { once: true });
+  };
+  const wireOfficeInstall = (status, { onRetry } = {}) => {
+    const checkbox = body?.querySelector("[data-office-consent]");
+    const button = body?.querySelector("[data-office-install]");
+    const sync = () => {
+      if (button) button.disabled = !checkbox?.checked;
+    };
+    checkbox?.addEventListener("change", sync);
+    sync();
+    button?.addEventListener("click", () => {
+      if (!checkbox?.checked) return;
+      if (typeof onRetry === "function") {
+        onRetry();
+        return;
+      }
+      void startOfficeInstall(status);
+    });
+  };
+  const paintOfficeState = (status, extra = {}, options = {}) => {
+    paint(renderOfficeInstallState({ status, ...extra }));
+    wireOfficeInstall(status, options);
+  };
+  const startOfficeInstall = async (status) => {
+    const onState = (state) => {
+      if (!node.isConnected) return;
+      if (state.phase === "done") {
+        // 装完用带时间戳的 URL 重新载入，绕过浏览器/宿主对旧 501 的缓存。
+        paintOfficeFrame({ loadingText: "已安装，正在载入预览…", version: Date.now() });
+        return;
+      }
+      if (state.phase === "error") {
+        paintOfficeState(status, { error: state.error });
+        return;
+      }
+      paint(renderOfficeInstallState({
+        status,
+        installing: { phase: state.phase, text: state.text },
+      }));
+    };
+    try {
+      await installOfficeEngineAndWait({ api, onState });
+    } catch (failure) {
+      if (node.isConnected) paintOfficeState(status, { error: errorText(failure) });
+    }
+  };
+  const checkOfficeEngine = async () => {
+    let status;
+    try {
+      status = await api.officeStatus();
+    } catch (failure) {
+      if (!node.isConnected) return;
+      paintOfficeState(null, { error: `无法获取引擎状态：${errorText(failure)}` }, {
+        onRetry: () => void checkOfficeEngine(),
+      });
+      return;
+    }
+    if (!node.isConnected) return;
+    if (officePreviewMode(status) === "frame") {
+      paintOfficeFrame();
+      return;
+    }
+    paintOfficeState(status);
+  };
+
   if (kind === "note" || kind === "text") {
     api.docContent(name, doc?.id ?? "").then((content) => {
       paint(renderPreviewBody({ kind, urls, content }));
     }).catch((failure) => {
       paint(renderPreviewBody({ kind, urls, content: { error: failure?.message ?? String(failure) } }));
     });
+  } else if (kind === "office") {
+    void checkOfficeEngine();
   } else {
     paint(renderPreviewBody({ kind, urls }));
-    // Office 转换提示在 iframe 真正载入后隐藏，避免转换完成后仍挂着“正在转换”。
     body?.querySelector("iframe")?.addEventListener("load", () => {
       body.querySelector(".preview-loading")?.remove();
     }, { once: true });

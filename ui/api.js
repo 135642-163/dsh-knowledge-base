@@ -134,4 +134,8 @@ export const api = {
   },
   stdStatus: (name) => request("GET", `/kbs/${encodeURIComponent(name)}/std`),
   stdCheck: (name, body) => request("POST", `/kbs/${encodeURIComponent(name)}/std-check`, body),
+  /** Office 转换引擎状态（可选安装 LibreOfficeKit）。 */
+  officeStatus: () => request("GET", "/office/status"),
+  /** 一键安装引擎：必须显式 confirm；返回 { jobId }，进度用 job() 轮询。 */
+  installOffice: () => request("POST", "/office/install", { confirm: true }),
 };
