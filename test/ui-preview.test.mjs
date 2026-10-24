@@ -110,6 +110,15 @@ test("内容读取失败显示错误与下载入口；未知格式提示下载�
   assert.match(unsupported, /下载原件/);
 });
 
+test("笔记预览失败不渲染死链「下载原件」（笔记没有原件）", () => {
+  const failed = renderPreviewBody({ kind: "note", urls: URLS, content: { error: "读取失败" } });
+  assert.match(failed, /class="preview-content-error"/);
+  assert.match(failed, /读取失败/);
+  assert.doesNotMatch(failed, /下载原件/);
+  assert.doesNotMatch(failed, /请下载原件后查看/);
+  assert.doesNotMatch(failed, /href=/);
+});
+
 test("预览正文里的 URL 属性按 HTML 转义", () => {
   const html = renderPreviewBody({ kind: "pdf", urls: { inline: "/x?a=1&b=\"2\"", download: "/x" } });
   assert.match(html, /src="\/x\?a=1&amp;b=&quot;2&quot;"/);

@@ -136,15 +136,16 @@ function docs(name, state, { fmtNumber, icons }) {
   const limit = docsPageSize(page.limit);
   const offset = Math.max(0, Math.round(Number(page.offset) || 0));
   const items = Array.isArray(page.items) ? page.items : [];
+  if (searching) {
+    // 防抖/请求在途：只保留工具栏与「正在搜索…」，不把上一轮的行/表格挂在新搜索词下。
+    return `
+      <div class="panel">
+        ${docsToolbar({ query, limit, status, total, pages: 1, pageNo: 1, fmtNumber, icons, showPager: false })}
+        <div class="state docs-empty"><p>正在搜索…</p></div>
+      </div>
+    `;
+  }
   if (total === 0) {
-    if (searching) {
-      return `
-        <div class="panel">
-          ${docsToolbar({ query, limit, status, total, pages: 1, pageNo: 1, fmtNumber, icons, showPager: false })}
-          <div class="state docs-empty"><p>正在搜索…</p></div>
-        </div>
-      `;
-    }
     if (query.trim() === "" && status === "") {
       return `<div class="state">还没有资料，点右上角的「上传资料」开始导入。</div>`;
     }
@@ -173,11 +174,9 @@ function docs(name, state, { fmtNumber, icons }) {
       ${docsToolbar({ query, limit, status, total, pages, pageNo, fmtNumber, icons, showPager: true })}
       <div class="table-head">
         <strong>${fmtNumber(total)} 篇</strong>
-        ${searching
-          ? `<span class="muted">正在搜索…</span>`
-          : items.length > 0
-            ? `<span class="muted">第 ${fmtNumber(offset + 1)}–${fmtNumber(rangeEnd)} 篇</span>`
-            : ""}
+        ${items.length > 0
+          ? `<span class="muted">第 ${fmtNumber(offset + 1)}–${fmtNumber(rangeEnd)} 篇</span>`
+          : ""}
       </div>
       <table class="table">
         <thead><tr><th>标题</th><th>类型</th><th>页数</th><th>可信度</th><th>更新</th></tr></thead>
@@ -250,6 +249,7 @@ function notes(state, { fmtNumber }) {
   if (total === 0) {
     return `<div class="panel"><h3>笔记</h3><p class="muted">还没有笔记。在对话里用 kb_add_note 沉淀后，会显示在这里。</p></div>`;
   }
+  const capped = total > items.length;
   return `
     <div class="panel">
       <div class="table-head">
@@ -266,6 +266,7 @@ function notes(state, { fmtNumber }) {
           </tr>`).join("")}
         </tbody>
       </table>
+      ${capped ? `<p class="muted notes-cap">仅显示前 ${fmtNumber(items.length)} 篇（共 ${fmtNumber(total)} 篇）</p>` : ""}
     </div>
   `;
 }

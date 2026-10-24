@@ -110,6 +110,12 @@ test("findSource resolves the stored source file by doc id prefix", async () => 
   assert.equal(found.name, "abc123.pdf");
 });
 
+test("findSource ignores non-file entries with a matching doc id", async () => {
+  const { kbRoot } = await setup();
+  await mkdir(join(kbRoot, "标准", "sources", "dir1.pdf"), { recursive: true });
+  assert.equal(await findSource(kbRoot, "标准", "dir1"), null);
+});
+
 test("API accepts prefix-stripped URLs as delivered by the host", async () => {
   const { kbRoot } = await setup();
   const status = await call({ kbRoot }, makeReq({ url: "/status" }));

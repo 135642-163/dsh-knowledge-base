@@ -151,7 +151,7 @@ package.json / README.md   改
 - `updatedAt`：ISO 时间；`inheritedFrom`：父 sessionId 或 `null`。
 - 写入：临时文件（`<path>.<pid>.<ts>.tmp`）+ `rename` 原子替换，权限 `0600`；**按 kbRoot 的进程内串行队列**（模块级 `Map<root, Promise>`），并发 PUT 不互相覆盖。
 - 读取：JSON 解析失败、结构非法、读取 EACCES → 按空库处理并保留原文件（不删）；单条条目结构非法跳过该条。
-- 清理（惰性，仅读路径发现变化才回写）：`updatedAt` 超过 `scopeTtlDays`（默认 30）的条目删除；`kbs` 中已不存在/已归档/已合并的库名剔除；剔除后 `selected` 且空 → `none`（0.22.0 起；0.21.x 曾回退 `all`）。
+- 清理（惰性，仅读路径发现变化才回写）：**只有 `selected` 条目**在 `updatedAt` 超过 `scopeTtlDays`（默认 30）时删除；`none`/`all` 条目不做 TTL 清理（`none` 是显式关闭，过期删除会静默退回 `all`；`all` 过期后解析结果不变）。`kbs` 中已不存在/已归档/已合并的库名剔除；剔除后 `selected` 且空 → `none`（0.22.0 起；0.21.x 曾回退 `all`）。
 - 归档/重命名同步：现有 `removeScopesReferences(root, name)` 只在**彻底删除归档库**（`purgeKb`）时调用，归档与重命名都没接。2B 把它迁移到 `lib/scope-store.js`（`removeScopeKb` / `renameScopeKb`）：`archiveKb` / `purgeKb` 内 best-effort 剔除库名；重命名由 `kb_rename` 工具与 `PATCH /kbs/:name` 两个入口在 `renameKb` 之后调用 `renameScopeKb`（`lib/store.js` 的 `renameKb` 保持纯目录操作）。
 - 隐私：只含 sessionId 与库名，无对话内容。
 
@@ -367,7 +367,7 @@ ctx.systemPrompt.section({
 
 ## 15. 测试计划
 
-### 15.1 自动化（`node:test`；0.21.0 新增 188 例，312 → **500**；0.21.1 复审后 **508**；0.22.0 **612**——见 §15.3 与 §21.8）
+### 15.1 自动化（`node:test`；0.21.0 新增 188 例，312 → **500**；0.21.1 复审后 **508**；0.22.0 **620**——见 §15.3 与 §21.8）
 
 - `scope-store.test.mjs`（17）：**文件层**——缺失文件读空、原子写 + `0600`、进程内串行队列（20 并发）、mutator 返回 falsy 时不写盘、同步视图 mtime+size 缓存与冻结视图、损坏/超限文件（读空、拒写 `SCOPE_UNUSABLE`）、清理回写只在变化时发生、`removeScopeKb`/`renameScopeKb` 库名同步、未知条目字段保留。sessionId 校验、mode/kbs 结构校验、50 上限、TTL 过期与失效库 prune、归档/合并判定由 `scope.test.mjs` / `scope-api.test.mjs` 覆盖。
 - `scope.test.mjs`（37）：条目归一化/50 上限/非法 sessionId、子会话快照 + `inheritedFrom`、父无条目 → all、父变化不回溯、只读解析（GET）不落快照、写失败降级为只读解析、`setScope` 严格校验（不存在/归档/合并）、`resolveSingleKb`/`resolveDocTarget` 单测（含软删除与虚拟文档）。
@@ -387,9 +387,9 @@ ctx.systemPrompt.section({
 - 真实模型轮次里让模型调用 `kb_list`：只返回「验收甲库」，「验收乙库」不出现。
 - 降级：没有 `webServer` 时胶囊不渲染（由 `features.scope` / status 探测决定）。
 
-### 15.3 0.22.0 新增与变更用例（`npm test` 612/612）
+### 15.3 0.22.0 新增与变更用例（`npm test` 620/620）
 
-- 0.21.1（`e3b5ad8`）基线 **508**；0.22.0 净增 **104** 例（原有文件 +24，新文件 +80）。
+- 0.21.1（`e3b5ad8`）基线 **508**；0.22.0 净增 **112** 例（原有文件 +24，新文件 +80，复审跟进 +8）。
 - 新增文件：
   - `web-preview.test.mjs`（27）：`source?inline=1` 白名单/响应头/路径穿越、HTML/SVG 415、
     `preview.pdf` 引擎缺失 501、非 Office 415、转换一次后命中缓存、并发合并、失败 500 不带路径、
@@ -406,6 +406,10 @@ ctx.systemPrompt.section({
 - 变更文件（0.21.1 → 0.22.0）：`scope.test.mjs` 39 → 47、`scope-tools.test.mjs` 54 → 55、
   `scope-api.test.mjs` 20 → 24、`scope-prompt.test.mjs` 10 → 12、`scope-sync.test.mjs` 7 → 8、
   `scope-view.test.mjs` 7 → 9、`scope-client.test.mjs` 41 → 46、`ui-api.test.mjs` 9 → 10。
+- 0.22.0 复审跟进（2026-10-24，+8 例）：`scope.test.mjs` 47 → 51（`none` 免 TTL 三例 + 同步视图一例）、
+  `ui-preview.test.mjs` 8 → 9（笔记错误分支不渲染下载入口）、`ui-docs.test.mjs` 19 → 20
+  （笔记超过返回上限的提示）、`web-api-read.test.mjs` 6 → 7（`findSource` 只认普通文件）、
+  `web-http.test.mjs` 5 → 6（`serveFile` 读流错误销毁响应）。
 - 全部用例使用临时目录，不依赖本机知识库；`check:client` / `check-ui` 为独立门禁，不计入用例数。
 
 ## 16. 验收标准
@@ -466,7 +470,7 @@ ctx.systemPrompt.section({
 
 ## 21. 0.22.0 交互完善
 
-> 版本：0.22.0（基线 0.21.1 / `npm test` 508/508；本版 **612/612**）。
+> 版本：0.22.0（基线 0.21.1 / `npm test` 508/508；本版 **620/620**，含复审跟进 +8）。
 > 本轮把 §6/§7/§8/§12 里「`selected` + 空 = `all`」的旧规则改为「空 = `none`」（**破坏性变更**），
 > 并补齐工作台资料分页/搜索、原件预览、笔记、徽标、重命名与临时/锁文件过滤。
 > 相关提交：`0733c59`（none 模式）、`092506e`（范围门先于参数校验）、`076f59d` + `5563ee8`（资料页与工具栏）、
@@ -480,16 +484,21 @@ ctx.systemPrompt.section({
 - **只有显式 `all` 表示全部库**（以后新增的库自动包含）。
 - `selected` + 空 `kbs` 在读取（`normalizeScope`）与写入（`setScope`）两侧都归一化为 `none`；
   未知/缺失 `mode` 的条目按 `none` 处理（fail closed）。
-- 清理：`selected` 的库名全部失效（删除/归档/合并）后写回 `none`（0.21.x 曾回退 `all`）；
+- 清理：TTL 只清理 `selected` 条目（`none` 是显式关闭，过期删除会静默退回 `all`；`all` 过期后语义不变）；
+  `selected` 的库名全部失效（删除/归档/合并）后写回 `none`（0.21.x 曾回退 `all`）；
   手工写进 `none` 条目的 `kbs` 在清理时清空。
 
 **工具**（21 个 `kb_*` 全部）：
 
-- `lib/scope.js` 的 `assertScopeEnabled(scope)` 是统一门禁：`none` 下在读取/检索任何库之前抛
+- `lib/scope.js` 的 `assertScopeEnabled(scope)` 是统一门禁：`none` 下在读取/检索任何库数据之前抛
   `ScopeError`（`code: "KB_DISABLED"`，message 逐字为 README 中的提示）。
 - `assertInScope` 先过 enabled 门，`resolveSingleKb` / `resolveDocTarget` / `kb_list` / `kb_query` /
-  `kb_lint` 都经过它；`kb_rename`、`kb_remove(removeKb=true)` 等库级管理把门禁放在参数校验之前，
-  因此 `kb_rename({})` / `kb_remove({})` 在 `none` 下也返回 `KB_DISABLED`，而不是参数形状错误。
+  `kb_lint` 都经过它。
+- 参数校验分工：工具 schema 中标 `required: true` 的参数（如 `kb_import` 的 `path`、`kb_read` 的 `doc`、
+  `kb_edit` 的 `old_string`）由框架在 `execute` 之前校验，缺参时会先返回 `INVALID_ARGS`，不会走到范围门。
+  `kb_remove` / `kb_rename` 的参数都不是 schema-required，缺参在 `execute` 内、门禁之后校验，
+  因此 `kb_rename({})` / `kb_remove({})` 在 `none` 下保证返回 `KB_DISABLED`，而不是参数形状错误；
+  其余工具在通过 schema 校验后、读取/检索任何库数据之前过范围门。
 - 参数 schema 相应调整：`kb_rename` 的 `newName` 不再是 schema-required（由工具内校验），以便先报范围错误。
 
 **系统提示**（覆盖 §9 的行为）：
@@ -542,7 +551,7 @@ ctx.systemPrompt.section({
 - 顶部/底部分页统一 `第 X / Y 页 · 共 N 篇` + 上一页/下一页 + 页码输入框（Enter 或按钮跳页）；
   表格底部显示 `第 a–b 篇`；`total=0` 时不渲染分页。
 - 状态筛选 `全部/有失败/导入中` 渲染为按钮组（当前项高亮）；有筛选/搜索无结果时保留工具栏；
-  新条件结果未回来时显示「正在搜索…」，不把旧结果挂在新词下。
+  新条件结果未回来时只渲染工具栏与「正在搜索…」，旧查询的行/表格与分页都不渲染。
 
 **交互接线**（`ui/docs-controls.js`）：
 
@@ -585,7 +594,8 @@ ctx.systemPrompt.section({
 - 笔记：`ui/app.js` 打开笔记 tab 时请求 `GET /docs?type=note&limit=200`；`ui/views/detail.js#notes`
   渲染标题/更新日期/摘要（120 字截断）；点标题走 `openPreviewModal`（`previewKindFor` 对 `type=note`
   返回 `note`），用 `/content` 的合并版 markdown 以 `<pre>` + HTML 转义展示（超过 2 MB 提示截断）。
-  笔记没有原件，列表本身不提供下载入口。
+  笔记没有原件，列表本身与预览失败分支（`renderPreviewBody`）都不提供下载入口，只留「关闭」；
+  总数超过返回条数（200）时列表底部提示「仅显示前 N 篇（共 M 篇）」，不做分页。
 - 徽标：`ui/views/badges.js#statusBadges` 输出 `导入中 N` / `有失败 N`（只渲染非零项），
   `title` 为 `成功 X · 导入中 Y · 失败 Z`；详情页 `interactiveFailed=true` 时「有失败」是
   `data-action="docs-status" data-docs-status="failed"` 按钮（跳资料 tab 并过滤），总览卡片保持 span。
@@ -614,7 +624,7 @@ ctx.systemPrompt.section({
 
 ### 21.8 测试与验收
 
-- `npm test`：**612/612** 通过（0.21.1 基线 508，净增 104：原有文件 +24、新文件 +80），
+- `npm test`：**620/620** 通过（0.21.1 基线 508，净增 112：原有文件 +24、新文件 +80、复审跟进 +8），
   含 `check:client` 与 `check-ui`；逐文件明细见 §15.3。
 - `npm run typecheck`、`npm run check:client`、`node scripts/check-ui.mjs` 全绿。
 - 真实宿主验收（2026-10-24，临时 `dsh --profile web --port 55941` + 临时 kbRoot，WKWebView 脚本）：

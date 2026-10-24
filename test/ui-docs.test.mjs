@@ -125,7 +125,13 @@ test("新搜索还没有结果时显示「正在搜索…」，不把旧结果�
     appliedQuery: "旧词",
   });
   assert.match(stale, /正在搜索…/);
+  assert.match(stale, /data-docs-query/);
+  assert.match(stale, /value="新词"/);
+  // 旧查询的行/表格/分页不能挂在新搜索词下面，分页在搜索中也保持隐藏。
+  assert.doesNotMatch(stale, /data-action="open-doc"/);
+  assert.doesNotMatch(stale, /<table/);
   assert.doesNotMatch(stale, /第 1–1 篇/);
+  assert.doesNotMatch(stale, /data-action="docs-page"/);
 });
 
 test("表格列和行保持原样并显示条目区间", () => {
@@ -271,6 +277,25 @@ test("笔记 tab 的加载/空/错误状态", () => {
   const failed = renderNotes({ items: [], total: 0, loading: false, error: "读取失败" });
   assert.match(failed, /读取失败/);
   assert.match(failed, /class="form-error"/);
+});
+
+test("笔记超过返回上限时提示仅显示前 N 篇", () => {
+  const capped = renderNotes({
+    items: [makeNote("n1"), makeNote("n2")],
+    total: 350,
+    loading: false,
+    error: "",
+  });
+  assert.match(capped, /共 350 篇/);
+  assert.match(capped, /仅显示前 2 篇（共 350 篇）/);
+
+  const full = renderNotes({
+    items: [makeNote("n1"), makeNote("n2")],
+    total: 2,
+    loading: false,
+    error: "",
+  });
+  assert.doesNotMatch(full, /仅显示前/);
 });
 
 test("笔记摘要过长时截断", () => {

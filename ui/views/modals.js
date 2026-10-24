@@ -251,11 +251,15 @@ export function renderPreviewBody({ kind, urls = {}, content } = {}) {
   }
   if (kind === "note" || kind === "text") {
     if (content?.error) {
+      // 笔记没有原件：错误分支不再渲染「下载原件」（点了也是死链），只留弹窗底部的「关闭」。
+      const fallback = kind === "note"
+        ? ""
+        : `<p class="muted">请下载原件后查看。</p>
+          <a class="btn" href="${download}">下载原件</a>`;
       return `
         <div class="preview-content-error">
           <p class="form-error">${escapeHtml(content.error)}</p>
-          <p class="muted">请下载原件后查看。</p>
-          <a class="btn" href="${download}">下载原件</a>
+          ${fallback}
         </div>
       `;
     }

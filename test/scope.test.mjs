@@ -287,6 +287,49 @@ test("GET-style resolve does not renew and prunes an expired entry", async () =>
   assert.equal(data.scopes.s1, undefined);
 });
 
+test("GET keeps an expired none entry instead of silently re-enabling all", async () => {
+  const root = await tmpRoot();
+  const old = new Date(Date.now() - 40 * 86400000).toISOString();
+  await writeScopes(root, { scopes: { s1: { mode: "none", kbs: [], updatedAt: old } } });
+  const scope = await resolveScope(root, { sessionId: "s1", ttlDays: 30, snapshot: false });
+  assert.equal(scope.mode, "none");
+  assert.deepEqual(scope.kbs, []);
+  const data = await readScopes(root);
+  assert.equal(data.scopes.s1.mode, "none", "an explicit none must not be expired into all");
+  assert.equal(data.scopes.s1.updatedAt, old, "GET must not renew");
+});
+
+test("tool resolve keeps an expired none entry in none", async () => {
+  const root = await tmpRoot();
+  const old = new Date(Date.now() - 40 * 86400000).toISOString();
+  await writeScopes(root, { scopes: { s1: { mode: "none", kbs: [], updatedAt: old } } });
+  const scope = await resolveScope(root, { sessionId: "s1", ttlDays: 30 });
+  assert.equal(scope.mode, "none");
+  assert.deepEqual(scope.kbs, []);
+  const data = await readScopes(root);
+  assert.equal(data.scopes.s1.mode, "none");
+  assert.notEqual(data.scopes.s1.updatedAt, old, "tool use may still renew the retained entry");
+});
+
+test("expired selected still expires while an expired none stays", async () => {
+  const root = await tmpRoot();
+  await makeKb(root, "A");
+  const old = new Date(Date.now() - 40 * 86400000).toISOString();
+  await writeScopes(root, {
+    scopes: {
+      off: { mode: "none", kbs: [], updatedAt: old },
+      on: { mode: "selected", kbs: ["A"], updatedAt: old },
+    },
+  });
+  const off = await resolveScope(root, { sessionId: "off", ttlDays: 30, snapshot: false });
+  const on = await resolveScope(root, { sessionId: "on", ttlDays: 30, snapshot: false });
+  assert.equal(off.mode, "none");
+  assert.equal(on.mode, "all", "expired selected entries keep today's TTL behavior");
+  const data = await readScopes(root);
+  assert.equal(data.scopes.off.mode, "none");
+  assert.equal(data.scopes.on, undefined);
+});
+
 test("a recently renewed entry is not rewritten by tool use", async () => {
   const root = await tmpRoot();
   await makeKb(root, "A");
@@ -654,4 +697,13 @@ test("scopeForSessionSync hides entries older than ttlDays", async () => {
   const kept = scopeForSessionSync(root, "s1", null, 0);
   assert.equal(kept.mode, "selected");
   assert.deepEqual(kept.kbs, ["A"]);
+});
+
+test("scopeForSessionSync keeps an expired none entry (no silent all)", async () => {
+  const root = await tmpRoot();
+  const stale = new Date(Date.now() - 40 * 86400000).toISOString();
+  await writeScopes(root, { scopes: { s1: { mode: "none", kbs: [], updatedAt: stale } } });
+  const scope = scopeForSessionSync(root, "s1", null, 30);
+  assert.equal(scope.mode, "none");
+  assert.deepEqual(scope.kbs, []);
 });
