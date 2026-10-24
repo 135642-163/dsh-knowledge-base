@@ -136,9 +136,13 @@ button { font: inherit; color: inherit; }
 .desc { margin: 0; color: var(--muted); min-height: 34px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .stats { display: flex; gap: 12px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
 .stats strong { color: var(--text); font-weight: 650; }
-.bar { display: flex; height: 8px; border-radius: 999px; overflow: hidden; background: var(--panel-2); }
-.bar.thin { height: 5px; }
-.bar i { display: block; height: 100%; }
+.composition { display: flex; flex-direction: column; gap: 6px; }
+.bar { display: flex; gap: 2px; width: 100%; height: 8px; background: transparent; }
+.bar i { display: block; height: 100%; border-radius: 999px; flex: 0 1 auto; }
+.bar.empty i { width: 100%; background: var(--line); }
+.trust-dots { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; row-gap: 2px; font-size: 11px; color: var(--muted); }
+.trust-dot { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
+.trust-dot-mark { font-size: 8px; line-height: 1; }
 .card-foot { display: flex; gap: 6px; align-items: center; font-size: 11px; flex-wrap: wrap; }
 .tag { background: var(--panel-2); border-radius: 999px; padding: 1px 7px; }
 .empty-card { background: var(--panel); border: 1px dashed var(--line); border-radius: var(--radius); padding: 60px 20px; text-align: center; }

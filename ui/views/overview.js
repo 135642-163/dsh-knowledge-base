@@ -70,9 +70,9 @@ function card(kb, { icons, fmtNumber }) {
         <span><strong>${compact(kb.chars)}</strong> 字</span>
         <span><strong>${fmtNumber(kb.docs.notes)}</strong> 笔记</span>
       </div>
-      <div class="bars">
+      <div class="composition">
         ${typeBar(kb.types)}
-        ${trustBar(kb.trust)}
+        ${trustDots(kb.trust)}
       </div>
       <div class="card-foot muted">
         <span>${kb.updatedAt ? `更新 ${formatDate(kb.updatedAt)}` : "尚未更新"}</span>
@@ -82,31 +82,48 @@ function card(kb, { icons, fmtNumber }) {
   `;
 }
 
+/**
+ * 类型构成条与图例共用的低饱和同族配色（浅色/深色主题下都保持可读）。
+ * 未识别的类型回落到 unknown 的灰色。
+ */
 const TYPE_COLORS = {
-  "pdf-text": "#6b8afd", "pdf-scanned": "#3f5fd6", "pdf-mixed": "#8ea6ff",
-  docx: "#3b82f6", pptx: "#f59e0b", markdown: "#10b981", text: "#94a3b8",
-  note: "#a855f7", epub: "#14b8a6", mobi: "#14b8a6", pdf: "#64748b", unknown: "#cbd5e1",
+  "pdf-scanned": "#5f7fb8", "pdf-text": "#7f96c9", "pdf-mixed": "#a3b6d9",
+  docx: "#7aa2d0", pptx: "#c9a36a", markdown: "#7fae9a", note: "#a48bc4",
+  epub: "#6fb3aa", mobi: "#6fb3aa", text: "#93a3b8", pdf: "#8a9bb5", unknown: "#b8c0cc",
 };
 
+const TRUST_COLORS = { high: "#4f9d69", medium: "#c9a36a", low: "#b96a6a", unknown: "#93a3b8" };
+const TRUST_LABELS = { high: "高", medium: "中", low: "低", unknown: "未知" };
+const TRUST_LEVELS = ["high", "medium", "low", "unknown"];
+
 function typeBar(types = {}) {
-  const total = Object.values(types).reduce((sum, value) => sum + Number(value || 0), 0);
-  if (total === 0) return `<div class="bar empty"></div>`;
-  return `<div class="bar" title="${escapeAttr(typeTitle(types))}">${Object.entries(types)
-    .filter(([, value]) => Number(value) > 0)
-    .map(([type, value]) => `<i style="width:${(Number(value) / total) * 100}%;background:${TYPE_COLORS[type] ?? "#cbd5e1"}"></i>`)
+  const entries = Object.entries(types)
+    .map(([type, value]) => [type, Math.max(0, Number(value) || 0)])
+    .filter(([, value]) => value > 0);
+  const total = entries.reduce((sum, [, value]) => sum + value, 0);
+  if (total === 0) {
+    return `<div class="bar empty" role="img" aria-label="暂无文档类型" title="暂无文档类型"><i></i></div>`;
+  }
+  const title = `类型 ${entries.map(([type, value]) => `${type} ${value}`).join(" · ")}`;
+  return `<div class="bar" role="img" title="${escapeAttr(title)}" aria-label="${escapeAttr(title)}">${entries
+    .map(([type, value]) => `<i style="width:${(value / total) * 100}%;background:${TYPE_COLORS[type] ?? TYPE_COLORS.unknown}"></i>`)
     .join("")}</div>`;
 }
 
-function typeTitle(types) {
-  return Object.entries(types).map(([type, value]) => `${type} ${value}`).join(" · ");
-}
-
-function trustBar(trust = {}) {
-  const total = Object.values(trust).reduce((sum, value) => sum + Number(value || 0), 0);
-  if (total === 0) return `<div class="bar thin empty"></div>`;
-  const colors = { high: "#16a34a", medium: "#f59e0b", low: "#dc2626", unknown: "#94a3b8" };
-  return `<div class="bar thin" title="${escapeAttr(Object.entries(trust).map(([key, value]) => `${key} ${value}`).join(" · "))}">${Object.entries(trust)
-    .map(([key, value]) => `<i style="width:${(Number(value) / total) * 100}%;background:${colors[key] ?? "#94a3b8"}"></i>`)
+/**
+ * 可信度只保留紧凑圆点图例：非零项才渲染 `● N`。
+ * 四项都为零时不占位（空库卡片只留空类型条）。
+ */
+function trustDots(trust = {}) {
+  const entries = TRUST_LEVELS.map((level) => [level, Math.max(0, Number(trust[level]) || 0)]);
+  if (entries.every(([, value]) => value === 0)) return "";
+  const title = `可信度：${entries.map(([level, value]) => `${TRUST_LABELS[level]} ${value}`).join(" · ")}`;
+  return `<div class="trust-dots" title="${escapeAttr(title)}" aria-label="${escapeAttr(title)}">${entries
+    .filter(([, value]) => value > 0)
+    .map(([level, value]) => {
+      const label = `${TRUST_LABELS[level]} ${value}`;
+      return `<span class="trust-dot" title="${escapeAttr(label)}" aria-label="${escapeAttr(`可信度：${label}`)}"><span class="trust-dot-mark" style="color:${TRUST_COLORS[level]}" aria-hidden="true">●</span>${value}</span>`;
+    })
     .join("")}</div>`;
 }
 
