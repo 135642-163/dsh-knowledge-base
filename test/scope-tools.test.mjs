@@ -864,11 +864,11 @@ test("none mode disables all 21 kb_* tools with KB_DISABLED", async () => {
     ["kb_edit_batch", { edits: [{ doc: doc.docId, old_string: "正文", new_string: "修订" }] }],
     ["kb_snapshot", {}],
     ["kb_add_note", { title: "笔记", content: "内容" }],
-    ["kb_remove", { doc: doc.docId }],
+    ["kb_remove", {}],
     ["kb_restore", { doc: doc.docId }],
     ["kb_history", { doc: doc.docId }],
     ["kb_export", { format: "md" }],
-    ["kb_rename", { kb: "甲库", newName: "甲库2" }],
+    ["kb_rename", {}],
     ["kb_std_check", { action: "check" }],
   ];
   const covered = new Set(cases.map(([name]) => name));
@@ -878,6 +878,20 @@ test("none mode disables all 21 kb_* tools with KB_DISABLED", async () => {
       () => tools.get(name).execute(args, scoped("s1")),
       (error) => error.code === KB_DISABLED && error.message === KB_DISABLED_MESSAGE,
       `${name} must reject with KB_DISABLED`
+    );
+  }
+
+  // 参数校验不能先于范围门：缺 kb/doc 的调用也必须是 KB_DISABLED，
+  // 而不是 KB_REQUIRED / 参数错误（否则等于泄露了知识库处于启用状态）。
+  for (const [name, args] of [
+    ["kb_remove", {}],
+    ["kb_remove", { removeKb: true }],
+    ["kb_rename", {}],
+  ]) {
+    await assert.rejects(
+      () => tools.get(name).execute(args, scoped("s1")),
+      (error) => error.code === KB_DISABLED && error.message === KB_DISABLED_MESSAGE,
+      `${name}(${JSON.stringify(args)}) must reject with KB_DISABLED`
     );
   }
 
