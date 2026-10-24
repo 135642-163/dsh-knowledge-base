@@ -281,12 +281,15 @@ export function openPreviewModal({ name, doc, icons } = {}) {
     pdf: api.previewPdfUrl(name, doc?.id ?? ""),
     download: api.sourceUrl(name, doc?.id ?? ""),
   };
+  const downloadAction = kind === "note"
+    ? ""
+    : `<a class="btn" href="${escapeAttr(urls.download)}">下载原件</a>`;
   const node = overlay(`
     <div class="modal-form preview-form">
       <h2>${escapeHtml(doc?.title ?? "原件预览")}</h2>
       <div class="preview-body"><p class="state">加载中…</p></div>
       <div class="modal-actions">
-        <a class="btn" href="${escapeAttr(urls.download)}">下载原件</a>
+        ${downloadAction}
         <button type="button" class="btn" data-close>关闭</button>
       </div>
     </div>
@@ -304,6 +307,10 @@ export function openPreviewModal({ name, doc, icons } = {}) {
     });
   } else {
     paint(renderPreviewBody({ kind, urls }));
+    // Office 转换提示在 iframe 真正载入后隐藏，避免转换完成后仍挂着“正在转换”。
+    body?.querySelector("iframe")?.addEventListener("load", () => {
+      body.querySelector(".preview-loading")?.remove();
+    }, { once: true });
   }
   return node;
 }
