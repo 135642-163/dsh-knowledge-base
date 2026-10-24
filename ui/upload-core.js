@@ -22,17 +22,36 @@ export function extOf(path) {
   return index > 0 ? name.slice(index) : "";
 }
 
+/**
+ * 临时/锁文件判定：与服务端 lib/temp-files.js 同一规则。工作台是零构建静态
+ * 目录（/kb/ 只服务 ui/），不能直接 import lib/，因此保留这份无依赖实现；
+ * test/temp-files.test.mjs 会校验两份实现一致。
+ */
+export function isTempFileName(name) {
+  const base = String(name ?? "").split(/[\\/]/).pop().toLowerCase();
+  if (base === "") return false;
+  if (base.startsWith("~$")) return true;
+  if (base.startsWith(".~lock.")) return true;
+  return base === "thumbs.db" || base === "desktop.ini" || base === ".ds_store";
+}
+
 export function classifyFiles(entries, limits = {}) {
   const maxBytes = Number(limits.maxBytes) || 0;
   const maxFiles = Number(limits.maxFiles) || 0;
   const extensions = Array.isArray(limits.extensions) ? limits.extensions.map((ext) => ext.toLowerCase()) : [];
   const accepted = [];
   const rejected = [];
+  const skipped = [];
 
   for (const entry of entries) {
     const file = entry?.file ?? entry;
     const path = relPathFor(file);
     const size = Number(entry?.size ?? file?.size ?? 0);
+    // 临时/锁文件不进入 rejected：目录上传时静默跳过并汇总数量，避免逐文件报错。
+    if (isTempFileName(path)) {
+      skipped.push({ path, size });
+      continue;
+    }
     const ext = extOf(path);
     let reason = "";
     if (extensions.length > 0 && !extensions.includes(ext)) {
@@ -49,7 +68,7 @@ export function classifyFiles(entries, limits = {}) {
       rejected.push({ path: item.path, size: item.size, reason: `超过单批文件数上限 ${maxFiles}` });
     }
   }
-  return { accepted, rejected };
+  return { accepted, rejected, skipped };
 }
 
 /** 固定并发队列：download/upload 都按 FIFO 取任务。 */

@@ -49,6 +49,7 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
     kb: kb || kbs[0]?.name || "",
     files: [],
     rejected: [],
+    tempSkipped: 0,
     batchId: null,
     jobId: null,
     job: null,
@@ -144,6 +145,7 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
           ${state.files.map((item) => `<div class="uprow"><span class="upname" title="${escapeAttr(item.path)}">${escapeHtml(item.path)}</span><span class="muted">${formatBytes(item.size)}</span></div>`).join("")}
           ${state.rejected.map((item) => `<div class="uprow rejected"><span class="upname" title="${escapeAttr(item.path)}">${escapeHtml(item.path)}</span><span class="badge warn">${escapeHtml(item.reason)}</span></div>`).join("")}
         </div>
+        ${state.tempSkipped > 0 ? `<p class="muted">已跳过 ${state.tempSkipped} 个临时/锁文件</p>` : ""}
         <div class="form-row">
           <label class="check"><input type="checkbox" id="upload-dup" ${state.allowCrossDuplicates ? "checked" : ""} /> 允许跨库重复</label>
           <label class="check ocr-field">OCR
@@ -320,10 +322,11 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
   function addFiles(files) {
     if (state.phase !== "select" || files.length === 0) return;
     const limits = state.limits ?? { maxBytes: 0, maxFiles: 0, extensions: [] };
-    const { accepted, rejected } = classifyFiles(files, limits);
+    const { accepted, rejected, skipped } = classifyFiles(files, limits);
     if (accepted.length > 0) state.error = "";
     state.files.push(...accepted.map((item) => ({ ...item, status: "pending", percent: 0, error: "" })));
     state.rejected.push(...rejected);
+    state.tempSkipped += skipped.length;
     if (limits.maxFiles > 0 && state.files.length > limits.maxFiles) {
       const overflow = state.files.splice(limits.maxFiles);
       for (const item of overflow) {
@@ -516,6 +519,7 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
     state.error = "";
     state.files = state.files.map((item) => ({ ...item, status: "pending", percent: 0, error: "" }));
     state.rejected = [];
+    state.tempSkipped = 0;
     render();
   }
 
@@ -593,6 +597,7 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
     state.pollRetry = 0;
     state.files = failed.map((item) => ({ ...item, status: "pending", percent: 0, error: "" }));
     state.rejected = [];
+    state.tempSkipped = 0;
     state.error = "";
     render();
   }
