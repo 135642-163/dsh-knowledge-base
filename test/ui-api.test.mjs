@@ -57,6 +57,25 @@ function fakeSignal() {
 
 const { api, ApiError } = await import("../ui/api.js");
 
+test("docs 把 query/limit/offset 编码进查询串，空 query 不传", async () => {
+  calls.length = 0;
+  await api.docs("标准", { offset: 50, limit: 100, query: "继电 保护" });
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].url, /^\/kb\/api\/kbs\/%E6%A0%87%E5%87%86\/docs\?/);
+  assert.equal(calls[0].options.method, "GET");
+  const url = new URL(calls[0].url, "http://dsh.internal");
+  assert.equal(url.searchParams.get("offset"), "50");
+  assert.equal(url.searchParams.get("limit"), "100");
+  assert.equal(url.searchParams.get("query"), "继电 保护");
+
+  calls.length = 0;
+  await api.docs("标准", { offset: 0, limit: 50, query: "" });
+  const empty = new URL(calls[0].url, "http://dsh.internal");
+  assert.equal(empty.searchParams.get("offset"), "0");
+  assert.equal(empty.searchParams.get("limit"), "50");
+  assert.equal(empty.searchParams.has("query"), false);
+});
+
 test("批次与任务方法打到正确路径", async () => {
   calls.length = 0;
   await api.createBatch({ kb: "标准", create: true });

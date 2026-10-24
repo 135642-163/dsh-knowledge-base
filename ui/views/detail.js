@@ -1,6 +1,28 @@
 import { hrefForKb } from "../router.js";
 import { renderStdPanel } from "./std.js";
 
+/** 工作台允许的每页条数；服务端仍按 1–200 兜底。 */
+export const DOCS_PAGE_SIZES = [50, 100, 200];
+
+/** 旧状态/手改 URL 里的其它 limit 一律回落到默认 50。 */
+export function docsPageSize(value) {
+  const size = Math.round(Number(value) || 0);
+  return DOCS_PAGE_SIZES.includes(size) ? size : DOCS_PAGE_SIZES[0];
+}
+
+/** 总页数；0 篇也有第 1 页（视图层在 total=0 时整体隐藏分页）。 */
+export function docsPageCount(total, limit = DOCS_PAGE_SIZES[0]) {
+  const count = Math.max(0, Math.round(Number(total) || 0));
+  return Math.max(1, Math.ceil(count / docsPageSize(limit)));
+}
+
+/** 跳页输入的范围保护：非数字/过小→1，超过末页→末页。 */
+export function clampDocsPage(value, pages = 1) {
+  const max = Math.max(1, Math.round(Number(pages) || 0));
+  const page = Math.round(Number(value) || 0);
+  return Math.min(max, Math.max(1, page));
+}
+
 export function renderDetail(state, current, { icons, fmtNumber }) {
   if (state.detailLoading && !state.detail) return `<div class="state">加载中…</div>`;
   if (state.detailError) return `<div class="state error">${escapeHtml(state.detailError)}</div>`;
@@ -34,7 +56,7 @@ export function renderDetail(state, current, { icons, fmtNumber }) {
         ${tabLink(kb.name, "settings", "设置", tab)}
       </nav>
       ${tab === "overview" ? overview(kb, detail, { fmtNumber }) : ""}
-      ${tab === "docs" ? docs(kb.name, state, { fmtNumber }) : ""}
+      ${tab === "docs" ? docs(kb.name, state, { fmtNumber, icons }) : ""}
       ${tab === "notes" ? notes(kb, { fmtNumber }) : ""}
       ${tab === "log" ? log(detail.logTail) : ""}
       ${tab === "std" ? renderStdPanel(state, kb.name, { escapeHtml }) : ""}
@@ -86,21 +108,42 @@ function overview(kb, detail, { fmtNumber }) {
   `;
 }
 
-function docs(name, state, { fmtNumber }) {
+function docs(name, state, { fmtNumber, icons }) {
   const page = state.docs;
-  if (!page.items || page.items.length === 0) {
-    return `<div class="state">还没有资料，点右上角的「上传资料」开始导入。</div>`;
+  const query = String(page.query ?? "");
+  const total = Math.max(0, Math.round(Number(page.total) || 0));
+  const limit = docsPageSize(page.limit);
+  const offset = Math.max(0, Math.round(Number(page.offset) || 0));
+  const items = Array.isArray(page.items) ? page.items : [];
+  if (total === 0) {
+    if (query.trim() === "") {
+      return `<div class="state">还没有资料，点右上角的「上传资料」开始导入。</div>`;
+    }
+    // 有搜索词但无结果：保留工具栏（可继续改词/清除），整体不显示分页。
+    return `
+      <div class="panel">
+        ${docsToolbar({ query, limit, total, pages: 1, pageNo: 1, fmtNumber, icons, showPager: false })}
+        <div class="state docs-empty">
+          <p>没有匹配的资料</p>
+          <button class="btn" data-action="docs-clear">清除搜索</button>
+        </div>
+      </div>
+    `;
   }
+  const pages = docsPageCount(total, limit);
+  const pageNo = clampDocsPage(Math.floor(offset / limit) + 1, pages);
+  const rangeEnd = Math.min(offset + items.length, total);
   return `
     <div class="panel">
+      ${docsToolbar({ query, limit, total, pages, pageNo, fmtNumber, icons, showPager: true })}
       <div class="table-head">
-        <strong>${fmtNumber(page.total)} 篇</strong>
-        <span class="muted">第 ${page.offset + 1}–${Math.min(page.offset + page.items.length, page.total)} 篇</span>
+        <strong>${fmtNumber(total)} 篇</strong>
+        ${items.length > 0 ? `<span class="muted">第 ${fmtNumber(offset + 1)}–${fmtNumber(rangeEnd)} 篇</span>` : ""}
       </div>
       <table class="table">
         <thead><tr><th>标题</th><th>类型</th><th>页数</th><th>可信度</th><th>更新</th></tr></thead>
         <tbody>
-          ${page.items.map((doc) => `<tr>
+          ${items.map((doc) => `<tr>
             <td><button class="link" data-action="open-doc" data-kb="${escapeAttr(name)}" data-id="${escapeAttr(doc.id)}">${escapeHtml(doc.title)}</button></td>
             <td class="muted">${escapeHtml(doc.type ?? "")}</td>
             <td class="muted">${fmtNumber(doc.pages)}</td>
@@ -109,11 +152,41 @@ function docs(name, state, { fmtNumber }) {
           </tr>`).join("")}
         </tbody>
       </table>
-      <div class="pager">
-        <button class="btn" data-action="docs-page" data-offset="${Math.max(0, page.offset - page.limit)}" ${page.offset <= 0 ? "disabled" : ""}>上一页</button>
-        <span class="muted">第 ${Math.floor(page.offset / page.limit) + 1} 页</span>
-        <button class="btn" data-action="docs-page" data-offset="${page.offset + page.limit}" ${page.offset + page.items.length >= page.total ? "disabled" : ""}>下一页</button>
-      </div>
+      ${docsPager({ pageNo, pages, total, limit, fmtNumber, label: "底部分页" })}
+    </div>
+  `;
+}
+
+function docsToolbar({ query, limit, total, pages, pageNo, fmtNumber, icons, showPager }) {
+  return `
+    <div class="table-tools">
+      <label class="search docs-search">
+        ${icons?.search ?? ""}
+        <input type="search" data-docs-query value="${escapeAttr(query)}" placeholder="搜索标题、摘要或标签…" aria-label="搜索资料" autocomplete="off" />
+      </label>
+      <label class="docs-size">
+        <span class="muted">每页</span>
+        <select data-docs-size aria-label="每页条数">
+          ${DOCS_PAGE_SIZES.map((size) => `<option value="${size}"${size === limit ? " selected" : ""}>${size}</option>`).join("")}
+        </select>
+      </label>
+      ${showPager ? docsPager({ pageNo, pages, total, limit, fmtNumber, label: "顶部分页" }) : ""}
+    </div>
+  `;
+}
+
+function docsPager({ pageNo, pages, total, limit, fmtNumber, label }) {
+  const prevOffset = Math.max(0, (pageNo - 2) * limit);
+  const nextOffset = pageNo * limit;
+  return `
+    <div class="pager docs-pager" role="group" aria-label="${label}">
+      <button class="btn" data-action="docs-page" data-offset="${prevOffset}" ${pageNo <= 1 ? "disabled" : ""}>上一页</button>
+      <span class="muted docs-page-text">第 ${pageNo} / ${pages} 页 · 共 ${fmtNumber(total)} 篇</span>
+      <button class="btn" data-action="docs-page" data-offset="${nextOffset}" ${pageNo >= pages ? "disabled" : ""}>下一页</button>
+      <span class="docs-jump">
+        <input type="number" min="1" max="${pages}" step="1" value="${pageNo}" data-docs-page aria-label="页码" />
+        <button class="btn" data-action="docs-jump">跳转</button>
+      </span>
     </div>
   `;
 }

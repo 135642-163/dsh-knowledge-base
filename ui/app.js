@@ -2,7 +2,7 @@ import { api, ApiError } from "./api.js";
 import { icons } from "./icons.js";
 import { hrefForKb, hrefForOverview, hrefForTrash, parseHash } from "./router.js";
 import { renderOverview } from "./views/overview.js";
-import { renderDetail } from "./views/detail.js";
+import { clampDocsPage, docsPageCount, docsPageSize, renderDetail } from "./views/detail.js";
 import { renderTrash } from "./views/trash.js";
 import { openConfirmModal, openCreateModal, openDocModal, openKbPickerModal, openRestoreModal } from "./views/modals.js";
 import { openUploadModal } from "./views/upload.js";
@@ -21,7 +21,7 @@ const state = {
   detail: null,
   detailLoading: false,
   detailError: "",
-  docs: { items: [], total: 0, offset: 0, limit: 50 },
+  docs: { items: [], total: 0, offset: 0, limit: 50, query: "" },
   trash: { items: [], loading: false, error: "" },
   std: {
     kb: "", loading: false, error: "", warning: "", starting: false, cancelling: false,
@@ -74,21 +74,28 @@ async function refreshKbsQuiet() {
   }
 }
 
-async function loadDetail(name, tab) {
+async function loadDetail(name, tab, options = {}) {
   if (state.detail?.kb?.name !== name) {
     state.detail = null;
     state.docs = { items: [], total: 0, offset: 0, limit: 50, query: "" };
   }
+  // 搜索触发的重载：每次重绘后把焦点和光标送回搜索框末尾。
+  const paint = () => {
+    render();
+    if (options.focusDocsQuery) focusDocsQueryInput();
+  };
   state.detailLoading = true;
   state.detailError = "";
-  render();
+  paint();
   try {
     const detail = await api.kb(name);
     state.detail = detail;
     if (tab === "std") {
       await loadStd(name);
     } else if (tab === "docs") {
-      const docs = await api.docs(name, { offset: state.docs.offset, limit: state.docs.limit, query: state.docs.query });
+      const limit = docsPageSize(state.docs.limit);
+      state.docs.limit = limit;
+      const docs = await api.docs(name, { offset: state.docs.offset, limit, query: state.docs.query });
       state.docs = { items: docs.docs, total: docs.total, offset: docs.offset, limit: docs.limit, query: state.docs.query };
     }
   } catch (error) {
@@ -96,8 +103,26 @@ async function loadDetail(name, tab) {
     state.detail = null;
   } finally {
     state.detailLoading = false;
-    render();
+    paint();
   }
+}
+
+/** 只在资料 tab 生效：重载文档列表（跳页/每页条数/清除搜索共用）。 */
+async function reloadDocs({ focusQuery = false } = {}) {
+  const current = route();
+  if (current.page !== "detail") return;
+  await loadDetail(current.name, "docs", focusQuery ? { focusDocsQuery: true } : {});
+}
+
+/** 跳页：读页码输入，越界收敛到 [1, 总页数]。 */
+async function jumpDocsPage(input) {
+  const current = route();
+  if (current.page !== "detail") return;
+  const limit = docsPageSize(state.docs.limit);
+  const pages = docsPageCount(state.docs.total, limit);
+  state.docs.limit = limit;
+  state.docs.offset = (clampDocsPage(input?.value, pages) - 1) * limit;
+  await loadDetail(current.name, "docs");
 }
 
 function stdErrorText(error) {
@@ -460,8 +485,21 @@ function bind() {
       window.location.hash = hrefForKb(current.name, target.dataset.tab);
     } else if (action === "docs-page") {
       const current = route();
-      state.docs.offset = Math.max(0, Number(target.dataset.offset) || 0);
+      if (current.page !== "detail") return;
+      const limit = docsPageSize(state.docs.limit);
+      state.docs.limit = limit;
+      state.docs.offset = Math.max(0, Math.round(Number(target.dataset.offset) || 0));
       await loadDetail(current.name, "docs");
+    } else if (action === "docs-jump") {
+      const input = target.closest(".docs-jump")?.querySelector("[data-docs-page]")
+        ?? app.querySelector("[data-docs-page]");
+      await jumpDocsPage(input);
+    } else if (action === "docs-clear") {
+      const current = route();
+      if (current.page !== "detail") return;
+      state.docs.query = "";
+      state.docs.offset = 0;
+      await loadDetail(current.name, "docs", { focusDocsQuery: true });
     } else if (action === "archive-kb") {
       const current = route();
       if (!current.name) return;
@@ -571,6 +609,49 @@ function bind() {
       applyQuery();
     };
   }
+  // 资料 tab：搜索（300ms 防抖 + 输入法安全）、每页条数与跳页
+  const docsSearch = app.querySelector("[data-docs-query]");
+  if (docsSearch) {
+    let composing = false;
+    let timer = 0;
+    let applied = state.docs.query;
+    const applyDocsQuery = async () => {
+      clearTimeout(timer);
+      const value = docsSearch.value;
+      state.docs.query = value;
+      if (value === applied) return;
+      applied = value;
+      state.docs.offset = 0;
+      await reloadDocs({ focusQuery: true });
+    };
+    docsSearch.oncompositionstart = () => { composing = true; clearTimeout(timer); };
+    docsSearch.oncompositionend = () => { composing = false; void applyDocsQuery(); };
+    docsSearch.oninput = (event) => {
+      state.docs.query = docsSearch.value;
+      if (composing || event.isComposing) return;
+      clearTimeout(timer);
+      timer = setTimeout(() => { void applyDocsQuery(); }, 300);
+    };
+    docsSearch.onkeydown = (event) => {
+      if (event.key !== "Enter" || composing || event.isComposing) return;
+      event.preventDefault();
+      void applyDocsQuery();
+    };
+  }
+  app.querySelectorAll("[data-docs-size]").forEach((select) => {
+    select.onchange = () => {
+      state.docs.limit = docsPageSize(select.value);
+      state.docs.offset = 0;
+      void reloadDocs();
+    };
+  });
+  app.querySelectorAll("[data-docs-page]").forEach((input) => {
+    input.onkeydown = (event) => {
+      if (event.key !== "Enter" || event.isComposing) return;
+      event.preventDefault();
+      void jumpDocsPage(input);
+    };
+  });
   app.querySelectorAll("[data-filter='status']").forEach((button) => {
     button.onclick = () => { state.filter = button.dataset.value; render(); };
   });
@@ -579,6 +660,16 @@ function bind() {
 /** 搜索框整页重绘后聚焦并把光标放回末尾（输入法组合结束也走这里）。 */
 function focusQueryInput() {
   const next = app.querySelector("[data-filter='query']");
+  if (!next) return;
+  next.focus();
+  next.setSelectionRange(next.value.length, next.value.length);
+}
+
+/** 资料搜索框重绘后聚焦并把光标放回末尾；只在资料 tab 生效。 */
+function focusDocsQueryInput() {
+  const current = route();
+  if (current.page !== "detail" || (current.tab || "overview") !== "docs") return;
+  const next = app.querySelector("[data-docs-query]");
   if (!next) return;
   next.focus();
   next.setSelectionRange(next.value.length, next.value.length);
