@@ -3,7 +3,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -111,6 +111,14 @@ test("renameScopeKb replaces and de-duplicates names", async () => {
   assert.deepEqual(data.scopes.s3.kbs, ["新"]);
 });
 
+test("renameScopeKb with the same name returns the scopes data", async () => {
+  const root = await tmpRoot();
+  await writeScopes(root, { scopes: { s1: { mode: "selected", kbs: ["A"] } } });
+  const before = await readScopes(root);
+  const same = await renameScopeKb(root, "A", "A");
+  assert.deepEqual(same, before);
+});
+
 test("mutateScopes refuses to overwrite a corrupt file", async () => {
   const root = await tmpRoot();
   await writeScopes(root, { scopes: {} });
@@ -128,14 +136,39 @@ test("mutateScopes refuses to overwrite a corrupt file", async () => {
   assert.equal(await readFile(file, "utf8"), "{oops");
 });
 
-test("oversized file reads empty and mutateScopes refuses to overwrite", async () => {
+test("mutateScopes propagates read errors (EACCES) without touching the file", async () => {
+  const root = await tmpRoot();
+  await writeScopes(root, { scopes: { s1: { mode: "all", kbs: [] } } });
+  const file = scopeFilePath(root);
+  const original = await readFile(file, "utf8");
+  await chmod(file, 0o000);
+  try {
+    await assert.rejects(
+      () =>
+        mutateScopes(root, (data) => {
+          data.scopes.s2 = { mode: "all", kbs: [] };
+          return true;
+        }),
+      (error) => error.code === "EACCES"
+    );
+  } finally {
+    await chmod(file, 0o600);
+  }
+  assert.equal(await readFile(file, "utf8"), original);
+});
+
+test("valid oversized file is unreadable by both views and cannot be overwritten", async () => {
   const root = await tmpRoot();
   await writeScopes(root, { scopes: {} });
   const file = scopeFilePath(root);
-  const big = "x".repeat(1024 * 1024 + 10);
+  const big = `{"version":1,"scopes":{"pad":{"mode":"all","kbs":[],"pad":"${"x".repeat(1024 * 1024 + 10)}"}}}`;
   await writeFile(file, big, "utf8");
   assert.deepEqual(readScopesSync(root), { version: 1, scopes: {} });
-  await assert.rejects(() => mutateScopes(root, () => true), /unusable/);
+  assert.deepEqual(await readScopes(root), { version: 1, scopes: {} });
+  await assert.rejects(
+    () => mutateScopes(root, () => true),
+    (error) => error.code === "SCOPE_UNUSABLE"
+  );
   assert.equal((await stat(file)).size, big.length);
 });
 
