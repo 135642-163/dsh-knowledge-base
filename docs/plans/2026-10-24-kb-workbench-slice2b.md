@@ -3627,3 +3627,37 @@ Expected: `--ff-only` 成功；HEAD 为 `chore: release 0.21.0 …`，其后还�
   - 真实浏览器自动化（Playwright）尚未接入，本轮为一次性 WKWebView 脚本验收；
   - Office 预览仅单页 docx 人工验过，大表格/扫描件附件/字体替换与超大文件耗时建议抽检；
   - 笔记正文以纯文本渲染（不解析 markdown 样式），后续可按需加安全渲染。
+
+## 0.23.0 实施记录
+
+0.22.0 → 0.23.0 的资料治理轮（删除/回收站 + 跨库移动 + 失败重试 + 卡片可视化 + Office 一键安装）。
+任务按实际提交顺序记录：
+
+| # | 任务 | 提交 | 主要文件 |
+|---|---|---|---|
+| 1 | 资料生命周期 API：软删除允许 ready/failed、恢复回到删除前状态、彻底删除逐字标题确认、失败文档 `kb-reparse` 后台重试、`error`/`sourceFile`/`movedTo` 投影与 remove/restore 日志 | `1d4e74e` | `lib/store.js`、`lib/web/api.js`、`lib/web/data.js`、`test/soft-delete.test.mjs`、`test/web-docs-lifecycle.test.mjs` |
+| 2 | 跨库移动引擎：只读预检（同 ID/同内容/同标题冲突）、skip/rename 策略（同内容始终跳过）、50 篇/500 MB 上限、逐篇事务（暂存校验 → 落位 → 原子写清单 → 源库软删）、journal 崩溃恢复、撤销移动 | `b9cc1f6` | `lib/transfer.js`、`lib/web/api.js`、`test/transfer.test.mjs`、`test/web-docs-move.test.mjs` |
+| 3 | 工作台资料治理 UI：行内操作矩阵、仅 ready/failed 可勾选、多选工具条「移动到…/移入回收站」、彻底删除输入标题、已删除筛选、移动弹窗（预检/冲突分组/跳过或副本/结果页/撤销全部）、失败行重试与弹窗 | `b62f74d` | `ui/api.js`、`ui/app.js`、`ui/style.css`、`ui/views/detail.js`、`ui/views/modals.js`、`test/ui-docs-actions.test.mjs` |
+| 4 | 总览卡片方案 B：单条类型构成条 + 可信度圆点图例，删除第二条可信度比例条 | `33d000a` | `ui/views/overview.js`、`ui/style.css`、`test/ui-overview.test.mjs` |
+| 5 | Office 转换引擎一键安装：`/office/status` + `/office/install`、consent、后台任务与进度、`~/.dsh/tools/libreoffice-kit`（`DSH_OFFICE_KIT_HOME`）、`capabilities` 校验、预览内安装面板与完成后重载 | `176d4d6` | `lib/web/office-install.js`、`lib/web/api.js`、`lib/web/preview.js`、`lib/web/server.js`、`ui/api.js`、`ui/style.css`、`ui/views/modals.js`、`test/office-install.test.mjs`、`test/web-office-api.test.mjs`、`test/ui-preview.test.mjs` |
+| 6 | 可信度圆点行补「可信度」标签 | `6446e83` | `ui/views/overview.js`、`ui/style.css` |
+
+- **真实宿主验收（2026-10-25，临时 `dsh --profile web --port 55942` + 临时 `kbRoot` + WKWebView 脚本）**：
+  「移动测试文档」甲库 → 乙库，结果「成功 1 · 跳过 0 · 失败 0」；源库该文档进入「已删除」且行内为
+  「撤销移动」，撤销后源文档恢复、目标副本进乙库回收站；软删除 + 逐字标题彻底删除清掉文件；失败
+  文档重试 `kb-reparse` 成功（`status: ready`、error 清空）；总览卡片类型条 + 可信度圆点行渲染。
+  截图见 `/Users/littlesun/workspace/deepseek/project/知识库/.acceptance/screenshot-23-*.png`。
+  说明：Office 一键安装 UI 由单测覆盖，本机已装引擎、未做真实重新下载；删除/移动/重试的真实 DOM
+  流程走一次性 WKWebView 脚本，不是 Playwright。
+- **测试**：`npm test` **722/722**（0.22.0 基线 620，净增 102：新增文件 88、现有文件 +14）；
+  `npm run typecheck`、`npm run check:client`、`node scripts/check-ui.mjs` 全绿。
+  逐文件明细见 spec §15.4，本轮说明见 spec §22。
+- **发布**：版本 0.23.0（`package.json`、`package-lock.json` 根与 `packages[""]`、`lib/version.js`），
+  README 新增 `## 0.23.0 资料治理`，更新 `officeKitCli`/环境变量说明与测试段（722）；
+  spec 追加 §22 与 §15.4。
+- **已知跟进**：
+  - 批量彻底删除仍未提供（批量只软删除）；
+  - 笔记（无原件）不能移动；移动不复制历史版本；
+  - 真实浏览器自动化（Playwright）仍未接入，UI 验收靠一次性 WKWebView 脚本；
+  - 跨 `kbRoot` 迁移没有入口；
+  - Office 一键安装尚未做真实下载（约 300 MB）与弱网/失败重试的现场验收。

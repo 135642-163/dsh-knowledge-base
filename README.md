@@ -113,6 +113,68 @@ exports/                   导出产物
 - `restoreKb` / `removeKbDir` 未做范围同步；失效库名由读取时清理（prune）兜底。
 - 胶囊只注册在 `conversation.input.left`；`conversation.session.header.utilities` 未接入。
 
+## 0.23.0 资料治理
+
+工作台的资料可以删除、跨库移动、失败后重试；总览卡片改为单条类型条 + 可信度圆点；Office 预览支持一键安装转换引擎。
+
+### 删除与回收站
+
+- 可删除**就绪（ready）与失败（failed）**资料；导入中的资料拒绝删除（`409 DOC_IMPORTING`），已删除的不能重复删除。入口在资料行（就绪=「移除」，失败=「重试 / 移除」）、失败资料的文档弹窗（「移入回收站」）与多选工具条（「移入回收站」）。
+- **默认软删除**：只把清单状态改为 `deleted`，记 `deletedAt` 与 `deletedFromStatus`，原件、`markdown/` 解析内容与历史版本全部保留。恢复后回到删除前的状态——失败资料恢复后仍是失败，失败原因也还在。
+- 状态筛选新增 **已删除**（`status=deleted`）。该列表每行提供 **恢复** 与 **彻底删除**；从别的库移动过来的资料显示 **撤销移动** 而不是普通「恢复」（见下节）。
+- **彻底删除只从已删除列表提供**，必须逐字输入资料标题才能确认（服务端同样校验 `confirm` 去首尾空白后与标题完全一致，否则 `400 CONFIRM_REQUIRED`）；会删掉原件、解析内容与历史版本，**不可恢复**。
+- **批量只做软删除**：多选工具条只有「移入回收站」，没有批量彻底删除；部分失败时按篇报告成功/失败数量。
+- 每次删除/恢复都写库日志：`remove`（detail 区分「软删除」/「永久删除」）与 `restore`，并刷新 `index.md`。
+- HTTP：`POST /kb/api/kbs/:name/docs/:id/delete`（body `{permanent?, confirm?}`）、`POST /kb/api/kbs/:name/docs/:id/restore`。
+
+### 跨库移动
+
+- 资料 tab 多选（只有 ready/failed 行可勾选）→「移动到…」→ 选目标库。目标必须是**同一个 `kbRoot` 下、未合并**的另一个库；下拉不列当前库与已合并库。
+- 先做**预检**（只读）：逐篇校验文档就绪/未删除/原件存在，汇总「将移动 N 篇（约 X MB）」，并按 **同 ID / 同内容 / 同标题** 分组列出目标库已有的重复。
+- **冲突策略**：默认「跳过」；可改「重命名为副本」——同 ID 冲突换新 id，同标题冲突追加「（副本）」「（副本 2）」；**同内容（`sourceHash`）始终跳过**，改名只会制造真重复。
+- **移动 = 复制到目标库 + 源库软删除**：目标库先写 `.transfer/<transferId>/` 暂存并逐字节校验（原件大小、markdown 文件数与字节），再落位，最后才原子写清单；源库文档标记 `deleted` + `movedTo`，所以在源库回收站能 **撤销移动**。
+- **撤销移动**：源文档恢复为移动前状态，目标库副本**软删除进目标库回收站**；两边的原件与解析内容都保留。只在目标副本仍可用且 transferId 匹配时允许；目标副本被修改/删除后拒绝撤销（`409 TRANSFER_UNDO_UNAVAILABLE`）。
+- 单批上限 **50 篇 / 500 MB**（超过是 `413 TRANSFER_TOO_MANY` / `TRANSFER_TOO_LARGE`）；同一 `kbRoot` 的 move/undo 进程内串行执行。
+- **历史版本不复制**：目标库从零开始积累历史；没有原件的笔记不能移动（预检/移动报「原件不存在」）。
+- 每篇文档一份 journal（`<kbRoot>/.transfers/<transferId>.json`）+ 目标库暂存目录。进程崩溃后，下一次预检/移动/撤销会先收敛：目标清单已提交→补齐源库删除并清暂存；未提交→删 journal 记录过的路径，不把半成品留成清单里的孤儿。
+- HTTP：`POST /kb/api/kbs/:name/docs/move/preflight`、`POST /kb/api/kbs/:name/docs/move`、`POST /kb/api/kbs/:name/docs/:id/undo-move`。
+
+### 失败资料
+
+- 失败行显示 **失败** 徽标与 重试 / 移除；文档弹窗显示 `error` 原文与 `warnings` 列表，并提供 **重新导入**（仅失败资料）。
+- **重新导入不是重新上传**：服务端用 `sources/` 里保存的原件重跑导入管线（强制完整重解析），以后台任务 `kb-reparse` 执行；界面每 1 秒轮询任务（约 2 分钟超时），成功/失败都有 toast，结算后刷新资料列表与库计数。
+- 同一行不会重复触发重试；原件已丢失时不能重试（`409 SOURCE_MISSING`）；非失败资料 `409 DOC_NOT_FAILED`。
+- 资料列表与详情新增 `error` / `sourceFile` / `movedTo`（列表）与 `error` / `errorAt` / `warnings`（详情）投影，列表直接显示失败原因，不必逐篇读详情。
+
+### 卡片可视化（方案 B）
+
+- 总览卡片只保留**一条**横向类型构成条：按类型篇数分段（圆角段、颜色区分类型），hover 显示「类型 pdf-text 3 · docx 1」，空库显示空条。
+- 可信度不再画第二条比例条，改为一行紧凑圆点图例：行首 **可信度** 标签 + 只显示非零档的 `● N`（高/中/低/未知各有固定颜色，单项 hover「高 3」，整行 title/aria-label 给四档完整计数）。四档全为零时不占位。
+
+### 一键安装 Office 转换引擎
+
+- 预览 Office（docx/pptx/xlsx 等）时若 `/office/status` 报引擎不可用，预览面板直接显示安装区：说明「约 300 MB，转换只在本机进行」、勾选同意、点 **安装转换引擎**；未勾选前按钮禁用。
+- `POST /kb/api/office/install` 必须带 `{confirm:true}`（否则 `400 CONSENT_REQUIRED`），以后台任务 `office-install` 安装到 `~/.dsh/tools/libreoffice-kit`（可用 `DSH_OFFICE_KIT_HOME` 改目录）；装 `@deepseek-ai/libreoffice-kit@0.2.2` 与当前平台引擎包（Linux 走 wasm），完成后跑 `<node> <cli> capabilities`，输出里必须有 `conversions` 才算成功。
+- 界面每 1.5 秒轮询安装任务并显示阶段/进度文字；成功后复查 `/office/status` 并自动重载预览（带 cache-bust）。**已安装**时预览直接内嵌、不进入安装区（`/office/install` 也直接回 `{alreadyInstalled:true}`）；并发安装返回 `409 OFFICE_INSTALL_RUNNING`。
+- 缺少 Node/npm 时不启动安装，面板改为「缺少 Node/npm，无法自动安装，请按 README 手动安装」。手动命令：
+
+  ```sh
+  mkdir -p ~/.dsh/tools/libreoffice-kit && cd ~/.dsh/tools/libreoffice-kit
+  npm install @deepseek-ai/libreoffice-kit
+  ```
+
+- 安装失败文案固定且不含本机路径；退出码/日志尾部只放在错误 `details` 里供本地排查。
+
+### 已知限制（0.23.0）
+
+- 只能在同一个 `kbRoot` 内移动；不同根目录的库之间没有迁移入口（需手工搬目录或重新导入）。
+- 单批 50 篇 / 500 MB，超过需要分批。
+- 无原件的笔记不能移动；历史版本不随移动复制，目标库从零开始。
+- 批量操作只提供软删除；彻底删除只能逐篇确认标题。
+- 撤销移动只在目标副本仍然可用时成立；目标副本被改/删后需手工处理。
+- 真实 DOM 的删除/移动/重试流程由一次性 WKWebView 脚本验收，尚未接入 Playwright 自动化。
+- Office 一键安装会下载约 300 MB 引擎；本次发布验收时本机已装引擎，**未做真实重新下载**（安装面板的同意、已安装、任务轮询与失败分支由单测覆盖）。
+
 ## 0.22.0 交互完善
 
 本会话范围、工作台资料浏览与原件查看的易用性补完。其中「一个都没选」的含义是**破坏性变更**。
@@ -596,7 +658,7 @@ kb_export({
 | `ocrNativeBin` | `""` | 原生 tesseract / tesserocr 环境的显式二进制或 python 路径（留空自动探测） |
 | `ocrPythonBin` | `""` | rapidocr 环境的显式 python 路径（留空自动探测 `~/.dsh/tools/rapidocr-env` 与 PATH） |
 | `ebookConvertBin` | `""` | Calibre ebook-convert 的显式路径（MOBI/AZW3 转换用；留空自动探测 PATH、`~/.dsh/tools/calibre`、macOS 默认安装位置） |
-| `officeKitCli` | `""` | LibreOfficeKit CLI 的显式路径（Office 原件预览转 PDF；留空自动探测 `DSH_OFFICE_KIT_CLI`、`~/.dsh/tools/libreoffice-kit` 默认安装与 PATH 里的 `dsoffice`） |
+| `officeKitCli` | `""` | LibreOfficeKit CLI 的显式路径（Office 原件预览转 PDF；留空自动探测 `DSH_OFFICE_KIT_CLI`、`DSH_OFFICE_KIT_HOME`、`~/.dsh/tools/libreoffice-kit` 默认安装与 PATH 里的 `dsoffice`） |
 | `maxInlinePages` | 20 | 超过则转入后台任务导入 |
 | `maxInlineBytes` | 10MB | 文件总字节数超过则转入后台任务导入 |
 | `partMaxChars` | 8000 | 分块大小（字符） |
@@ -609,8 +671,10 @@ kb_export({
 | `scopeTtlDays` | `30` | `selected` 会话范围条目过期天数（`none`/`all` 不做 TTL 清理）；0 = 不过期 |
 | `scopeLintMaxKbs` | `20` | `kb_lint` 在限定模式下最多检查多少个库 |
 
-> 0.22.0 只新增可选的 `officeKitCli`（Office 原件预览转 PDF）；`scopeTtlDays` 仍控制 `selected`
-> 会话范围条目的过期天数（`none`/`all` 不做 TTL 清理），`scopeLintMaxKbs` 仍是 `kb_lint` 逐库上限。
+> 0.22.0 新增可选的 `officeKitCli`（Office 原件预览转 PDF）；0.23.0 起配 `officeKitCli` 之外还可用
+> 环境变量 `DSH_OFFICE_KIT_CLI`（显式 CLI）或 `DSH_OFFICE_KIT_HOME`（安装/探测目录，一键安装也会装到
+> 这里）。`scopeTtlDays` 仍控制 `selected` 会话范围条目的过期天数（`none`/`all` 不做 TTL 清理），
+> `scopeLintMaxKbs` 仍是 `kb_lint` 逐库上限。
 
 > 引擎选择：默认只有内置 **tesseract.js（WASM）** 可用，零安装、全平台可移植。
 > 可选加速：`~/.dsh/tools/rapidocr-env` 装 RapidOCR（Python，中文印刷页最快）或
@@ -643,7 +707,7 @@ done
 ## 测试
 
 ```bash
-npm test          # node:test（620 个用例）；覆盖查重精度、同名文件保护、后台失败统计、检索截断/单文档上限、
+npm test          # node:test（722 个用例）；覆盖查重精度、同名文件保护、后台失败统计、检索截断/单文档上限、
                   # 相似导入提示、OCR 模型检查、流式 zip、心跳与锁回收、
                   # 清单 v1→v2→v3 迁移与备份、内容哈希跳过、kb_reparse、分块索引/页码锚点、
                   # kb_list 分页/过滤/kind、检索排序、跨库检索、文字层质量启发式、
@@ -663,7 +727,14 @@ npm test          # node:test（620 个用例）；覆盖查重精度、同名�
                   # 资料工具栏（防抖/输入法/跳页/每页条数/清除/焦点/旧响应丢弃）fake DOM 测试、
                   # 资料搜索（标题+摘要+标签）与状态筛选、笔记列表、状态徽标与重命名弹窗、
                   # 原件预览（白名单 inline、Office→PDF 缓存/并发合并/引擎缺失、/content 截断与转义）、
-                  # 临时/锁文件识别、导入跳过与 kb_lint 分组
+                  # 临时/锁文件识别、导入跳过与 kb_lint 分组、
+                  # 资料生命周期（软删除/恢复原状态/彻底删除确认、导入中拒绝、error/movedTo 投影）、
+                  # 失败资料重试（kb-reparse 任务、原件缺失、非失败拒绝、轮询/超时/结果提示）、
+                  # 跨库移动（预检摘要与冲突分组、同 ID/内容/标题策略、副本命名、50 篇/500 MB 上限、
+                  # 逐篇事务与部分失败、撤销移动、journal 崩溃恢复与暂存清理）、
+                  # 删除/移动/重试 UI（多选工具条、确认弹窗、目标库过滤、结果页与撤销进度、行内重试）、
+                  # 总览单条类型条 + 可信度圆点（无第二比例条、非零项/颜色/hover 计数）、
+                  # Office 引擎状态与一键安装（同意校验、已安装短路、缺 Node/npm、后台任务进度、capabilities 校验）
                   # （全部使用临时目录，不依赖本机知识库）
 ```
 
