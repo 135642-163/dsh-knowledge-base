@@ -2,10 +2,12 @@ import { api, ApiError } from "./api.js";
 import { icons } from "./icons.js";
 import { hrefForKb, hrefForOverview, hrefForTrash, parseHash } from "./router.js";
 import { renderOverview } from "./views/overview.js";
-import { docsPageSize, renderDetail } from "./views/detail.js";
+import { docsPageSize, docsStatus, renderDetail } from "./views/detail.js";
 import { attachDocsControls, createRequestGate } from "./docs-controls.js";
 import { renderTrash } from "./views/trash.js";
-import { openConfirmModal, openCreateModal, openDocModal, openKbPickerModal, openRestoreModal } from "./views/modals.js";
+import {
+  openConfirmModal, openCreateModal, openDocModal, openKbPickerModal, openPreviewModal, openRenameModal, openRestoreModal,
+} from "./views/modals.js";
 import { openUploadModal } from "./views/upload.js";
 
 const app = document.querySelector("#app");
@@ -22,7 +24,8 @@ const state = {
   detail: null,
   detailLoading: false,
   detailError: "",
-  docs: { items: [], total: 0, offset: 0, limit: 50, query: "", appliedQuery: "" },
+  docs: { items: [], total: 0, offset: 0, limit: 50, query: "", appliedQuery: "", status: "" },
+  notes: { items: [], total: 0, loading: false, error: "" },
   trash: { items: [], loading: false, error: "" },
   std: {
     kb: "", loading: false, error: "", warning: "", starting: false, cancelling: false,
@@ -88,8 +91,11 @@ async function loadDetail(name, tab) {
   const token = detailGate.begin();
   if (state.detail?.kb?.name !== name) {
     state.detail = null;
-    state.docs = { items: [], total: 0, offset: 0, limit: 50, query: "", appliedQuery: "" };
+    state.docs = { items: [], total: 0, offset: 0, limit: 50, query: "", appliedQuery: "", status: "" };
+    state.notes = { items: [], total: 0, loading: false, error: "" };
   }
+  // 笔记 tab 先亮加载态再等列表：同库切 tab 时不会闪一下「还没有笔记」。
+  if (tab === "notes") state.notes = { ...state.notes, loading: true, error: "" };
   state.detailLoading = true;
   state.detailError = "";
   render();
@@ -101,13 +107,16 @@ async function loadDetail(name, tab) {
       await loadStd(name);
       if (!detailGate.isCurrent(token)) return { stale: true };
     } else if (tab === "docs") {
-      // 搜索请求发出时的 query/offset；返回后还要确认用户没有继续输入，
-      // 否则旧词的结果不能挂在新词下面（本轮直接丢弃，等下一次防抖请求）。
+      // 搜索请求发出时的 query/offset/status；返回后还要确认用户没有继续输入或
+      // 切换筛选，否则旧结果不能挂在新条件下面（本轮直接丢弃，等下一次请求）。
       const query = String(state.docs.query ?? "");
+      const status = docsStatus(state.docs.status);
       const limit = docsPageSize(state.docs.limit);
       const offset = Math.max(0, Math.round(Number(state.docs.offset) || 0));
-      const docs = await api.docs(name, { offset, limit, query });
-      if (!detailGate.isCurrent(token) || query !== String(state.docs.query ?? "")) return { stale: true };
+      const docs = await api.docs(name, { offset, limit, query, status });
+      if (!detailGate.isCurrent(token)
+        || query !== String(state.docs.query ?? "")
+        || status !== docsStatus(state.docs.status)) return { stale: true };
       state.docs = {
         items: docs.docs,
         total: docs.total,
@@ -115,7 +124,28 @@ async function loadDetail(name, tab) {
         limit: docs.limit,
         query,
         appliedQuery: query,
+        status,
       };
+    } else if (tab === "notes") {
+      // 笔记列表与资料共用同一份详情 token：切库/切 tab 后在途响应自动作废。
+      try {
+        const notes = await api.docs(name, { type: "note", limit: 200, offset: 0 });
+        if (!detailGate.isCurrent(token)) return { stale: true };
+        state.notes = {
+          items: Array.isArray(notes.docs) ? notes.docs : [],
+          total: Math.max(0, Math.round(Number(notes.total) || 0)),
+          loading: false,
+          error: "",
+        };
+      } catch (error) {
+        if (!detailGate.isCurrent(token)) return { stale: true };
+        state.notes = {
+          items: [],
+          total: 0,
+          loading: false,
+          error: error instanceof ApiError ? error.message : String(error?.message ?? error),
+        };
+      }
     }
     return { stale: false };
   } catch (error) {
@@ -495,6 +525,30 @@ function bind() {
       window.location.hash = hrefForKb(target.dataset.name);
     } else if (action === "open-doc") {
       openDocModal({ name: target.dataset.kb, id: target.dataset.id, icons, fmtNumber });
+    } else if (action === "open-note") {
+      const current = route();
+      const id = target.dataset.id;
+      if (current.page !== "detail" || !id) return;
+      let doc = (state.notes.items ?? []).find((item) => item.id === id) ?? null;
+      if (!doc) {
+        try {
+          doc = await api.doc(current.name, id);
+        } catch (error) {
+          showToast(error instanceof ApiError ? error.message : String(error?.message ?? error), "error");
+          return;
+        }
+      }
+      openPreviewModal({ name: current.name, doc, icons });
+    } else if (action === "docs-status") {
+      const current = route();
+      if (current.page !== "detail") return;
+      state.docs.status = docsStatus(target.dataset.docsStatus);
+      state.docs.offset = 0;
+      if (current.tab !== "docs") {
+        window.location.hash = hrefForKb(current.name, "docs");
+        return;
+      }
+      await loadDetail(current.name, "docs");
     } else if (action === "tab") {
       const current = route();
       window.location.hash = hrefForKb(current.name, target.dataset.tab);
@@ -527,6 +581,19 @@ function bind() {
       } catch (error) {
         showToast(error instanceof ApiError ? error.message : String(error?.message ?? error), "error");
       }
+    } else if (action === "rename-kb-modal") {
+      const current = route();
+      const name = target.dataset.name || (current.page === "detail" ? current.name : "");
+      if (!name) return;
+      openRenameModal({
+        name,
+        onRenamed: async (next) => {
+          showToast("已重命名");
+          await loadKbs();
+          const tab = current.page === "detail" ? (current.tab || "overview") : "overview";
+          window.location.hash = hrefForKb(next, tab);
+        },
+      });
     } else if (action === "rename-kb") {
       const next = app.querySelector("#kb-rename")?.value?.trim() ?? "";
       if (next === "" || next === target.dataset.name) return;

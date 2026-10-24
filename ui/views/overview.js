@@ -1,3 +1,5 @@
+import { statusBadges } from "./badges.js";
+
 export function renderOverview(state, { icons, fmtNumber }) {
   const kbs = state.kbs.filter((kb) => matches(kb, state));
   const totalDocs = state.kbs.reduce((sum, kb) => sum + kb.docs.ready + kb.docs.importing + kb.docs.failed, 0);
@@ -57,7 +59,7 @@ function card(kb, { icons, fmtNumber }) {
         <span class="dot" style="--dot:${colorFor(kb.name)}"></span>
         <h2>${escapeHtml(kb.name)}</h2>
         ${kb.status === "empty" ? `<span class="badge">空库</span>` : ""}
-        ${kb.status === "warn" ? `<span class="badge warn">有失败</span>` : ""}
+        ${statusBadges(kb)}
         ${kb.mergedInto ? `<span class="badge">已合并至 ${escapeHtml(kb.mergedInto)}</span>` : ""}
         <span class="card-more">${icons.chevron}</span>
       </div>

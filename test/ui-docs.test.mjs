@@ -3,9 +3,11 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { clampDocsPage, docsPageCount, docsPageSize, renderDetail } from "../ui/views/detail.js";
+import { DOCS_STATUSES, clampDocsPage, docsPageCount, docsPageSize, docsStatus, renderDetail } from "../ui/views/detail.js";
+import { renderOverview } from "../ui/views/overview.js";
+import { statusBadges } from "../ui/views/badges.js";
 
-const icons = { upload: "", archive: "", search: "" };
+const icons = { upload: "", archive: "", search: "", chevron: "", database: "" };
 const fmtNumber = (value) => new Intl.NumberFormat("zh-CN").format(Number(value) || 0);
 const current = { page: "detail", name: "标准", tab: "docs" };
 
@@ -171,4 +173,160 @@ test("分页辅助函数收敛每页条数与跳页范围", () => {
   assert.equal(clampDocsPage("", 3), 1);
   assert.equal(clampDocsPage(2, 3), 2);
   assert.equal(clampDocsPage(99, 3), 3);
+});
+
+// ---------------------------------------------------------------------------
+// 状态筛选 / 笔记列表 / 状态徽标 / 重命名入口（0.22.0 Task 5）
+// ---------------------------------------------------------------------------
+
+function makeNote(id, patch = {}) {
+  return {
+    id,
+    title: `笔记 ${id}`,
+    type: "note",
+    summary: "",
+    updatedAt: "2026-10-01T00:00:00.000Z",
+    trust: "high",
+    ...patch,
+  };
+}
+
+function renderNotes(notes) {
+  const state = makeState();
+  state.notes = notes;
+  return renderDetail(state, { page: "detail", name: "标准", tab: "notes" }, { icons, fmtNumber });
+}
+
+test("资料状态筛选渲染全部/有失败/导入中，当前项高亮", () => {
+  const all = render({ items: [makeDoc("a1")], total: 1, status: "" });
+  assert.match(all, /data-docs-status=""/);
+  assert.match(all, /data-docs-status="failed"/);
+  assert.match(all, /data-docs-status="importing"/);
+  assert.match(all, /class="seg active" data-action="docs-status" data-docs-status="" aria-pressed="true">全部/);
+  assert.match(all, /class="seg" data-action="docs-status" data-docs-status="failed" aria-pressed="false">有失败/);
+
+  const failed = render({ items: [makeDoc("f1")], total: 1, status: "failed" });
+  assert.match(failed, /class="seg active" data-action="docs-status" data-docs-status="failed" aria-pressed="true">有失败/);
+
+  const importing = render({ items: [makeDoc("i1")], total: 1, status: "importing" });
+  assert.match(importing, /class="seg active" data-action="docs-status" data-docs-status="importing" aria-pressed="true">导入中/);
+
+  // 非法状态回落到「全部」。
+  const invalid = render({ items: [makeDoc("a1")], total: 1, status: "ready" });
+  assert.match(invalid, /class="seg active" data-action="docs-status" data-docs-status="" aria-pressed="true">全部/);
+});
+
+test("状态筛选无结果时保留工具栏，可切回全部", () => {
+  const failed = render({ total: 0, status: "failed" });
+  assert.match(failed, /没有导入失败的资料/);
+  assert.match(failed, /data-docs-query/);
+  assert.match(failed, /data-docs-status=""/);
+  assert.doesNotMatch(failed, /data-action="docs-page"/);
+
+  const importing = render({ total: 0, status: "importing" });
+  assert.match(importing, /没有导入中的资料/);
+
+  const searched = render({ total: 0, query: "不存在的标准", status: "failed" });
+  assert.match(searched, /没有匹配的资料/);
+  assert.match(searched, /data-docs-clear/);
+});
+
+test("docsStatus 收敛合法值", () => {
+  assert.deepEqual(DOCS_STATUSES, ["", "failed", "importing"]);
+  assert.equal(docsStatus("failed"), "failed");
+  assert.equal(docsStatus(" importing "), "importing");
+  assert.equal(docsStatus("ready"), "");
+  assert.equal(docsStatus(undefined), "");
+});
+
+test("笔记 tab 渲染标题按钮、日期、摘要与总数", () => {
+  const html = renderNotes({
+    items: [
+      makeNote("n1", { title: "继电保护摘要", summary: "第一条摘要" }),
+      makeNote("n2", { title: "<img src=x onerror=alert(1)>", summary: "<b>粗体</b>" }),
+    ],
+    total: 2,
+    loading: false,
+    error: "",
+  });
+  assert.match(html, /共 2 篇/);
+  assert.match(html, /data-action="open-note" data-id="n1"/);
+  assert.match(html, /data-action="open-note" data-id="n2"/);
+  assert.match(html, /继电保护摘要/);
+  assert.match(html, /2026-10-01/);
+  assert.match(html, /第一条摘要/);
+  assert.doesNotMatch(html, /<img src=x/);
+  assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
+  assert.match(html, /&lt;b&gt;粗体&lt;\/b&gt;/);
+});
+
+test("笔记 tab 的加载/空/错误状态", () => {
+  const loading = renderNotes({ items: [], total: 0, loading: true, error: "" });
+  assert.match(loading, /加载中…/);
+  assert.doesNotMatch(loading, /还没有笔记/);
+
+  const empty = renderNotes({ items: [], total: 0, loading: false, error: "" });
+  assert.match(empty, /还没有笔记/);
+
+  const failed = renderNotes({ items: [], total: 0, loading: false, error: "读取失败" });
+  assert.match(failed, /读取失败/);
+  assert.match(failed, /class="form-error"/);
+});
+
+test("笔记摘要过长时截断", () => {
+  const summary = "摘".repeat(200);
+  const html = renderNotes({ items: [makeNote("n1", { summary })], total: 1, loading: false, error: "" });
+  assert.match(html, /…/);
+  assert.doesNotMatch(html, new RegExp(summary));
+});
+
+test("statusBadges 只渲染非零项并带完整拆分 title", () => {
+  assert.equal(statusBadges({ docs: { ready: 3, importing: 0, failed: 0 } }), "");
+
+  const importing = statusBadges({ docs: { ready: 3, importing: 2, failed: 0 } });
+  assert.match(importing, /<span class="badge accent" title="成功 3 · 导入中 2 · 失败 0">导入中 2<\/span>/);
+  assert.doesNotMatch(importing, /有失败/);
+
+  const failed = statusBadges({ docs: { ready: 5, importing: 2, failed: 3 } });
+  assert.match(failed, /<span class="badge warn" title="成功 5 · 导入中 2 · 失败 3">有失败 3<\/span>/);
+  assert.match(failed, /导入中 2/);
+
+  const interactive = statusBadges({ docs: { ready: 5, importing: 0, failed: 3 } }, { interactiveFailed: true });
+  assert.match(interactive, /<button type="button" class="badge warn badge-action" data-action="docs-status" data-docs-status="failed" title="成功 5 · 导入中 0 · 失败 3">有失败 3<\/button>/);
+});
+
+test("详情页头把导入中和有失败拆成两个徽标，失败可点进筛选", () => {
+  const state = makeState({ items: [makeDoc("a1")], total: 1 });
+  state.detail.kb.docs = { ready: 5, importing: 2, failed: 3, notes: 0, deleted: 0 };
+  const html = renderDetail(state, current, { icons, fmtNumber });
+  assert.match(html, /导入中 2/);
+  assert.match(html, /有失败 3/);
+  assert.match(html, /title="成功 5 · 导入中 2 · 失败 3"/);
+  assert.match(html, /data-action="docs-status" data-docs-status="failed"/);
+});
+
+test("总览卡片状态徽标保持只读", () => {
+  const kb = {
+    name: "标准",
+    description: "",
+    tags: [],
+    docs: { ready: 5, importing: 2, failed: 3, notes: 0, deleted: 0 },
+    pages: 10,
+    chars: 100,
+    types: {},
+    trust: {},
+    updatedAt: "2026-10-01T00:00:00.000Z",
+    status: "warn",
+  };
+  const html = renderOverview({ kbs: [kb], filter: "all", query: "" }, { icons, fmtNumber });
+  assert.match(html, /导入中 2/);
+  assert.match(html, /<span class="badge warn" title="成功 5 · 导入中 2 · 失败 3">有失败 3<\/span>/);
+  assert.doesNotMatch(html, /data-action="docs-status"/);
+});
+
+test("详情页头提供重命名入口，保留上传与归档", () => {
+  const html = renderDetail(makeState(), current, { icons, fmtNumber });
+  assert.match(html, /data-action="rename-kb-modal" data-name="标准"[^>]*>重命名<\/button>/);
+  assert.match(html, /data-action="upload"/);
+  assert.match(html, /data-action="archive-kb"/);
 });
