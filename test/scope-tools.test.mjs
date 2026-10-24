@@ -4,7 +4,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { apply } from "../lib/index.js";
@@ -137,4 +137,113 @@ test("kb_query rejects doc together with cross-kb search", async () => {
     () => tools.get("kb_query").execute({ pattern: "甲", doc: "甲文档" }, scoped("s1")),
     /doc 只能用于单个知识库/
   );
+});
+
+test("kb_query and kb_list accept an explicit in-scope kb", async () => {
+  const { tools, scoped, importDoc, scope } = await setup();
+  await importDoc("a.md", "# A\n\n继电保护甲。\n", "甲库", "甲文档");
+  await importDoc("b.md", "# B\n\n继电保护乙。\n", "乙库", "乙文档");
+  await scope("s1", ["甲库"]);
+  const query = await tools.get("kb_query").execute({ pattern: "继电保护", kb: "甲库" }, scoped("s1"));
+  assert.equal(query.kb, "甲库");
+  assert.equal(query.searchedKbs, undefined);
+  assert.deepEqual(query.scope, { mode: "selected", kbs: ["甲库"] });
+  assert.ok(query.matches.every((match) => match.title === "甲文档"));
+  const list = await tools.get("kb_list").execute({ kb: "甲库" }, scoped("s1"));
+  assert.deepEqual(list.docs.map((doc) => doc.title), ["甲文档"]);
+  assert.deepEqual(list.scope, { mode: "selected", kbs: ["甲库"] });
+});
+
+test("tools inherit scope from the parent session", async () => {
+  const { tools, scoped, importDoc, scope } = await setup();
+  await importDoc("a.md", "# A\n\n甲资料。\n", "甲库", "甲文档");
+  await importDoc("b.md", "# B\n\n乙资料。\n", "乙库", "乙文档");
+  await scope("parent", ["甲库"]);
+  const result = await tools.get("kb_list").execute({}, scoped("child", "parent"));
+  assert.deepEqual(result.kbs.map((kb) => kb.name), ["甲库"]);
+  assert.deepEqual(result.scope, { mode: "selected", kbs: ["甲库"] });
+});
+
+test("kb_list fails open when .scopes.json is corrupt", async () => {
+  const { tools, scoped, importDoc, kbRoot } = await setup();
+  await importDoc("a.md", "# A\n\n甲资料。\n", "甲库", "甲文档");
+  await writeFile(join(kbRoot, ".scopes.json"), "{broken", "utf8");
+  const result = await tools.get("kb_list").execute({}, scoped("s1"));
+  assert.deepEqual(result.kbs.map((kb) => kb.name), ["甲库"]);
+  assert.deepEqual(result.scope, { mode: "all", kbs: [] });
+});
+
+test("kb_query and kb_list key scope by directory, not manifest name", async () => {
+  const { tools, scoped, importDoc, scope, kbRoot } = await setup();
+  await importDoc("a.md", "# A\n\n继电保护甲。\n", "甲库", "甲文档");
+  await importDoc("b.md", "# B\n\n继电保护AAA。\n", "AAA", "AAA文档");
+  const realDir = join(kbRoot, "甲库");
+  const fakeDir = join(kbRoot, "AAA");
+  const realManifest = JSON.parse(await readFile(join(realDir, "kb.json"), "utf8"));
+  const fakeManifest = JSON.parse(await readFile(join(fakeDir, "kb.json"), "utf8"));
+  // 目录名与 manifest.name 互换：甲库/ 的清单名叫 AAA，AAA/ 的清单名叫 甲库
+  await writeFile(join(realDir, "kb.json"), JSON.stringify({ ...realManifest, name: "AAA" }), "utf8");
+  await writeFile(join(fakeDir, "kb.json"), JSON.stringify({ ...fakeManifest, name: "甲库" }), "utf8");
+  await scope("s1", ["甲库"]);
+
+  // (i) 省略 kb 的 selected 检索只搜目录「甲库」，不应命中 AAA/ 的内容
+  const scopedQuery = await tools.get("kb_query").execute({ pattern: "继电保护" }, scoped("s1"));
+  assert.deepEqual(scopedQuery.searchedKbs, ["甲库"]);
+  assert.ok(scopedQuery.matches.every((match) => match.title === "甲文档"));
+  assert.ok(scopedQuery.matches.every((match) => !match.line.includes("AAA")));
+
+  // kb_list selected 同样按目录名过滤
+  const list = await tools.get("kb_list").execute({}, scoped("s1"));
+  assert.deepEqual(list.kbs.map((kb) => kb.dir), ["甲库"]);
+
+  // (ii) all 模式 kb="*" 按条目搜索（清单名不同，各搜各的目录）
+  const allStar = await tools.get("kb_query").execute({ pattern: "继电保护", kb: "*" }, scoped("s3"));
+  assert.deepEqual([...allStar.searchedKbs].sort(), ["AAA", "甲库"]);
+  const titles = new Set(allStar.matches.map((match) => match.title));
+  assert.ok(titles.has("甲文档"));
+  assert.ok(titles.has("AAA文档"));
+
+  // (iii) 两个目录清单同名时，kb="*" 必须分别搜索两个目录
+  await writeFile(join(realDir, "kb.json"), JSON.stringify({ ...realManifest, name: "甲库" }), "utf8");
+  await writeFile(join(fakeDir, "kb.json"), JSON.stringify({ ...fakeManifest, name: "甲库" }), "utf8");
+  const duplicateStar = await tools.get("kb_query").execute({ pattern: "继电保护", kb: "*" }, scoped("s4"));
+  assert.deepEqual(duplicateStar.searchedKbs, ["甲库", "甲库"]);
+  const duplicateTitles = new Set(duplicateStar.matches.map((match) => match.title));
+  assert.ok(duplicateTitles.has("甲文档"));
+  assert.ok(duplicateTitles.has("AAA文档"));
+});
+
+test("kb_query routes doc to a single scoped kb and rejects multi-kb doc search", async () => {
+  const { tools, scoped, importDoc, scope } = await setup();
+  await importDoc("a.md", "# A\n\n继电保护甲。\n", "甲库", "甲文档");
+  await importDoc("b.md", "# B\n\n继电保护乙。\n", "乙库", "乙文档");
+  await scope("s1", ["甲库"]);
+  const single = await tools.get("kb_query").execute({ pattern: "继电保护", doc: "甲文档" }, scoped("s1"));
+  assert.equal(single.kb, "甲库");
+  assert.deepEqual(single.matches.map((match) => match.title), ["甲文档"]);
+  assert.deepEqual(single.scope, { mode: "selected", kbs: ["甲库"] });
+
+  await scope("s2", ["甲库", "乙库"]);
+  await assert.rejects(
+    () => tools.get("kb_query").execute({ pattern: "继电保护", doc: "甲文档" }, scoped("s2")),
+    (error) => error.code === "KB_REQUIRED" && /doc 只能用于单个知识库/.test(error.message)
+  );
+  await assert.rejects(
+    () => tools.get("kb_query").execute({ pattern: "继电保护", doc: "甲文档", kb: "*" }, scoped("s2")),
+    (error) => error.code === "KB_REQUIRED" && /doc 只能用于单个知识库/.test(error.message)
+  );
+});
+
+test("kb_list explains an unavailable scoped kb", async () => {
+  const { tools, scoped, importDoc, scope, kbRoot } = await setup();
+  await importDoc("a.md", "# A\n\n甲资料。\n", "甲库", "甲文档");
+  await writeFile(join(kbRoot, "甲库", "kb.json"), "{broken", "utf8");
+  await scope("s1", ["甲库"]);
+  const result = await tools.get("kb_list").execute({}, scoped("s1"));
+  assert.deepEqual(result.kbs, []);
+  assert.deepEqual(result.scope, { mode: "selected", kbs: ["甲库"] });
+  const text = tools.get("kb_list").output.render({}, result)[0].text;
+  assert.match(text, /本会话范围/);
+  assert.match(text, /不可用/);
+  assert.doesNotMatch(text, /还没有任何知识库/);
 });
