@@ -3,7 +3,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, readFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { handleApi } from "../lib/web/api.js";
@@ -34,11 +34,15 @@ function makeReq({ method = "GET", url = "/kb/api/scope", headers = {}, body } =
   };
 }
 
-async function call(kbRoot, req) {
+async function call(kbRoot, req, { ctx, fence = () => true } = {}) {
   const res = makeRes();
-  await handleApi(req, res, { opts: { kbRoot }, fence: () => true });
+  await handleApi(req, res, { ctx, opts: { kbRoot }, fence });
   return { res, json: res.body ? JSON.parse(res.body) : null };
 }
+
+const CHMOD_GUARD = {
+  skip: process.platform === "win32" || (typeof process.getuid === "function" && process.getuid() === 0),
+};
 
 async function setup() {
   const kbRoot = join(await mkdtemp(join(tmpdir(), "kb-scope-api-")), "kb");
@@ -163,9 +167,7 @@ test("PUT rejects a cross-origin request", async () => {
   assert.equal(res.status, 403);
 });
 
-test("PUT reports SCOPE_WRITE_FAILED when the scopes file cannot be written", {
-  skip: process.platform === "win32" || (typeof process.getuid === "function" && process.getuid() === 0),
-}, async () => {
+test("PUT reports SCOPE_WRITE_FAILED when the scopes file cannot be written", CHMOD_GUARD, async () => {
   const kbRoot = await setup();
   await chmod(kbRoot, 0o555);
   try {
@@ -175,7 +177,112 @@ test("PUT reports SCOPE_WRITE_FAILED when the scopes file cannot be written", {
     }));
     assert.equal(res.status, 500);
     assert.equal(json.error.code, "SCOPE_WRITE_FAILED");
+    // 5xx 不回显可能带绝对路径的 details
+    assert.equal(json.error.details, undefined);
+    assert.equal(res.body.includes(kbRoot), false);
   } finally {
     await chmod(kbRoot, 0o755);
   }
+});
+
+test("GET is rejected by the fence", async () => {
+  const kbRoot = await setup();
+  const { res } = await call(kbRoot, makeReq({ url: "/kb/api/scope?session=s1" }), { fence: () => false });
+  assert.equal(res.status, 403);
+});
+
+test("GET of a fresh session reports null updatedAt and no resolved rows", async () => {
+  const kbRoot = await setup();
+  const { res, json } = await call(kbRoot, makeReq({ url: "/kb/api/scope?session=fresh" }));
+  assert.equal(res.status, 200);
+  assert.equal(json.updatedAt, null);
+  assert.deepEqual(json.resolved, []);
+});
+
+test("GET prunes an expired entry and falls back to all", async () => {
+  const kbRoot = await setup();
+  const stale = new Date(Date.now() - 40 * 86400000).toISOString();
+  await writeFile(join(kbRoot, ".scopes.json"), JSON.stringify({
+    version: 1,
+    scopes: { s1: { mode: "selected", kbs: ["甲库"], updatedAt: stale, inheritedFrom: null } },
+  }), "utf8");
+  const { res, json } = await call(kbRoot, makeReq({ url: "/kb/api/scope?session=s1" }));
+  assert.equal(res.status, 200);
+  assert.deepEqual(json.scope, { mode: "all", kbs: [], inheritedFrom: null });
+  const data = JSON.parse(await readFile(join(kbRoot, ".scopes.json"), "utf8"));
+  assert.equal(Object.hasOwn(data.scopes, "s1"), false);
+});
+
+test("GET resolves the parent scope from the live agent registry without snapshotting", async () => {
+  const kbRoot = await setup();
+  const put = await call(kbRoot, makeReq({
+    method: "PUT",
+    body: { session: "parent", mode: "selected", kbs: ["甲库"] },
+  }));
+  assert.equal(put.res.status, 200);
+  const ctx = {
+    get: (name) => name === "agents"
+      ? { get: (id) => id === "child" ? { session: { header: { parentSession: "parent" } } } : undefined }
+      : undefined,
+  };
+  const get = await call(kbRoot, makeReq({ url: "/kb/api/scope?session=child" }), { ctx });
+  assert.equal(get.res.status, 200);
+  assert.deepEqual(get.json.scope, { mode: "selected", kbs: ["甲库"], inheritedFrom: "parent" });
+  const data = JSON.parse(await readFile(join(kbRoot, ".scopes.json"), "utf8"));
+  assert.equal(Object.hasOwn(data.scopes, "child"), false);
+});
+
+test("GET degrades to all mode when .scopes.json is unreadable", CHMOD_GUARD, async () => {
+  const kbRoot = await setup();
+  const file = join(kbRoot, ".scopes.json");
+  await writeFile(file, JSON.stringify({
+    version: 1,
+    scopes: { s1: { mode: "selected", kbs: ["甲库"], updatedAt: new Date().toISOString(), inheritedFrom: null } },
+  }), "utf8");
+  await chmod(file, 0o000);
+  try {
+    const { res, json } = await call(kbRoot, makeReq({ url: "/kb/api/scope?session=s1" }));
+    assert.equal(res.status, 200);
+    assert.deepEqual(json.scope, { mode: "all", kbs: [], inheritedFrom: null });
+    assert.equal(json.updatedAt, null);
+  } finally {
+    await chmod(file, 0o600);
+  }
+});
+
+test("PUT rejects non-array kbs", async () => {
+  const kbRoot = await setup();
+  const { res, json } = await call(kbRoot, makeReq({
+    method: "PUT",
+    body: { session: "s1", mode: "selected", kbs: "甲库" },
+  }));
+  assert.equal(res.status, 400);
+  assert.equal(json.error.code, "SCOPE_INVALID");
+});
+
+test("resolved follows the input order and drops an archived kb", async () => {
+  const kbRoot = await setup();
+  const put = await call(kbRoot, makeReq({
+    method: "PUT",
+    body: { session: "s1", mode: "selected", kbs: ["乙库", "甲库"] },
+  }));
+  assert.deepEqual(put.json.resolved.map((row) => row.name), ["乙库", "甲库"]);
+  await call(kbRoot, makeReq({
+    method: "POST",
+    url: `/kb/api/kbs/${encodeURIComponent("甲库")}/archive`,
+    body: { confirm: "甲库" },
+  }));
+  const get = await call(kbRoot, makeReq({ url: "/kb/api/scope?session=s1" }));
+  assert.deepEqual(get.json.resolved.map((row) => row.name), ["乙库"]);
+});
+
+test("PUT enforces the scope size cap", async () => {
+  const kbRoot = await setup();
+  const kbs = Array.from({ length: 51 }, (_, i) => `库${i}`);
+  const { res, json } = await call(kbRoot, makeReq({
+    method: "PUT",
+    body: { session: "s1", mode: "selected", kbs },
+  }));
+  assert.equal(res.status, 400);
+  assert.equal(json.error.code, "SCOPE_INVALID");
 });

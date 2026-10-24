@@ -231,6 +231,21 @@ test("setScope validates mode, kbs existence and archived kbs", async () => {
   assert.deepEqual(saved.kbs, ["A"]);
 });
 
+test("setScope rejects non-array kbs and non-string items", async () => {
+  const root = await tmpRoot();
+  await makeKb(root, "A");
+  await assert.rejects(
+    () => setScope(root, { sessionId: "s1", mode: "selected", kbs: "A" }),
+    (e) => e.code === "SCOPE_INVALID" && e.message === "kbs 必须是数组"
+  );
+  await assert.rejects(
+    () => setScope(root, { sessionId: "s1", mode: "selected", kbs: [42] }),
+    (e) => e.code === "SCOPE_INVALID" && e.message === "知识库名称必须是字符串"
+  );
+  const data = await readScopes(root);
+  assert.deepEqual(Object.keys(data.scopes), []);
+});
+
 test("setScope validates kb selection strictly", async () => {
   const root = await tmpRoot();
   await makeKb(root, "A");
