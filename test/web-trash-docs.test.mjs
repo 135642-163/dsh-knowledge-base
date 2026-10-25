@@ -501,3 +501,442 @@ test("purge and trash listing enforce UI header and same-origin on writes", asyn
   assert.equal(res.status, 403);
 });
 
+// ---------------------------------------------------------------------------
+// 跨库批量彻底删除
+// ---------------------------------------------------------------------------
+
+const CROSS_PURGE_URL = "/kb/api/trash/docs/purge";
+
+async function crossSetup() {
+  const kbRoot = await tempRoot();
+  const alpha = await setupKb(kbRoot, "甲库", [
+    deletedDoc("a1", "甲一", "2026-10-01T00:00:00.000Z", { sourceFile: "a1.pdf" }),
+    deletedDoc("a2", "甲二", "2026-10-02T00:00:00.000Z"),
+    doc("a-live", "甲在用"),
+  ]);
+  const beta = await setupKb(kbRoot, "乙库", [
+    deletedDoc("b1", "乙一", "2026-10-03T00:00:00.000Z", { sourceFile: "b1.pdf" }),
+    deletedDoc("b2", "乙二", "2026-10-04T00:00:00.000Z"),
+    doc("b-live", "乙在用"),
+  ]);
+  await materialize(alpha, "a1");
+  await materialize(beta, "b1");
+  return { kbRoot, alpha, beta };
+}
+
+function crossPurge(kbRoot, body, { opts = {}, headers } = {}) {
+  return call({ kbRoot, ...opts }, makeReq({
+    method: "POST",
+    url: CROSS_PURGE_URL,
+    body,
+    ...(headers ? { headers } : {}),
+  }));
+}
+
+test("cross-kb purge requires the exact 彻底删除 N 篇 phrase", async () => {
+  const { kbRoot, alpha, beta } = await crossSetup();
+  const item = { kb: "甲库", id: "a1" };
+  const bodies = [
+    { items: [item] },
+    { items: [item], confirm: "" },
+    // 旧版按库名确认不再适用。
+    { items: [item], confirm: "甲库" },
+    // 篇数不符（少一篇 / 多一篇 / 缺空格）。
+    { items: [item], confirm: "彻底删除 0 篇" },
+    { items: [item], confirm: "彻底删除 2 篇" },
+    { items: [item], confirm: "彻底删除 1篇" },
+  ];
+  for (const body of bodies) {
+    const { res, json } = await crossPurge(kbRoot, body);
+    assert.equal(res.status, 400, JSON.stringify(body));
+    assert.equal(json.error.code, "CONFIRM_REQUIRED", JSON.stringify(body));
+    assert.equal(json.error.message, "请输入「彻底删除 1 篇」以确认");
+  }
+  assert.ok(await docOf(alpha, "a1"));
+  assert.ok(await docOf(beta, "b1"));
+  assert.equal(existsSync(join(alpha, "markdown", "a1")), true);
+});
+
+test("cross-kb purge removes docs in multiple kbs, logs once each and refreshes indexes", async () => {
+  const { kbRoot, alpha, beta } = await crossSetup();
+  const { res, json } = await crossPurge(kbRoot, {
+    items: [
+      { kb: "甲库", id: "a1" },
+      { kb: "乙库", id: "b1" },
+    ],
+    confirm: "彻底删除 2 篇",
+  });
+  assert.equal(res.status, 200);
+  assert.deepEqual(json, { purged: 2, failed: [], byKb: { 甲库: 1, 乙库: 1 } });
+
+  assert.equal(await docOf(alpha, "a1"), null);
+  assert.equal(await docOf(beta, "b1"), null);
+  assert.equal(existsSync(join(alpha, "markdown", "a1")), false);
+  assert.equal(existsSync(join(beta, "markdown", "b1")), false);
+  // 未选中的同批条目（含在用资料）保持原状。
+  assert.equal((await docOf(alpha, "a2")).status, "deleted");
+  assert.ok(await docOf(alpha, "a-live"));
+  assert.equal((await docOf(beta, "b2")).status, "deleted");
+  assert.ok(await docOf(beta, "b-live"));
+
+  const alphaLog = await readFile(join(alpha, "log.md"), "utf8");
+  assert.match(alphaLog, /remove\s+甲一（a1）\s+彻底删除（跨库批量）/);
+  assert.equal(alphaLog.includes("甲二"), false);
+  const betaLog = await readFile(join(beta, "log.md"), "utf8");
+  assert.match(betaLog, /remove\s+乙一（b1）\s+彻底删除（跨库批量）/);
+  assert.equal(betaLog.includes("乙二"), false);
+
+  const alphaIndex = await readFile(join(alpha, "index.md"), "utf8");
+  assert.match(alphaIndex, /共 2 篇/);
+  assert.equal(alphaIndex.includes("甲一"), false);
+  const betaIndex = await readFile(join(beta, "index.md"), "utf8");
+  assert.match(betaIndex, /共 2 篇/);
+  assert.equal(JSON.stringify(json).includes(kbRoot), false);
+});
+
+test("cross-kb purge dedupes by kb+id but treats the same id in another kb as distinct", async () => {
+  const kbRoot = await tempRoot();
+  const alpha = await setupKb(kbRoot, "甲库", [
+    deletedDoc("same", "甲同", "2026-10-01T00:00:00.000Z"),
+  ]);
+  const beta = await setupKb(kbRoot, "乙库", [
+    deletedDoc("same", "乙同", "2026-10-01T00:00:00.000Z"),
+  ]);
+
+  const { res, json } = await crossPurge(kbRoot, {
+    items: [
+      { kb: "甲库", id: "same" },
+      { kb: "甲库", id: "same" },
+      { kb: "乙库", id: "same" },
+    ],
+    confirm: "彻底删除 2 篇",
+  });
+  assert.equal(res.status, 200);
+  assert.deepEqual(json, { purged: 2, failed: [], byKb: { 甲库: 1, 乙库: 1 } });
+  assert.equal(await docOf(alpha, "same"), null);
+  assert.equal(await docOf(beta, "same"), null);
+
+  const alphaLog = await readFile(join(alpha, "log.md"), "utf8");
+  assert.equal((alphaLog.match(/甲同（same）/g) ?? []).length, 1);
+  const betaLog = await readFile(join(beta, "log.md"), "utf8");
+  assert.equal((betaLog.match(/乙同（same）/g) ?? []).length, 1);
+});
+
+test("cross-kb purge prevalidates every item and deletes nothing on a live doc", async () => {
+  const { kbRoot, alpha, beta } = await crossSetup();
+  // 第一条合法、第二条是在用资料：整批拒绝，合法条目也不能被提前删掉。
+  const { res, json } = await crossPurge(kbRoot, {
+    items: [
+      { kb: "甲库", id: "a1" },
+      { kb: "乙库", id: "b-live" },
+    ],
+    confirm: "彻底删除 2 篇",
+  });
+  assert.equal(res.status, 409);
+  assert.equal(json.error.code, "DOC_NOT_DELETED");
+  assert.match(json.error.message, /乙在用/);
+  assert.deepEqual(json.error.details, { kb: "乙库", id: "b-live", title: "乙在用" });
+  assert.ok(await docOf(alpha, "a1"));
+  assert.ok(await docOf(beta, "b-live"));
+  assert.equal(existsSync(join(alpha, "markdown", "a1")), true);
+  assert.equal(JSON.stringify(json).includes(kbRoot), false);
+});
+
+test("cross-kb purge rejects unknown and archived kbs without deleting anything", async () => {
+  const { kbRoot, alpha } = await crossSetup();
+
+  const unknown = await crossPurge(kbRoot, {
+    items: [
+      { kb: "甲库", id: "a1" },
+      { kb: "查无此库", id: "z" },
+    ],
+    confirm: "彻底删除 2 篇",
+  });
+  assert.equal(unknown.res.status, 409);
+  assert.equal(unknown.json.error.code, "KB_NOT_FOUND");
+  assert.deepEqual(unknown.json.error.details, { kb: "查无此库", id: "z", title: "" });
+  assert.ok(await docOf(alpha, "a1"));
+
+  const archivedDir = await setupKb(kbRoot, "归档库", [
+    deletedDoc("z1", "归档资料", "2026-10-02T00:00:00.000Z"),
+  ]);
+  const trashedTo = await archiveKb(kbRoot, "归档库");
+  const archived = await crossPurge(kbRoot, {
+    items: [{ kb: "归档库", id: "z1" }],
+    confirm: "彻底删除 1 篇",
+  });
+  assert.equal(archived.res.status, 409);
+  assert.equal(archived.json.error.code, "KB_NOT_FOUND");
+  assert.equal(existsSync(join(archivedDir, "kb.json")), false);
+  const archivedManifest = JSON.parse(await readFile(join(trashedTo, "kb.json"), "utf8"));
+  assert.equal(archivedManifest.docs.some((item) => item.id === "z1"), true);
+});
+
+test("cross-kb purge rejects empty, malformed and oversized item lists", async () => {
+  const { kbRoot, alpha } = await crossSetup();
+  const bodies = [
+    {},
+    { items: [], confirm: "彻底删除 0 篇" },
+    { items: "nope", confirm: "彻底删除 1 篇" },
+    { items: [null], confirm: "彻底删除 1 篇" },
+    { items: [{ kb: "甲库", id: "  " }], confirm: "彻底删除 1 篇" },
+    { items: [{ kb: "", id: "a1" }], confirm: "彻底删除 1 篇" },
+  ];
+  for (const body of bodies) {
+    const { res, json } = await crossPurge(kbRoot, body);
+    assert.equal(res.status, 400, JSON.stringify(body));
+    assert.equal(json.error.code, "INVALID_ARGS", JSON.stringify(body));
+  }
+
+  const items = Array.from({ length: 501 }, (_, index) => ({ kb: "甲库", id: `n${index}` }));
+  const over = await crossPurge(kbRoot, { items, confirm: "彻底删除 501 篇" });
+  assert.equal(over.res.status, 400);
+  assert.equal(over.json.error.code, "INVALID_ARGS");
+  assert.ok(await docOf(alpha, "a1"));
+});
+
+test("cross-kb purge reports partial failures without paths and keeps going", async () => {
+  const { kbRoot, alpha, beta } = await crossSetup();
+  const attempted = [];
+  const removeDocImpl = async (kbDir, docId) => {
+    attempted.push(docId);
+    if (docId === "b1") {
+      throw new Error(`EACCES: permission denied, rmdir '${join(kbDir, "markdown", docId)}'`);
+    }
+    return removeDoc(kbDir, docId);
+  };
+
+  const { res, json } = await crossPurge(
+    kbRoot,
+    {
+      items: [
+        { kb: "甲库", id: "a1" },
+        { kb: "乙库", id: "b1" },
+      ],
+      confirm: "彻底删除 2 篇",
+    },
+    { opts: { removeDocImpl } }
+  );
+  assert.equal(res.status, 200);
+  assert.deepEqual(json, {
+    purged: 1,
+    failed: [{ kb: "乙库", id: "b1", title: "乙一", error: "彻底删除失败" }],
+    byKb: { 甲库: 1 },
+  });
+  assert.deepEqual(attempted, ["a1", "b1"]);
+  assert.equal(await docOf(alpha, "a1"), null);
+  assert.equal((await docOf(beta, "b1")).status, "deleted");
+  assert.equal(existsSync(join(beta, "markdown", "b1")), true);
+
+  const alphaLog = await readFile(join(alpha, "log.md"), "utf8");
+  assert.match(alphaLog, /甲一（a1）\s+彻底删除（跨库批量）/);
+  const betaLog = await readFile(join(beta, "log.md"), "utf8");
+  assert.equal(betaLog.includes("乙一"), false);
+  // 失败原因固定文案：errno 与绝对路径不能跨 API 边界。
+  assert.equal(JSON.stringify(json).includes(kbRoot), false);
+  assert.equal(JSON.stringify(json).includes("EACCES"), false);
+});
+
+test("cross-kb purge enforces UI header and same-origin on writes", async () => {
+  const { kbRoot, alpha } = await crossSetup();
+  const body = { items: [{ kb: "甲库", id: "a1" }], confirm: "彻底删除 1 篇" };
+
+  const noHeader = await crossPurge(kbRoot, body, { headers: { "x-kb-ui": "" } });
+  assert.equal(noHeader.res.status, 403);
+  assert.equal(noHeader.json.error.code, "FORBIDDEN");
+
+  const crossOrigin = await crossPurge(kbRoot, body, {
+    headers: { origin: "http://evil.example", host: "127.0.0.1:55929" },
+  });
+  assert.equal(crossOrigin.res.status, 403);
+
+  const crossSite = await crossPurge(kbRoot, body, { headers: { "sec-fetch-site": "cross-site" } });
+  assert.equal(crossSite.res.status, 403);
+  assert.ok(await docOf(alpha, "a1"));
+});
+
+// ---------------------------------------------------------------------------
+// 已删除资料搜索与排序
+// ---------------------------------------------------------------------------
+
+/** 构造 GET /trash/docs?... 的 URL（只保留有值的参数）。 */
+function docsUrl(params = {}) {
+  const url = new URL("http://dsh.internal/kb/api/trash/docs");
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined) url.searchParams.set(key, String(value));
+  }
+  return `${url.pathname}${url.search}`;
+}
+
+async function listDocs(kbRoot, params) {
+  return call({ kbRoot }, makeReq({ url: docsUrl(params) }));
+}
+
+test("GET /trash/docs query filters kb/title/type/sourceFile case-insensitively", async () => {
+  const kbRoot = await tempRoot();
+  await setupKb(kbRoot, "alpha", [
+    deletedDoc("q1", "Annual REPORT", "2026-10-01T00:00:00.000Z", {
+      type: "pdf-text",
+      sourceFile: "annual.PDF",
+    }),
+    deletedDoc("q2", "会议纪要", "2026-10-02T00:00:00.000Z", { type: "note" }),
+  ]);
+  await setupKb(kbRoot, "beta", [
+    deletedDoc("q3", "Beta Doc", "2026-10-03T00:00:00.000Z", {
+      type: "docx",
+      sourceFile: "beta.docx",
+    }),
+  ]);
+
+  const ids = (json) => json.items.map((item) => item.id);
+  const kb = await listDocs(kbRoot, { query: "alpha" });
+  assert.equal(kb.res.status, 200);
+  assert.deepEqual(ids(kb.json), ["q2", "q1"]);
+  assert.equal(kb.json.total, 2);
+  assert.equal(kb.json.query, "alpha");
+  assert.equal(kb.json.sort, "deleted_desc");
+
+  const title = await listDocs(kbRoot, { query: "REPORT" });
+  assert.deepEqual(ids(title.json), ["q1"]);
+  const type = await listDocs(kbRoot, { query: "NOTE" });
+  assert.deepEqual(ids(type.json), ["q2"]);
+  const source = await listDocs(kbRoot, { query: "BETA.DOCX" });
+  assert.deepEqual(ids(source.json), ["q3"]);
+  // 首尾空白被裁剪，响应回显归一化后的 query。
+  const padded = await listDocs(kbRoot, { query: "  beta  " });
+  assert.deepEqual(ids(padded.json), ["q3"]);
+  assert.equal(padded.json.query, "beta");
+
+  const none = await listDocs(kbRoot, { query: "不存在的关键字" });
+  assert.deepEqual(none.json.items, []);
+  assert.equal(none.json.total, 0);
+  assert.equal(none.json.truncated, false);
+
+  const all = await listDocs(kbRoot, {});
+  assert.equal(all.json.total, 3);
+  assert.equal(all.json.query, "");
+  assert.equal(all.json.sort, "deleted_desc");
+});
+
+test("GET /trash/docs sorts deletedAt/title/kb with stable tie-breaks and invalid dates last", async () => {
+  const kbRoot = await tempRoot();
+  const same = "2026-10-02T00:00:00.000Z";
+  await setupKb(kbRoot, "alpha", [
+    deletedDoc("a-old", "Same", "2026-10-01T00:00:00.000Z"),
+    deletedDoc("a-same", "Same", same),
+    deletedDoc("a-bad", "Alpha", ""),
+    deletedDoc("a-new", "Zeta", "2026-10-03T00:00:00.000Z"),
+  ]);
+  await setupKb(kbRoot, "beta", [
+    deletedDoc("b-same", "Same", same),
+    deletedDoc("b-mid", "Beta", "2026-10-02T12:00:00.000Z"),
+  ]);
+
+  const order = async (sort) => {
+    const { json } = await listDocs(kbRoot, sort === undefined ? {} : { sort });
+    return { ids: json.items.map((item) => `${item.kb}/${item.id}`), sort: json.sort };
+  };
+
+  // 倒序：新→旧；同刻按 库名+id；非法日期最后。
+  const desc = await order("deleted_desc");
+  assert.deepEqual(desc.ids, [
+    "alpha/a-new",
+    "beta/b-mid",
+    "alpha/a-same",
+    "beta/b-same",
+    "alpha/a-old",
+    "alpha/a-bad",
+  ]);
+  assert.equal(desc.sort, "deleted_desc");
+
+  // 升序：旧→新；非法日期同样最后，不因方向反转插到最前。
+  const asc = await order("deleted_asc");
+  assert.deepEqual(asc.ids, [
+    "alpha/a-old",
+    "alpha/a-same",
+    "beta/b-same",
+    "beta/b-mid",
+    "alpha/a-new",
+    "alpha/a-bad",
+  ]);
+
+  // 标题排序：主列区分大小写无关的自然顺序，同标题按 库名+id 升序兜底。
+  const titleAsc = await order("title_asc");
+  assert.deepEqual(titleAsc.ids, [
+    "alpha/a-bad",
+    "beta/b-mid",
+    "alpha/a-old",
+    "alpha/a-same",
+    "beta/b-same",
+    "alpha/a-new",
+  ]);
+  const titleDesc = await order("title_desc");
+  assert.deepEqual(titleDesc.ids, [
+    "alpha/a-new",
+    "alpha/a-old",
+    "alpha/a-same",
+    "beta/b-same",
+    "beta/b-mid",
+    "alpha/a-bad",
+  ]);
+
+  // 库名排序：同库内再按 id 升序兜底。
+  const kbAsc = await order("kb_asc");
+  assert.deepEqual(kbAsc.ids, [
+    "alpha/a-bad",
+    "alpha/a-new",
+    "alpha/a-old",
+    "alpha/a-same",
+    "beta/b-mid",
+    "beta/b-same",
+  ]);
+  const kbDesc = await order("kb_desc");
+  assert.deepEqual(kbDesc.ids, [
+    "beta/b-mid",
+    "beta/b-same",
+    "alpha/a-bad",
+    "alpha/a-new",
+    "alpha/a-old",
+    "alpha/a-same",
+  ]);
+
+  // 未知 sort 回落默认 deleted_desc，并在响应里回显解析后的值。
+  const unknown = await order("updated_desc");
+  assert.deepEqual(unknown.ids, desc.ids);
+  assert.equal(unknown.sort, "deleted_desc");
+  const empty = await order(undefined);
+  assert.deepEqual(empty.ids, desc.ids);
+  assert.equal(empty.sort, "deleted_desc");
+});
+
+test("GET /trash/docs computes total/truncated after query filtering, then caps", async () => {
+  const kbRoot = await tempRoot();
+  const docs = [];
+  for (let i = 0; i < 510; i += 1) {
+    const title = i < 505 ? `匹配资料${i}` : `其他资料${i}`;
+    docs.push(deletedDoc(`m${String(i).padStart(3, "0")}`, title, new Date(Date.UTC(2026, 0, 1, 0, 0, i)).toISOString()));
+  }
+  await setupKb(kbRoot, "filter", docs);
+
+  const many = await listDocs(kbRoot, { query: "匹配" });
+  assert.equal(many.res.status, 200);
+  assert.equal(many.json.total, 505);
+  assert.equal(many.json.items.length, 500);
+  assert.equal(many.json.truncated, true);
+  // 过滤后仍按 deletedAt 倒序，再截断：最新命中的资料在首位，而不是先截断再过滤。
+  assert.equal(many.json.items[0].id, "m504");
+  assert.equal(many.json.items.at(-1).id, "m005");
+
+  const few = await listDocs(kbRoot, { query: "其他" });
+  assert.equal(few.json.total, 5);
+  assert.equal(few.json.items.length, 5);
+  assert.equal(few.json.truncated, false);
+  assert.deepEqual(
+    few.json.items.map((item) => item.id),
+    ["m509", "m508", "m507", "m506", "m505"]
+  );
+
+  const none = await listDocs(kbRoot, { query: "无命中" });
+  assert.equal(none.json.total, 0);
+  assert.equal(none.json.truncated, false);
+});
