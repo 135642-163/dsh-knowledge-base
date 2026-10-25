@@ -4,7 +4,9 @@ import { hrefForKb, hrefForOverview, hrefForTrash, parseHash } from "./router.js
 import { renderOverview } from "./views/overview.js";
 import { docsPageSize, docsStatus, renderDetail, selectionToggle, selectionToggleOne } from "./views/detail.js";
 import { attachDocsControls, createRequestGate } from "./docs-controls.js";
-import { renderTrash } from "./views/trash.js";
+import {
+  purgeDocsConfirmBody, renderTrash, trashPurgeTarget, trashSelectionToggleAll, trashSelectionToggleOne,
+} from "./views/trash.js";
 import {
   deleteConfirmBody, openConfirmModal, openCreateModal, openDocModal, openKbPickerModal, openMoveModal,
   openPreviewModal, openRenameModal, openRestoreModal, retryFailedDoc,
@@ -30,7 +32,14 @@ const state = {
     selected: [], busy: false, retrying: [],
   },
   notes: { items: [], total: 0, loading: false, error: "" },
-  trash: { items: [], loading: false, error: "" },
+  trash: {
+    items: [],
+    docs: { items: [], total: 0, truncated: false, error: "" },
+    selectedDocs: [],
+    loading: false,
+    error: "",
+    busy: false,
+  },
   std: {
     kb: "", loading: false, error: "", warning: "", starting: false, cancelling: false,
     status: null, job: null, timer: null, pollRetry: 0, inFlight: null,
@@ -585,19 +594,169 @@ async function cancelStd() {
   }
 }
 
+// 回收站请求代号：切 tab/连续刷新时旧响应自行作废。
+let trashToken = 0;
+
+/** 并行拉取归档库与全局已删除资料；某一个失败不影响另一个展示。 */
 async function loadTrash() {
+  const token = ++trashToken;
   state.trash.loading = true;
   state.trash.error = "";
+  // 刷新=列表内容会变，勾选统一清空（与切 tab 行为一致）。
+  state.trash.selectedDocs = [];
   render();
-  try {
-    const payload = await api.trash();
-    state.trash.items = Array.isArray(payload?.items) ? payload.items : [];
-  } catch (error) {
-    state.trash.error = error instanceof ApiError ? error.message : String(error?.message ?? error);
-  } finally {
-    state.trash.loading = false;
-    render();
+  const [archived, docs] = await Promise.allSettled([api.trash(), api.trashDocs()]);
+  if (token !== trashToken) return;
+  if (archived.status === "fulfilled") {
+    state.trash.items = Array.isArray(archived.value?.items) ? archived.value.items : [];
+  } else {
+    state.trash.items = [];
+    state.trash.error = errorText(archived.reason);
   }
+  if (docs.status === "fulfilled") {
+    const payload = docs.value ?? {};
+    state.trash.docs = {
+      items: Array.isArray(payload.items) ? payload.items : [],
+      total: Math.max(0, Math.round(Number(payload.total) || 0)),
+      truncated: payload.truncated === true,
+      error: "",
+    };
+  } else {
+    // 已删除资料单独失败：按空列表展示，并在该分区给出错误与重试。
+    state.trash.docs = { items: [], total: 0, truncated: false, error: errorText(docs.reason) };
+  }
+  state.trash.loading = false;
+  render();
+}
+
+/** 已删除资料列表里的一篇（同一个 id 可能出现在不同库）。 */
+function trashDocByKey(kb, id) {
+  const targetKb = String(kb ?? "");
+  const targetId = String(id ?? "");
+  return (state.trash.docs?.items ?? [])
+    .find((doc) => String(doc.kb) === targetKb && String(doc.id) === targetId) ?? null;
+}
+
+/** 回收站操作后的统一刷新：归档库 + 已删除资料 + 侧栏计数，必要时刷新详情。 */
+async function refreshAfterTrashChange(affectedKbs = []) {
+  await loadTrash();
+  await loadKbs();
+  const current = route();
+  if (current.page === "detail" && (affectedKbs.length === 0 || affectedKbs.includes(current.name))) {
+    await loadDetail(current.name, current.tab || "overview");
+  }
+}
+
+function purgeDocsToast(result) {
+  const purged = Math.max(0, Math.round(Number(result?.purged) || 0));
+  const failed = Array.isArray(result?.failed) ? result.failed : [];
+  if (failed.length === 0) return [`已彻底删除 ${purged} 篇`, "info"];
+  return [`${purged} 篇已彻底删除，${failed.length} 篇失败`, "error"];
+}
+
+/** 逐篇恢复已删除资料；失败不中断其余条目，最后统一报告。 */
+async function restoreTrashDocs(entries) {
+  if (state.trash.busy) return;
+  const list = (Array.isArray(entries) ? entries : [])
+    .map((entry) => ({
+      kb: String(entry?.kb ?? ""),
+      id: String(entry?.id ?? ""),
+      title: String(entry?.title ?? ""),
+    }))
+    .filter((entry) => entry.kb !== "" && entry.id !== "");
+  if (list.length === 0) return;
+  state.trash.busy = true;
+  state.trash.selectedDocs = [];
+  render();
+  const failures = [];
+  let restored = 0;
+  try {
+    for (const entry of list) {
+      try {
+        await api.restoreDoc(entry.kb, entry.id);
+        restored += 1;
+      } catch (error) {
+        failures.push({ ...entry, error: errorText(error) });
+      }
+    }
+  } finally {
+    state.trash.busy = false;
+  }
+  await refreshAfterTrashChange([...new Set(list.map((entry) => entry.kb))]);
+  if (failures.length === 0) {
+    showToast(list.length === 1 ? "已恢复" : `已恢复 ${restored} 篇`);
+    return;
+  }
+  const reason = failures[0]?.error ?? "未知错误";
+  showToast(
+    restored > 0
+      ? `${restored} 篇已恢复，${failures.length} 篇失败：${reason}`
+      : `恢复失败：${reason}`,
+    "error",
+  );
+}
+
+/** 彻底删除已删除资料：必须同一库，逐字输入库名确认。 */
+function purgeTrashDocs(entries) {
+  if (state.trash.busy) return;
+  const target = trashPurgeTarget(entries);
+  if (!target.ok) {
+    showToast(target.reason, "error");
+    return;
+  }
+  const { kb, entries: list } = target;
+  openConfirmModal({
+    title: list.length === 1 ? `彻底删除「${list[0].title}」` : `彻底删除「${kb}」中的 ${list.length} 篇`,
+    body: purgeDocsConfirmBody({ docs: list, total: list.length }),
+    confirmText: "彻底删除",
+    requireText: kb,
+    textLabel: "输入库名",
+    danger: true,
+    onConfirm: async () => {
+      state.trash.busy = true;
+      render();
+      try {
+        const result = await api.purgeDocs(kb, { ids: list.map((entry) => entry.id), confirm: kb });
+        state.trash.busy = false;
+        await refreshAfterTrashChange([kb]);
+        const [message, kind] = purgeDocsToast(result);
+        showToast(message, kind);
+      } finally {
+        state.trash.busy = false;
+        render();
+      }
+    },
+  });
+}
+
+/** 详情页「清空本库已删除资料」：all=true，同一个逐字输入库名确认。 */
+function purgeAllDeletedDocs() {
+  const current = route();
+  if (current.page !== "detail" || !current.name || state.docs.busy) return;
+  const name = current.name;
+  const total = Math.max(0, Math.round(Number(state.detail?.kb?.docs?.deleted) || 0));
+  openConfirmModal({
+    title: `清空「${name}」的已删除资料`,
+    body: purgeDocsConfirmBody({ total }),
+    confirmText: "彻底删除",
+    requireText: name,
+    textLabel: "输入库名",
+    danger: true,
+    onConfirm: async () => {
+      state.docs.busy = true;
+      render();
+      try {
+        const result = await api.purgeDocs(name, { all: true, confirm: name });
+        state.docs.busy = false;
+        await refreshAfterDocsChange();
+        const [message, kind] = purgeDocsToast(result);
+        showToast(message, kind);
+      } finally {
+        state.docs.busy = false;
+        render();
+      }
+    },
+  });
 }
 
 function render() {
@@ -637,7 +796,7 @@ function render() {
         ${state.error ? `<div class="state error">${escapeHtml(state.error)}<button class="btn" data-action="reload">重试</button></div>` : ""}
         ${!state.loading && !state.error && current.page === "overview" ? renderOverview(state, { icons, fmtNumber }) : ""}
         ${!state.loading && !state.error && current.page === "detail" ? renderDetail(state, current, { icons, fmtNumber }) : ""}
-        ${!state.loading && !state.error && current.page === "trash" ? renderTrash(state, { icons, fmtNumber }) : ""}
+        ${!state.loading && !state.error && current.page === "trash" ? renderTrash(state, current, { icons, fmtNumber }) : ""}
       </main>
     </div>
   `;
@@ -783,9 +942,40 @@ function bind() {
     } else if (action === "docs-purge") {
       const doc = pageDocById(target.dataset.id);
       if (doc) purgeDoc(doc);
+    } else if (action === "docs-purge-all") {
+      purgeAllDeletedDocs();
     } else if (action === "docs-undo-move") {
       const doc = pageDocById(target.dataset.id);
       if (doc) undoMoveDoc(doc);
+    } else if (action === "trash-doc-select") {
+      if (state.trash.busy) return;
+      const doc = trashDocByKey(target.dataset.kb, target.dataset.id);
+      if (!doc) return;
+      state.trash.selectedDocs = trashSelectionToggleOne(state.trash.selectedDocs, doc, target.checked);
+      render();
+    } else if (action === "trash-doc-select-all") {
+      if (state.trash.busy) return;
+      state.trash.selectedDocs = trashSelectionToggleAll(
+        state.trash.selectedDocs,
+        state.trash.docs?.items ?? [],
+      );
+      render();
+    } else if (action === "trash-doc-clear") {
+      if (state.trash.busy) return;
+      state.trash.selectedDocs = [];
+      render();
+    } else if (action === "trash-doc-restore") {
+      const doc = trashDocByKey(target.dataset.kb, target.dataset.id);
+      if (doc) await restoreTrashDocs([doc]);
+    } else if (action === "trash-doc-purge") {
+      const doc = trashDocByKey(target.dataset.kb, target.dataset.id);
+      if (doc) purgeTrashDocs([doc]);
+    } else if (action === "trash-docs-restore-selected") {
+      if (state.trash.busy) return;
+      await restoreTrashDocs(state.trash.selectedDocs);
+    } else if (action === "trash-docs-purge-selected") {
+      if (state.trash.busy) return;
+      purgeTrashDocs(state.trash.selectedDocs);
     } else if (action === "archive-kb") {
       const current = route();
       if (!current.name) return;

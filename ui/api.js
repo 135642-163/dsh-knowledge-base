@@ -112,6 +112,17 @@ export const api = {
   patchKb: (name, body) => request("PATCH", `/kbs/${encodeURIComponent(name)}`, body),
   archiveKb: (name, confirm) => request("POST", `/kbs/${encodeURIComponent(name)}/archive`, { confirm }),
   trash: () => request("GET", "/trash"),
+  /** 全局回收站：所有活跃库里的软删除资料（只读，最多 500 条）。 */
+  trashDocs: () => request("GET", "/trash/docs"),
+  /** 批量彻底删除本库回收站资料：confirm=库名，all 与 ids 二选一。 */
+  purgeDocs: (name, { ids = [], all = false, confirm = "" } = {}) => request(
+    "POST",
+    `/kbs/${encodeURIComponent(name)}/docs/purge`,
+    {
+      ...(all === true ? { all: true } : { ids: Array.isArray(ids) ? ids : [] }),
+      confirm: String(confirm),
+    },
+  ),
   restoreKb: (dir, name) => request("POST", `/trash/${encodeURIComponent(dir)}/restore`, name ? { name } : {}),
   purgeTrash: (dir) => request("DELETE", `/trash/${encodeURIComponent(dir)}`),
   sourceUrl: (name, id) => `${BASE}/kbs/${encodeURIComponent(name)}/docs/${encodeURIComponent(id)}/source`,

@@ -170,6 +170,34 @@ test("已删除筛选无结果时给出专门空状态", () => {
   assert.match(html, /data-docs-status="deleted"/);
 });
 
+test("已删除筛选且有回收站内容时显示「清空本库已删除资料」", () => {
+  const deletedRow = makeDoc("d", { status: "deleted", deleted: true });
+  const withDeleted = { docs: { ready: 1, importing: 0, failed: 0, notes: 0, deleted: 2 } };
+
+  // 只有切到「已删除」筛选才出现，其它筛选即使有回收站内容也不显示。
+  const all = render({ items: [makeDoc("a")], total: 1, status: "" }, withDeleted);
+  assert.doesNotMatch(all, /docs-purge-all/);
+  const filtered = render({ items: [makeDoc("f", { status: "failed" })], total: 1, status: "failed" }, withDeleted);
+  assert.doesNotMatch(filtered, /docs-purge-all/);
+
+  const shown = render({ items: [deletedRow], total: 1, status: "deleted" }, withDeleted);
+  assert.match(shown, /class="btn danger docs-purge-all" data-action="docs-purge-all">清空本库已删除资料/);
+
+  // 已删除筛选无结果（搜索词过滤）但库里仍有回收站内容时，工具栏仍保留入口。
+  const noResult = render({ total: 0, status: "deleted", query: "找不到", appliedQuery: "找不到" }, withDeleted);
+  assert.match(noResult, /没有匹配的资料/);
+  assert.match(noResult, /data-action="docs-purge-all"/);
+
+  const busy = render({ items: [deletedRow], total: 1, status: "deleted", busy: true }, withDeleted);
+  assert.match(busy, /data-action="docs-purge-all" disabled/);
+
+  // 库里没有已删除资料时不显示。
+  const none = render({ items: [], total: 0, status: "deleted" }, {
+    docs: { ready: 1, importing: 0, failed: 0, notes: 0, deleted: 0 },
+  });
+  assert.doesNotMatch(none, /docs-purge-all/);
+});
+
 test("行内操作按状态给出：失败=重试+移除，就绪=移除，已删除=恢复+彻底删除", () => {
   assert.deepEqual(docRowActions(makeDoc("f", { status: "failed" })), ["retry", "remove"]);
   assert.deepEqual(docRowActions(makeDoc("a")), ["remove"]);

@@ -232,6 +232,33 @@ test("文档删除/恢复/重试与跨库移动方法：POST + 编码路径 + JS
   assert.deepEqual(JSON.parse(calls[6].options.body), { target: "目标" });
 });
 
+test("全局回收站与批量彻底删除：URL、方法与请求体", async () => {
+  calls.length = 0;
+  await api.trashDocs();
+  await api.purgeDocs("标准", { ids: ["d1", "d2"], confirm: "标准" });
+  await api.purgeDocs("标准", { all: true, confirm: "标准" });
+  await api.purgeDocs("标准", { ids: ["d1"], all: true, confirm: "标准" });
+
+  assert.equal(calls.length, 4);
+  assert.equal(calls[0].url, "/kb/api/trash/docs");
+  assert.equal(calls[0].options.method, "GET");
+  // 只读接口不带工作台写请求标记。
+  assert.equal(calls[0].options.headers["x-kb-ui"], undefined);
+  assert.equal(calls[0].options.body, undefined);
+
+  const purgeUrl = "/kb/api/kbs/%E6%A0%87%E5%87%86/docs/purge";
+  for (const call of calls.slice(1)) {
+    assert.equal(call.url, purgeUrl);
+    assert.equal(call.options.method, "POST");
+    assert.equal(call.options.headers["x-kb-ui"], "1");
+    assert.equal(call.options.headers["content-type"], "application/json");
+  }
+  assert.deepEqual(JSON.parse(calls[1].options.body), { ids: ["d1", "d2"], confirm: "标准" });
+  assert.deepEqual(JSON.parse(calls[2].options.body), { all: true, confirm: "标准" });
+  // all=true 时即使同时给了 ids 也只发 all，避免服务端二选一校验被误触。
+  assert.deepEqual(JSON.parse(calls[3].options.body), { all: true, confirm: "标准" });
+});
+
 test("错误响应映射成 ApiError", async () => {
   globalThis.fetch = async () => ({
     ok: false,

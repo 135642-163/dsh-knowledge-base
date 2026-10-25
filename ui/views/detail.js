@@ -249,7 +249,7 @@ function docs(kb, state, { fmtNumber, icons }) {
   // 「已删除」筛选只在有回收站内容时出现；正在看回收站时即使刚清空也保留入口。
   const showDeleted = deleted > 0 || status === "deleted";
   const toolbar = (extra) => docsToolbar({
-    query, limit, status, deleted, showDeleted, fmtNumber, icons, ...extra,
+    query, limit, status, deleted, showDeleted, busy, fmtNumber, icons, ...extra,
   });
   if (searching) {
     // 防抖/请求在途：只保留工具栏与「正在搜索…」，不把上一轮的行/表格挂在新搜索词下。
@@ -340,7 +340,7 @@ function docActionButton(doc, action, { busy, retrying }) {
   return `<button type="button" class="btn mini${danger}" data-action="docs-${action}" data-id="${escapeAttr(doc.id)}"${target}${disabled ? " disabled" : ""}>${label}</button>`;
 }
 
-function docsToolbar({ query, limit, status, deleted = 0, showDeleted = false, total, pages, pageNo, fmtNumber, icons, showPager }) {
+function docsToolbar({ query, limit, status, deleted = 0, showDeleted = false, busy = false, total, pages, pageNo, fmtNumber, icons, showPager }) {
   const statuses = DOCS_STATUSES.filter((value) => value !== "deleted" || showDeleted);
   return `
     <div class="table-tools">
@@ -362,6 +362,9 @@ function docsToolbar({ query, limit, status, deleted = 0, showDeleted = false, t
           ${DOCS_PAGE_SIZES.map((size) => `<option value="${size}"${size === limit ? " selected" : ""}>${size}</option>`).join("")}
         </select>
       </label>
+      ${status === "deleted" && deleted > 0
+        ? `<button type="button" class="btn danger docs-purge-all" data-action="docs-purge-all"${busy ? " disabled" : ""}>清空本库已删除资料</button>`
+        : ""}
       ${showPager ? docsPager({ pageNo, pages, total, limit, fmtNumber, label: "顶部分页" }) : ""}
     </div>
   `;

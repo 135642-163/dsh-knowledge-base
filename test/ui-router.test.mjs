@@ -23,6 +23,10 @@ test("trash hash is its own page", () => {
   assert.deepEqual(parseHash("#/trash"), { page: "trash", query: {} });
 });
 
+test("trash hash carries the tab query", () => {
+  assert.deepEqual(parseHash("#/trash?tab=docs"), { page: "trash", query: { tab: "docs" } });
+});
+
 test("hrefForTrash", () => {
   assert.equal(hrefForTrash(), "#/trash");
 });

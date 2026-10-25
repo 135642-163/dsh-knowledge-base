@@ -204,6 +204,32 @@ code { background: var(--panel-2); border-radius: 4px; padding: 1px 4px; }
 .trash-help { margin: -6px 0 14px; font-size: 12px; }
 .trash-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 
+/* 回收站分区页签与全局已删除资料（0.24.0） */
+.trash-tabs { margin-bottom: 14px; }
+.trash-tabs .seg { display: inline-flex; align-items: center; gap: 6px; }
+.trash-tabs .seg.active { background: var(--accent-soft); color: var(--accent); }
+.seg-count {
+  min-width: 18px; padding: 0 6px; border-radius: 999px;
+  background: var(--panel-2); color: var(--muted);
+  font-size: 11px; line-height: 18px; text-align: center;
+}
+.trash-tabs .seg.active .seg-count { background: var(--panel); color: var(--accent); }
+.trash-docs-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.trash-docs-table .col-check { width: 34px; padding-right: 2px; }
+.trash-docs-table .col-check input { width: 15px; height: 15px; margin: 2px 0 0; }
+.trash-docs-table .col-actions { white-space: nowrap; }
+.trash-docs-table td { vertical-align: middle; }
+.trash-doc-row .trash-actions { flex-wrap: nowrap; }
+.trash-kb-badge { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: bottom; }
+.trash-bulk { align-items: center; }
+.trash-bulk-hint { color: var(--danger); font-size: 12px; }
+@media (max-width: 560px) {
+  .trash-docs-table th:nth-child(4), .trash-docs-table td:nth-child(4),
+  .trash-docs-table th:nth-child(5), .trash-docs-table td:nth-child(5) { display: none; }
+  .trash-bulk { align-items: stretch; }
+  .trash-bulk-hint { flex: 1 1 100%; }
+}
+
 /* 上传弹窗 */
 .head-actions { display: flex; gap: 8px; margin-left: auto; }
 .modal.modal-wide { width: min(720px, 92vw); }
