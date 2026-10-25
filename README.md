@@ -169,7 +169,7 @@ exports/                   导出产物
     `test/e2e/.artifacts`（目录以 `.` 开头，workflow 用 `include-hidden-files: true` 才会收集）。
 - 全新 CI profile 没有历史会话/模型凭据：胶囊用例自动 **skip** 并说明原因；工作台/回收站/搜索排序/移动/重试/预览用例
   照常执行，其余失败仍会让 job 红。
-- 本地有真实 profile 与凭据时跑完整套件（当前 11 项；来源面板在 CLI 0.1.x 会 skip）；CI 为核心用例通过 + 胶囊/来源面板按宿主 skip（Office 可选预览在无转换引擎时也会 skip）。
+- 本地有真实 profile 与凭据时跑完整套件（当前 12 项；来源面板在 CLI 0.1.x 会 skip）；CI 为核心用例通过 + 胶囊/来源面板按宿主 skip（Office 可选预览在无转换引擎时也会 skip）。
 - E2E 宿主兼容两种 profile 布局：优先 profile 自带 `node_modules`，否则使用 `profiles/node_modules` 共享目录；
   全新 CI profile 缺 `pnpm-lock.yaml` / `pnpm-workspace.yaml` 时跳过，不再启动失败。
 
@@ -248,6 +248,80 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
 `lib/clauses.js`（条款切分）与 `lib/fts-index.js`（SQLite FTS5/BM25）已实现，并接入
 `kb_query`：纯文本查询优先 FTS5，正则/索引不可用/无命中回退 ripgrep。当前真实「标准」库
 索引 911 篇、14.95 万条款、224MB；增量同步、后台构建和 60 条机制评测已完成：Doc/Page Recall@10 95%，MRR 0.761，p95 47.5ms；见 `docs/specs/2026-10-25-retrieval-eval.md`。
+
+### 已知限制（0.26.0）
+
+- **PDF viewer/关键词高亮**：`viewer.html` 只服务聊天来源面板，工作台预览仍是原生 PDF iframe
+  （WebKit 可能下载/空白）；viewer 与 `/page.png` 没有单测覆盖。扫描件原件没有文字层，
+  `p.search()` 不命中，高亮会**静默为 0**（OCR 文字只在 markdown 里）；每页最多 240 个高亮框，
+  超出静默截断；每次打开都把整份 PDF 读进内存。
+- **标准号检索回归**：`GB/T 1234` 这类带斜杠写法被判为纯文本走 FTS，`gb` 命中几乎所有标准，
+  GB 与 GB/T 不分（0.27 已修复，见下文）。
+- FTS 查询是 token OR，多词精度靠 BM25；「标准」库索引 911 篇约 220MB；跨库首查会后台建索引。
+- 来源面板 E2E 在 CLI 0.1.x 宿主 skip（历史投影不关联 `tool/result`），仅由单测覆盖。
+- 其余 6 个库没有 standardNo/标签（回填只做「标准」）。
+- `docs/specs/2026-10-25-retrieval-eval.md` 是机制回归（查询取条款原文开头 28 字），不是人工语义评测。
+
+
+## 0.27.0 检索工作台与人工评测
+
+**检索工作台**：工作台新增顶层 **全文搜索** 页（`#/search`，侧栏「全文搜索」入口）：跨库检索资料
+正文与条款，结果按文档去重；每张卡片显示标题、标准号、条款、页码、可信度、命中数与命中摘要。
+支持按 **知识库 / 标签 / 类型 / 可信度** 过滤、**加载更多** 分页；点标题或「打开原件」复用工作台
+现有预览弹窗（不新增全屏工作台）。过滤条件写回 hash（`#/search?q=…&kb=…&tag=…&type=…&trust=…`），
+刷新与浏览器后退都能复现同一组条件。
+
+**安全高亮**：摘要里的检索词由 `ui/search-core.js` 的 `highlightSegments` / `applyHighlights`
+用**文本节点 + `<mark>`** 渲染，不拼接 HTML；标题或摘要里出现 `<img onerror=…>` 之类内容只会
+显示成文本。摘要正文不进入渲染字符串，只输出空容器与下标，挂载后再用文本节点填充。
+
+**接口**：`GET /kb/api/search?q=&kb=&limit=&offset=&tag=&type=&trust=`
+
+- `q` 必填（trim 后 1–200 字）；`kb` 省略 / `*` / `all` = 全部活跃库（归档、已合并、空库与软删除
+  资料不参与）；`trust` 只接受 `high/medium/low/unknown`。
+- 返回 `q/kbs/terms/engine/indexBuilding/note/total/estimated/offset/limit/tookMs/facets/results`；
+  每条结果含 `kb/docId/title/standardNo/page/clause/snippet/terms/trust/type/tags/hits/deepLink`。
+- 纯文本优先条款级 FTS5；标准号与含正则的查询退回 ripgrep；单库失败只写 `note`（不带绝对路径），
+  不整页报错；`estimated=true` 表示总数按候选集估计。
+
+**排序**：生产排序 = 引擎序 + 标题命中 + **标准号命中**（删分隔符后双向包含，因此 `GB/T 19963`
+不会奖励 `GB 19963`）+ 标签命中 + 可信度 + 新近度。工作台检索与 `kb_query` 共用同一份条款索引，
+互不改写；`kb_query` 的返回字段不变。
+
+**修复 0.26 标准号检索回归**：`GB/T 1234`、`GBT 1234`、`GB_T 1234`、`GB∕T 1234`、`DL/T 587`、
+`GB/T 19963.2-2024` 等写法此前被判为「纯文本」走 FTS——分词后 `gb` 命中几乎所有标准，GB 与 GB/T
+不再区分（真实库 `GB/T 14549` 的 FTS top10 全是无关标准）。现在「能被标准号归一器认出的查询」
+一律走 `expandStdQuery` 精确正则，不再经过 FTS；判定复用 `expandStdQuery` 与
+`standards.js` 的长前缀表，没有第二套前缀列表。
+
+**60 题人工评测**：`scripts/eval/questions-2026-10-27.jsonl`（条款定位 20 / 跨文档 15 / 数值限值 15 /
+同义改写 10；人工标注 expected doc/page/clause），`node scripts/eval-benchmark.mjs` 只读跑四组对比：
+A = 当前 FTS，B = FTS + 标准号/标签/trust boost（0.27 生产排序），C = ripgrep 0.25 路径（整句当正则），
+C1 = 关键词 OR 输入 + 旧排序。报告见 `docs/specs/2026-10-27-retrieval-benchmark.md`，当前结果：
+
+| 变体 | Doc Recall@10 | Page Recall@10 | MRR@10 | p95 |
+| --- | --- | --- | --- | --- |
+| A 当前 FTS | 75.0% | 72.5% | 0.466 | 57ms |
+| B FTS + boost | **83.3%** | **78.3%** | **0.608** | 57ms |
+| C ripgrep（0.25 整句） | 3.3% | 3.3% | 0.022 | 29ms |
+| C1 ripgrep + 关键词 OR | 1.7% | 1.7% | 0.006 | 250ms |
+
+分组看：条款定位 A/B 都是 100%，B 的 MRR 从 0.674 提到 0.875；跨文档 53% → 60%；数值限值
+87% → 93%；**同义改写 40% → 70%**。数据集用 `node scripts/eval-benchmark.mjs --validate` 校验与
+真实库的一致性（只读打开索引）。本轮不引入 embedding/向量/rerank。
+
+### 已知限制（0.27.0）
+
+- **不承诺「打开即高亮」**：工作台预览仍是 0.26 的原生 PDF iframe（WebKit 可能下载/空白），
+  `viewer.html` 只在聊天来源面板使用；扫描件原件没有文字层，PDF 内高亮可能为 0（见 0.26 限制）。
+- **FTS 是 token OR**：多词查询靠 BM25 与 boost 排序，不做 AND/phrase 过滤；词多时精度会掉，
+  坏例逐条列在评测报告里。
+- 其余 6 个库没有 `standardNo`/`tags`（0.26 回填只做「标准」），因此**标签过滤与标准号加权只在
+  「标准」库有效**；首次跨库搜索会为这些库后台建索引（派生数据写入 `<kb>/.index`），当次请求
+  回退 ripgrep 并在状态行提示。
+- 结果分页只有「加载更多」，没有页码跳转；没有检索历史/保存检索/排序切换/结果导出。
+- `total` 在 ripgrep 路径是估计值（`estimated=true`）。
+- 单库失败会写进 `note` 但结果里看不出缺了哪个库的命中，需要看状态行。
 
 ## 0.24.0 回收站治理
 
@@ -906,7 +980,7 @@ done
 ## 测试
 
 ```bash
-npm test          # node:test（812 个用例）；覆盖查重精度、同名文件保护、后台失败统计、检索截断/单文档上限、
+npm test          # node:test（985 个用例）；覆盖查重精度、同名文件保护、后台失败统计、检索截断/单文档上限、
                   # 相似导入提示、OCR 模型检查、流式 zip、心跳与锁回收、
                   # 清单 v1→v2→v3 迁移与备份、内容哈希跳过、kb_reparse、分块索引/页码锚点、
                   # kb_list 分页/过滤/kind、检索排序、跨库检索、文字层质量启发式、
@@ -948,12 +1022,20 @@ npm test          # node:test（812 个用例）；覆盖查重精度、同名�
                   # 行内恢复/撤销移动按 movedToState 渲染、选择键、
                   # 批量恢复目标排除目标仍可用的移动行、跨库批量彻底删除、确认短语与正文、移动资料警告）、
                   # 移动源生命周期（目标副本 live/deleted/missing 矩阵、恢复清 movedTo、
-                  # 目标库归档/不存在、无重复可用副本）
+                  # 目标库归档/不存在、无重复可用副本）、
+                  # 0.26 资料编目与摄取（摘要/标签归一化与 manual 来源、标签 facets、schema v6 迁移、
+                  # 正文优先标准号与完整性矩阵、去重矩阵、回填脚本 dry-run/apply、lint 元数据分组、
+                  # 来源 sources/深链、viewer 与预览降级）、
+                  # 0.26 检索索引（条款切分、FTS5 建/增量/损坏回退、中文分词、kb_query 双路径积分）、
+                  # 0.27 检索工作台（标准号路径判定与 GB≠GB/T、文档级归并与 boost 排序、snippet 窗口、
+                  # 过滤/facets/分页、搜索页渲染与安全高亮、防抖/IME/Enter/旧响应作废/加载更多、
+                  # 60 题评测集结构）
                   # （全部使用临时目录，不依赖本机知识库）
 ```
 
 > **自动化边界**：`npm test` 覆盖回收站的可导出纯函数与 API；`npm run test:e2e` 的真实浏览器流程覆盖
-> 回收站两页签、行内恢复、行内/批量彻底删除、清空本库、搜索/排序/筛选空态与跨库选择；
+> 回收站两页签、行内恢复、行内/批量彻底删除、清空本库、搜索/排序/筛选空态与跨库选择、资料编目、
+> 上传状态、深链预览与**检索工作台（标准号区分、关键词高亮、过滤、清除、深链预览）**；
 > `loadTrash` 旧响应作废（token）、刷新后清空选择、跨库恢复循环**不在 E2E 套件内**（仍只有一次性
 > WKWebView 验收）；CI 的全新 profile 上胶囊用例自动 skip。`npm test` 本身仍不需要浏览器。
 
@@ -1000,7 +1082,7 @@ npm run test:e2e      # 自托管临时 DSH web 宿主并跑完整流程
   - 为什么不在 GitHub 托管 runner 上自动跑：全新 `DSH_HOME` 首次启动会要求一次性
     token，浏览器/同源 API 的认证链路在托管 runner 上不稳定，且没有历史会话/模型凭据
     （胶囊无法挂载）。自托管 runner 复用已配置 profile，结果与本地一致（当前 10/10 + 1 skip）。
-  - 本地有凭据 profile 当前 **10 passed / 0 failed / 1 skipped**（skip = CLI 0.1.x
+  - 本地有凭据 profile 当前 **11 passed / 0 failed / 1 skipped**（skip = CLI 0.1.x
     未投影 tool result meta），E2E 中的回收站用例会真实执行一次**跨库批量彻底删除**。
 
 ## 使用示例（对 harness 直接说）
