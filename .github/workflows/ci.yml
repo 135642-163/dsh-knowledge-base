@@ -53,11 +53,19 @@ jobs:
           mkdir -p "$DSH_HOME"
           echo "DSH_HOME=$DSH_HOME" >> "$GITHUB_ENV"
           dsh web --port 55970 --no-open > "$RUNNER_TEMP/dsh-first.log" 2>&1 &
+          TOKEN=""
           for i in $(seq 1 180); do
+            TOKEN="$(grep -o 'token=[A-Za-z0-9_-]*' "$RUNNER_TEMP/dsh-first.log" | head -1 | cut -d= -f2 || true)"
+            if [ -n "$TOKEN" ] && curl -sf --max-time 2 "http://127.0.0.1:55970/?token=$TOKEN" >/dev/null; then break; fi
             if curl -sf --max-time 2 http://127.0.0.1:55970/ >/dev/null; then break; fi
             sleep 1
           done
-          curl -sf --max-time 3 http://127.0.0.1:55970/ >/dev/null || { cat "$RUNNER_TEMP/dsh-first.log"; exit 1; }
+          if [ -n "$TOKEN" ]; then
+            curl -sf --max-time 3 "http://127.0.0.1:55970/?token=$TOKEN" >/dev/null || { cat "$RUNNER_TEMP/dsh-first.log"; exit 1; }
+            echo "DSH_E2E_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+          else
+            curl -sf --max-time 3 http://127.0.0.1:55970/ >/dev/null || { cat "$RUNNER_TEMP/dsh-first.log"; exit 1; }
+          fi
           pkill -f "dsh web --port 55970" || true
           sleep 2
 

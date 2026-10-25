@@ -910,8 +910,9 @@ npm run test:e2e      # 自托管临时 DSH web 宿主并跑完整流程
   `test/e2e/.artifacts/<timestamp>/`（截图、URL、console 错误、宿主日志），
   正常也会打印本次产物目录。
 - 可选环境变量：`DSH_E2E_URL` 复用已启动宿主（要求其 `kbRoot` 在临时目录，或显式
-  `DSH_E2E_ALLOW_MUTATE=1`）、`DSH_E2E_BROWSER=chromium`、`DSH_E2E_KEEP=1`、
-  `DSH_E2E_PYTHON=<python>`。
+  `DSH_E2E_ALLOW_MUTATE=1`）、`DSH_E2E_TOKEN`（全新 DSH_HOME 首次启动会要求 token，
+  E2E 会从宿主日志自动读取；外部宿主可用此变量显式提供）、`DSH_E2E_BROWSER=chromium`、
+  `DSH_E2E_KEEP=1`、`DSH_E2E_PYTHON=<python>`。
 - 浏览器下载走 Playwright CDN；受限网络可用 `PLAYWRIGHT_DOWNLOAD_HOST=<mirror>`
   后重试 `npm run e2e:install`。Chromium 下载失败（CDN/镜像缺对应版本）不影响套件，
   可只装 WebKit：`npx playwright install webkit`（套件本来就优先 WebKit）。

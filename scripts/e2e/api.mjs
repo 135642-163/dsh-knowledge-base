@@ -12,9 +12,15 @@ export class ApiError extends Error {
   }
 }
 
-export function createApi(baseUrl) {
+export function createApi(baseUrl, token = "") {
   const root = baseUrl.replace(/\/+$/, "");
   const origin = new URL(root).origin;
+  const withToken = (url) => {
+    if (!token) return url;
+    const parsed = new URL(url);
+    parsed.searchParams.set("token", token);
+    return parsed.toString();
+  };
 
   async function request(method, path, body) {
     const headers = { origin };
@@ -22,7 +28,7 @@ export function createApi(baseUrl) {
     if (method !== "GET" && method !== "HEAD") headers["x-kb-ui"] = "1";
     let response;
     try {
-      response = await fetch(`${root}/kb/api${path}`, {
+      response = await fetch(withToken(`${root}/kb/api${path}`), {
         method,
         headers,
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),

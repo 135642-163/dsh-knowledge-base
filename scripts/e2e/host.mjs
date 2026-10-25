@@ -149,7 +149,7 @@ export function rewritePatch(sourceText, kbRoot) {
   return { text: output, dropped };
 }
 
-async function waitForStatus(baseUrl, { timeoutMs, child, logs, getSpawnError = () => null }) {
+async function waitForStatus(baseUrl, { timeoutMs, child, logs, env, getSpawnError = () => null }) {
   const started = Date.now();
   let lastError = "";
   while (Date.now() - started < timeoutMs) {
@@ -160,9 +160,13 @@ async function waitForStatus(baseUrl, { timeoutMs, child, logs, getSpawnError = 
     if (child && (child.exitCode !== null || child.signalCode !== null)) {
       throw new HostError(`DSH 宿主提前退出（code=${child.exitCode}）`, logs.tailLines(120));
     }
+    // 全新 DSH_HOME 首次启动会打印带 token 的 URL；没有 token 的宿主（本机已登录 profile）不需要它。
+    const token = (String(logs.text()).match(/[?&]token=([A-Za-z0-9_-]+)/)?.[1] ?? "")
+      || String(env?.DSH_E2E_TOKEN ?? "").trim();
     try {
-      const response = await fetch(`${baseUrl}/kb/api/status`, { signal: AbortSignal.timeout(3000) });
-      if (response.ok) return await response.json();
+      const url = `${baseUrl}/kb/api/status${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+      const response = await fetch(url, { signal: AbortSignal.timeout(3000) });
+      if (response.ok) return { status: await response.json(), token };
       lastError = `HTTP ${response.status}`;
     } catch (error) {
       lastError = String(error?.cause?.code ?? error?.message ?? error);
@@ -255,10 +259,11 @@ async function makeTempProfile({ sourceProfile, home, kbRoot, log }) {
  * DSH_E2E_URL：复用已经启动的宿主。这里只读 /kb/api/status 拿 kbRoot，
  * 并拒绝在非临时目录上执行任何写操作（除非显式 DSH_E2E_ALLOW_MUTATE=1）。
  */
-async function connectExternal(baseUrl) {
+async function connectExternal(baseUrl, token = "") {
   let status;
   try {
-    const response = await fetch(`${baseUrl}/kb/api/status`, { signal: AbortSignal.timeout(10_000) });
+    const url = `${baseUrl}/kb/api/status${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+    const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     status = await response.json();
   } catch (error) {
@@ -269,6 +274,7 @@ async function connectExternal(baseUrl) {
   return {
     mode: "external",
     baseUrl: baseUrl.replace(/\/+$/, ""),
+    token,
     kbRoot: resolve(kbRoot),
     profileName: "(external)",
     profileDir: "",
@@ -288,7 +294,9 @@ export async function startHost({
 } = {}) {
   const external = String(env?.DSH_E2E_URL ?? "").trim();
   if (external !== "") {
-    const host = await connectExternal(external);
+    const envToken = String(env?.DSH_E2E_TOKEN ?? "").trim();
+    const urlToken = new URL(external).searchParams.get("token") ?? "";
+    const host = await connectExternal(external, envToken || urlToken);
     host.logs = createLogCapture();
     host.keep = false;
     host.stop = async () => {};
@@ -356,17 +364,18 @@ export async function startHost({
 
   try {
     await writeFile(join(artifactsDir, "host.log"), logs.text(), "utf8");
-    const status = await waitForStatus(baseUrl, { timeoutMs: statusTimeoutMs, child, logs, getSpawnError: () => spawnError });
+    const { status, token } = await waitForStatus(baseUrl, { timeoutMs: statusTimeoutMs, child, logs, env, getSpawnError: () => spawnError });
     if (resolve(String(status?.kbRoot ?? "")) !== resolve(kbRoot)) {
       throw new HostError(
         `宿主 kbRoot 与预期不一致：status=${status?.kbRoot} expected=${kbRoot}`,
         logs.tailLines(80),
       );
     }
-    log(`DSH host ready at ${baseUrl} (profile ${temp.profileName}, kbRoot ${kbRoot})`);
+    log(`DSH host ready at ${baseUrl} (profile ${temp.profileName}, kbRoot ${kbRoot}${token ? ", token auth" : ""})`);
     return {
       mode: "self",
       baseUrl,
+      token,
       kbRoot,
       profileName: temp.profileName,
       profileDir: temp.profileDir,

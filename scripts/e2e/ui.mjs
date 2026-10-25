@@ -62,13 +62,26 @@ export async function launchBrowser({ log = () => {}, env = process.env } = {}) 
   );
 }
 
+/** 全新 DSH_HOME 的宿主需要 ?token= 才能通过浏览器信任检查。 */
+function withToken(url, token) {
+  if (!token) return url;
+  try {
+    const parsed = new URL(url);
+    if (!parsed.searchParams.has("token")) parsed.searchParams.set("token", token);
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
 /** 页面控件的小工具：不引入 @playwright/test，仍保持清晰断言。 */
-export function createPageHelpers(page) {
+export function createPageHelpers(page, token = "") {
   const helpers = {
     page,
+    token,
     async goto(path) {
-      const url = path.startsWith("http") ? path : `${helpers.baseUrl}${path}`;
-      await page.goto(url, { waitUntil: "domcontentloaded" });
+      const raw = path.startsWith("http") ? path : `${helpers.baseUrl}${path}`;
+      await page.goto(withToken(raw, helpers.token), { waitUntil: "domcontentloaded" });
       return page;
     },
     async toast(text, timeout = 15_000) {
@@ -120,9 +133,10 @@ function sanitizeSlug(value) {
  * 一个测试的浏览器上下文：懒创建 page，失败时统一落盘。
  */
 export class TestContext {
-  constructor({ browser, baseUrl, api, artifactsDir, slug, log = () => {} }) {
+  constructor({ browser, baseUrl, token = "", api, artifactsDir, slug, log = () => {} }) {
     this.browser = browser;
     this.baseUrl = baseUrl;
+    this.token = token;
     this.api = api;
     this.artifactsDir = artifactsDir;
     this.slug = sanitizeSlug(slug);
@@ -157,7 +171,7 @@ export class TestContext {
       }
     });
     this.page = page;
-    this.helpers = createPageHelpers(page);
+    this.helpers = createPageHelpers(page, this.token);
     this.helpers.baseUrl = this.baseUrl;
     this.pages.push(page);
     return page;

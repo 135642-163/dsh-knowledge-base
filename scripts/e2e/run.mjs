@@ -79,7 +79,7 @@ async function main() {
     activeHost = host;
     assertExternalRootIsSafe(host, process.env);
 
-    const api = createApi(host.baseUrl);
+    const api = createApi(host.baseUrl, host.token);
     log("seeding fixtures via HTTP + manifests …");
     const seeded = await seedFixtures({ api, kbRoot: host.kbRoot, artifactsDir, log });
     Object.assign(seedInfo, seeded);
@@ -93,6 +93,7 @@ async function main() {
       const ctx = new TestContext({
         browser: browser.browser,
         baseUrl: host.baseUrl,
+        token: host.token,
         api,
         artifactsDir,
         slug: test.name,
