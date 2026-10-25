@@ -112,8 +112,25 @@ export const api = {
   patchKb: (name, body) => request("PATCH", `/kbs/${encodeURIComponent(name)}`, body),
   archiveKb: (name, confirm) => request("POST", `/kbs/${encodeURIComponent(name)}/archive`, { confirm }),
   trash: () => request("GET", "/trash"),
-  /** 全局回收站：所有活跃库里的软删除资料（只读，最多 500 条）。 */
-  trashDocs: () => request("GET", "/trash/docs"),
+  /** 全局回收站：所有活跃库里的软删除资料（只读，最多 500 条）；支持搜索与排序。 */
+  trashDocs: ({ query = "", sort = "deleted_desc" } = {}) => {
+    const params = new URLSearchParams();
+    const search = query === undefined || query === null ? "" : String(query);
+    const order = sort === undefined || sort === null || String(sort).trim() === ""
+      ? "deleted_desc"
+      : String(sort);
+    if (search !== "") params.set("query", search);
+    params.set("sort", order);
+    return request("GET", `/trash/docs?${params.toString()}`);
+  },
+  /** 跨库批量彻底删除：confirm 必须逐字输入「彻底删除 N 篇」。 */
+  purgeTrashDocs: (items, confirm) => request("POST", "/trash/docs/purge", {
+    items: (Array.isArray(items) ? items : []).map((item) => ({
+      kb: String(item?.kb ?? ""),
+      id: String(item?.id ?? ""),
+    })),
+    confirm: String(confirm ?? ""),
+  }),
   /** 批量彻底删除本库回收站资料：confirm=库名，all 与 ids 二选一。 */
   purgeDocs: (name, { ids = [], all = false, confirm = "" } = {}) => request(
     "POST",

@@ -78,14 +78,14 @@ export async function run(ctx) {
     message: "A2 彻底删除后不应再出现",
   });
 
-  // 勾选 B1 批量彻底删除（同库校验 + 逐字输入库名）。
+  // 勾选 B1 批量彻底删除（跨库接口 + 逐字输入「彻底删除 N 篇」）。
   const b1Row = page.locator(".trash-doc-row").filter({ hasText: FIXTURES.docs.b1.title });
   await b1Row.locator('input[data-action="trash-doc-select"]').check();
   const bulk = page.locator(".trash-bulk");
   await bulk.waitFor();
   await bulk.locator('button[data-action="trash-docs-purge-selected"]').click();
   modal = await ctx.helpers.modal();
-  await modal.locator('input[name="confirm"]').fill(FIXTURES.kbs.target);
+  await modal.locator('input[name="confirm"]').fill("彻底删除 1 篇");
   await modal.locator('button[type="submit"]').click();
   await modal.waitFor({ state: "detached" });
   await poll(async () => (await page.locator(".trash-doc-row").filter({ hasText: FIXTURES.docs.b1.title }).count()) === 0, {

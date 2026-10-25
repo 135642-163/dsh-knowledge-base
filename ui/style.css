@@ -214,7 +214,14 @@ code { background: var(--panel-2); border-radius: 4px; padding: 1px 4px; }
   font-size: 11px; line-height: 18px; text-align: center;
 }
 .trash-tabs .seg.active .seg-count { background: var(--panel); color: var(--accent); }
-.trash-docs-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+/* 已删除资料工具条：与资料 tab 的 table-tools 对齐，窄屏整行换行 */
+.trash-docs-tools { margin-bottom: 12px; }
+.trash-docs-tools .search.trash-search { flex: 0 1 auto; }
+.search.trash-search input { width: 240px; }
+.trash-docs-tools .docs-size { flex: 0 0 auto; }
+.trash-docs-count { margin-left: auto; font-size: 12px; white-space: nowrap; }
+.trash-docs-tools .badge.warn { white-space: nowrap; }
+.trash .empty-card .btn { margin-top: 4px; }
 .trash-docs-table .col-check { width: 34px; padding-right: 2px; }
 .trash-docs-table .col-check input { width: 15px; height: 15px; margin: 2px 0 0; }
 .trash-docs-table .col-actions { white-space: nowrap; }
@@ -228,6 +235,9 @@ code { background: var(--panel-2); border-radius: 4px; padding: 1px 4px; }
   .trash-docs-table th:nth-child(5), .trash-docs-table td:nth-child(5) { display: none; }
   .trash-bulk { align-items: stretch; }
   .trash-bulk-hint { flex: 1 1 100%; }
+  .trash-docs-tools .search.trash-search { flex: 1 1 100%; }
+  .search.trash-search input { width: 100%; min-width: 0; }
+  .trash-docs-count { margin-left: 0; }
 }
 
 /* 上传弹窗 */

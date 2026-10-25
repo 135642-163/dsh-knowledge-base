@@ -9,7 +9,25 @@
 export const TRASH_DOCS_CAP = 500;
 export const TRASH_DOCS_COPY = "已删除资料只列活跃库中的资料；归档库内的资料随库一起恢复，不单独列出。";
 export const PURGE_DOCS_WARNING = "彻底删除会移除原件、解析内容与历史版本，且撤销移动将不再可用。";
-export const MULTI_KB_PURGE_HINT = "彻底删除一次只能处理同一个库的资料";
+/** 跨库批量彻底删除的警告：与单库文案分开，强调移动撤销也会失效。 */
+export const TRASH_PURGE_WARNING = "彻底删除会移除原件、解析内容与历史版本；被移动文档的撤销移动将不再可用。";
+export const TRASH_QUERY_PLACEHOLDER = "搜索库名、标题或类型…";
+
+/** 已删除资料排序：value 与服务端 TRASH_SORTS 一一对应。 */
+export const TRASH_DOC_SORTS = Object.freeze([
+  ["deleted_desc", "删除时间（新→旧）"],
+  ["deleted_asc", "删除时间（旧→新）"],
+  ["title_asc", "标题 A→Z"],
+  ["title_desc", "标题 Z→A"],
+  ["kb_asc", "库名 A→Z"],
+  ["kb_desc", "库名 Z→A"],
+]);
+
+/** 未知排序值回落到默认的删除时间倒序，保证下拉框始终有选中项。 */
+function trashSortKey(value) {
+  const key = String(value ?? "");
+  return TRASH_DOC_SORTS.some(([sort]) => sort === key) ? key : "deleted_desc";
+}
 
 /** 路由 `?tab=docs` 才展示已删除资料，其余值（含手改 URL）回落到归档库。 */
 export function trashTab(current) {
@@ -126,7 +144,8 @@ export function trashSelectionAllSelected(selected, docs) {
 }
 
 /**
- * 批量彻底删除的目标校验：空选择或多库混合时返回可展示的原因。
+ * 彻底删除的目标校验：空选择返回可展示的原因；跨库选择允许（服务端逐库预检）。
+ * `kb` 只在选择来自同一个库时给出，供单行彻底删除沿用逐字输入库名。
  * @returns {{ok: boolean, kb: string, entries: Array<{kb:string,id:string,title:string}>, reason: string}}
  */
 export function trashPurgeTarget(selected) {
@@ -135,10 +154,31 @@ export function trashPurgeTarget(selected) {
     return { ok: false, kb: "", entries, reason: "请先选择要彻底删除的资料" };
   }
   const kbs = new Set(entries.map((entry) => entry.kb));
-  if (kbs.size > 1) {
-    return { ok: false, kb: "", entries, reason: MULTI_KB_PURGE_HINT };
-  }
-  return { ok: true, kb: entries[0].kb, entries, reason: "" };
+  return { ok: true, kb: kbs.size === 1 ? entries[0].kb : "", entries, reason: "" };
+}
+
+/** 跨库批量彻底删除的确认短语；弹窗必须逐字输入同一句。 */
+export function trashPurgePhrase(count) {
+  const n = Math.max(0, Math.round(Number(count) || 0));
+  return `彻底删除 ${n} 篇`;
+}
+
+/**
+ * 跨库批量彻底删除确认正文：最多列 10 条「库名：标题」+ 总篇数/库数 + 警告。
+ * 纯文本，交给确认弹窗统一转义。
+ */
+export function renderTrashPurgeBody(items = []) {
+  const list = selectionList(items);
+  const shown = list.slice(0, 10);
+  const lines = shown.map((entry) => `${entry.kb}：${entry.title || entry.id}`);
+  if (list.length > shown.length) lines.push(`…等 ${list.length} 篇`);
+  const kbCount = new Set(list.map((entry) => entry.kb)).size;
+  return [
+    ...lines,
+    `共 ${list.length} 篇，来自 ${kbCount} 个库`,
+    "",
+    TRASH_PURGE_WARNING,
+  ].join("\n");
 }
 
 /**
@@ -234,7 +274,7 @@ export function renderTrashArchived({ items = [], loading = false, error = "", i
   `;
 }
 
-/** 多选工具条：跨库时彻底删除禁用并展示原因；批量恢复自动排除已移动资料。 */
+/** 多选工具条：彻底删除支持跨库（确认时逐篇核对库名）；批量恢复自动排除已移动资料。 */
 export function renderTrashBulk({
   selected = [],
   docs = [],
@@ -243,29 +283,60 @@ export function renderTrashBulk({
 } = {}) {
   const list = selectionList(selected);
   if (list.length === 0) return "";
-  const sameKb = sameTrashKb(list);
   const restore = trashRestoreTargets(list, docs);
   return `
     <div class="docs-bulk trash-bulk">
       <strong>已选 ${fmtNumber(list.length)} 篇</strong>
       <button type="button" class="btn" data-action="trash-docs-restore-selected"${busy || restore.entries.length === 0 ? " disabled" : ""}>恢复所选</button>
       ${restore.excluded > 0 ? `<span class="muted trash-bulk-hint">已排除 ${fmtNumber(restore.excluded)} 篇已移动资料，请在对应库中撤销移动</span>` : ""}
-      <button type="button" class="btn danger" data-action="trash-docs-purge-selected"${busy || !sameKb ? " disabled" : ""}>彻底删除所选</button>
-      ${sameKb ? "" : `<span class="muted trash-bulk-hint">${MULTI_KB_PURGE_HINT}</span>`}
+      <button type="button" class="btn danger" data-action="trash-docs-purge-selected"${busy ? " disabled" : ""}>彻底删除所选</button>
       <button type="button" class="btn" data-action="trash-doc-clear"${busy ? " disabled" : ""}>取消选择</button>
     </div>
   `;
 }
 
 /**
- * 已删除资料分区：表头勾选/全选、行内恢复与彻底删除。
- * docs = { items, total, truncated, error }。
+ * 已删除资料工具条：搜索 + 排序 + 过滤后的篇数/截断提示。
+ * 搜索词和排序都是受控值（来自 state.trash），重绘后输入框/下拉框保持原值。
+ */
+export function renderTrashDocsToolbar({
+  query = "",
+  sort = "deleted_desc",
+  total = 0,
+  truncated = false,
+  icons = {},
+  fmtNumber = formatNumber,
+} = {}) {
+  const currentSort = trashSortKey(sort);
+  return `
+    <div class="table-tools trash-docs-tools">
+      <label class="search trash-search">
+        ${icons.search ?? ""}
+        <input type="search" data-trash-query value="${escapeAttr(query)}" placeholder="${TRASH_QUERY_PLACEHOLDER}" aria-label="搜索已删除资料" autocomplete="off" />
+      </label>
+      <label class="docs-size trash-sort">
+        <span class="muted">排序</span>
+        <select data-trash-sort aria-label="已删除资料排序">
+          ${TRASH_DOC_SORTS.map(([value, label]) => `<option value="${value}"${value === currentSort ? " selected" : ""}>${label}</option>`).join("")}
+        </select>
+      </label>
+      <span class="muted trash-docs-count">共 ${fmtNumber(total)} 篇</span>
+      ${truncated ? `<span class="badge warn">仅显示前 ${fmtNumber(TRASH_DOCS_CAP)} 篇</span>` : ""}
+    </div>
+  `;
+}
+
+/**
+ * 已删除资料分区：搜索/排序工具条、表头勾选/全选、行内恢复与彻底删除。
+ * docs = { items, total, truncated, error }；query/sort 来自 state.trash。
  */
 export function renderTrashDocs({
   docs = {},
   selectedDocs = [],
   loading = false,
   busy = false,
+  query = "",
+  sort = "deleted_desc",
   icons = {},
   fmtNumber = formatNumber,
 } = {}) {
@@ -274,15 +345,27 @@ export function renderTrashDocs({
   const total = Math.max(0, Math.round(Number(docs?.total) || 0));
   const truncated = docs?.truncated === true;
   const error = String(docs?.error ?? "");
+  const search = String(query ?? "");
   if (error) {
     return `<div class="state error">${escapeHtml(error)}<button class="btn" data-action="reload-trash">重试</button></div>`;
   }
   if (loading && items.length === 0) return `<div class="state">已删除资料加载中…</div>`;
+  const toolbar = renderTrashDocsToolbar({ query: search, sort, total, truncated, icons, fmtNumber });
   if (items.length === 0) {
+    // 搜索命中 0 篇与回收站本来就空是两种语义：前者保留搜索框并提供一键清除。
+    if (search.trim() !== "" && total === 0) {
+      return `
+        ${toolbar}
+        <div class="empty-card">
+          <div class="empty-icon">${icons.trash ?? ""}</div>
+          <h2>没有匹配的已删除资料</h2>
+          <p class="muted">换个关键词，或清除搜索查看全部已删除资料。</p>
+          <button type="button" class="btn" data-action="trash-docs-clear-query">清除搜索</button>
+        </div>
+      `;
+    }
     return `
-      <div class="trash-docs-head">
-        <span class="muted">共 ${fmtNumber(total)} 篇</span>
-      </div>
+      ${toolbar}
       <div class="empty-card">
         <div class="empty-icon">${icons.trash ?? ""}</div>
         <h2>没有已删除的资料</h2>
@@ -293,10 +376,7 @@ export function renderTrashDocs({
   const selected = selectionList(selectedDocs);
   const allSelected = trashSelectionAllSelected(selected, items);
   return `
-    <div class="trash-docs-head">
-      <span class="muted">共 ${fmtNumber(total)} 篇</span>
-      ${truncated ? `<span class="badge warn">仅显示前 ${fmtNumber(TRASH_DOCS_CAP)} 篇</span>` : ""}
-    </div>
+    ${toolbar}
     ${renderTrashBulk({ selected, docs: items, busy, fmtNumber })}
     <div class="table-scroll">
       <table class="table trash-docs-table">
@@ -359,6 +439,8 @@ export function renderTrash(state, current, { icons = {}, fmtNumber = formatNumb
           selectedDocs: trash.selectedDocs,
           loading,
           busy: Boolean(trash.busy),
+          query: trash.query ?? "",
+          sort: trash.sort ?? "deleted_desc",
           icons,
           fmtNumber,
         })

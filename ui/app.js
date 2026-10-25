@@ -5,8 +5,8 @@ import { renderOverview } from "./views/overview.js";
 import { docsPageSize, docsStatus, renderDetail, selectionToggle, selectionToggleOne } from "./views/detail.js";
 import { attachDocsControls, createRequestGate } from "./docs-controls.js";
 import {
-  purgeDocsConfirmBody, renderTrash, trashPurgeTarget, trashRestoreTargets,
-  trashSelectionToggleAll, trashSelectionToggleOne,
+  purgeDocsConfirmBody, renderTrash, renderTrashPurgeBody, trashDocKey, trashPurgePhrase,
+  trashPurgeTarget, trashRestoreTargets, trashSelectionToggleAll, trashSelectionToggleOne,
 } from "./views/trash.js";
 import {
   deleteConfirmBody, openConfirmModal, openCreateModal, openDocModal, openKbPickerModal, openMoveModal,
@@ -37,6 +37,8 @@ const state = {
     items: [],
     docs: { items: [], total: 0, truncated: false, error: "" },
     selectedDocs: [],
+    query: "",
+    sort: "deleted_desc",
     loading: false,
     error: "",
     busy: false,
@@ -602,16 +604,24 @@ async function cancelStd() {
 // 回收站请求代号：切 tab/连续刷新时旧响应自行作废。
 let trashToken = 0;
 
-/** 并行拉取归档库与全局已删除资料；某一个失败不影响另一个展示。 */
-async function loadTrash() {
+/**
+ * 并行拉取归档库与全局已删除资料；某一个失败不影响另一个展示。
+ * query/sort 取自 state.trash，刷新（含操作后）不重置；搜索/排序变化时由调用方
+ * 传 resetSelection 清空勾选——旧列表的跨页选择不能挂到新结果上。
+ */
+async function loadTrash({ resetSelection = false } = {}) {
   const token = ++trashToken;
   state.trash.loading = true;
   state.trash.error = "";
-  // 刷新=列表内容会变，勾选统一清空（与切 tab 行为一致）。
-  state.trash.selectedDocs = [];
+  if (resetSelection) state.trash.selectedDocs = [];
   render();
-  const [archived, docs] = await Promise.allSettled([api.trash(), api.trashDocs()]);
-  if (token !== trashToken) return;
+  const query = String(state.trash.query ?? "");
+  const sort = String(state.trash.sort || "deleted_desc");
+  const [archived, docs] = await Promise.allSettled([api.trash(), api.trashDocs({ query, sort })]);
+  // 输入防抖期间状态里的 query 可能已经更新：旧响应不能再挂到新搜索词下面。
+  if (token !== trashToken
+    || query !== String(state.trash.query ?? "")
+    || sort !== String(state.trash.sort || "deleted_desc")) return { stale: true };
   if (archived.status === "fulfilled") {
     state.trash.items = Array.isArray(archived.value?.items) ? archived.value.items : [];
   } else {
@@ -630,8 +640,13 @@ async function loadTrash() {
     // 已删除资料单独失败：按空列表展示，并在该分区给出错误与重试。
     state.trash.docs = { items: [], total: 0, truncated: false, error: errorText(docs.reason) };
   }
+  // 刷新后只保留仍在当前列表里的勾选：撤销移动/外部删除不会留下失效的待删条目。
+  const visibleKeys = new Set((state.trash.docs.items ?? []).map((doc) => trashDocKey(doc)));
+  state.trash.selectedDocs = (Array.isArray(state.trash.selectedDocs) ? state.trash.selectedDocs : [])
+    .filter((entry) => visibleKeys.has(trashDocKey(entry)));
   state.trash.loading = false;
   render();
+  return { stale: false };
 }
 
 /** 已删除资料列表里的一篇（同一个 id 可能出现在不同库）。 */
@@ -718,17 +733,17 @@ async function undoTrashMove(doc, target = "") {
   await refreshAfterTrashChange([sourceKb, targetKb]);
 }
 
-/** 彻底删除已删除资料：必须同一库，逐字输入库名确认。 */
-function purgeTrashDocs(entries) {
+/** 单行彻底删除：沿用本库回收站接口，逐字输入库名确认。 */
+function purgeTrashDoc(doc) {
   if (state.trash.busy) return;
-  const target = trashPurgeTarget(entries);
+  const target = trashPurgeTarget([doc]);
   if (!target.ok) {
     showToast(target.reason, "error");
     return;
   }
   const { kb, entries: list } = target;
   openConfirmModal({
-    title: list.length === 1 ? `彻底删除「${list[0].title}」` : `彻底删除「${kb}」中的 ${list.length} 篇`,
+    title: `彻底删除「${list[0].title}」`,
     body: purgeDocsConfirmBody({ docs: list, total: list.length }),
     confirmText: "彻底删除",
     requireText: kb,
@@ -736,11 +751,53 @@ function purgeTrashDocs(entries) {
     danger: true,
     onConfirm: async () => {
       state.trash.busy = true;
+      state.trash.selectedDocs = [];
       render();
       try {
         const result = await api.purgeDocs(kb, { ids: list.map((entry) => entry.id), confirm: kb });
-        state.trash.busy = false;
         await refreshAfterTrashChange([kb]);
+        const [message, kind] = purgeDocsToast(result);
+        showToast(message, kind);
+      } finally {
+        state.trash.busy = false;
+        render();
+      }
+    },
+  });
+}
+
+/**
+ * 跨库批量彻底删除：服务端先逐库预检再删除；确认短语固定为「彻底删除 N 篇」。
+ * 部分失败由响应里的 {purged, failed} 汇报，不把成功条目回滚。
+ */
+function purgeSelectedTrashDocs(entries) {
+  if (state.trash.busy) return;
+  const target = trashPurgeTarget(entries);
+  if (!target.ok) {
+    showToast(target.reason, "error");
+    return;
+  }
+  const list = target.entries;
+  const count = list.length;
+  const phrase = trashPurgePhrase(count);
+  const affectedKbs = [...new Set(list.map((entry) => entry.kb))];
+  openConfirmModal({
+    title: count === 1 ? `彻底删除「${list[0].title}」` : `彻底删除 ${count} 篇已删除资料`,
+    body: renderTrashPurgeBody(list),
+    confirmText: "彻底删除",
+    requireText: phrase,
+    textLabel: "输入",
+    danger: true,
+    onConfirm: async () => {
+      state.trash.busy = true;
+      state.trash.selectedDocs = [];
+      render();
+      try {
+        const result = await api.purgeTrashDocs(
+          list.map((entry) => ({ kb: entry.kb, id: entry.id })),
+          phrase,
+        );
+        await refreshAfterTrashChange(affectedKbs);
         const [message, kind] = purgeDocsToast(result);
         showToast(message, kind);
       } finally {
@@ -986,6 +1043,12 @@ function bind() {
       if (state.trash.busy) return;
       state.trash.selectedDocs = [];
       render();
+    } else if (action === "trash-docs-clear-query") {
+      if (state.trash.busy) return;
+      state.trash.query = "";
+      state.trash.selectedDocs = [];
+      const result = await loadTrash({ resetSelection: true });
+      if (!result?.stale) focusTrashQueryInput();
     } else if (action === "trash-doc-restore") {
       const doc = trashDocByKey(target.dataset.kb, target.dataset.id);
       if (doc) await restoreTrashDocs([doc]);
@@ -995,13 +1058,13 @@ function bind() {
       if (doc) await undoTrashMove(doc, target.dataset.target ?? "");
     } else if (action === "trash-doc-purge") {
       const doc = trashDocByKey(target.dataset.kb, target.dataset.id);
-      if (doc) purgeTrashDocs([doc]);
+      if (doc) purgeTrashDoc(doc);
     } else if (action === "trash-docs-restore-selected") {
       if (state.trash.busy) return;
       await restoreTrashDocs(state.trash.selectedDocs);
     } else if (action === "trash-docs-purge-selected") {
       if (state.trash.busy) return;
-      purgeTrashDocs(state.trash.selectedDocs);
+      purgeSelectedTrashDocs(state.trash.selectedDocs);
     } else if (action === "archive-kb") {
       const current = route();
       if (!current.name) return;
@@ -1062,8 +1125,7 @@ function bind() {
         danger: true,
         onConfirm: async () => {
           const result = await api.purgeTrash(dir);
-          await loadTrash();
-          await loadKbs();
+          await refreshAfterTrashChange();
           showToast(`已彻底删除「${result?.name ?? item.name}」`);
         },
       });
@@ -1072,8 +1134,7 @@ function bind() {
       const name = target.dataset.name;
       try {
         const result = await api.restoreKb(dir);
-        await loadKbs();
-        await loadTrash();
+        await refreshAfterTrashChange();
         showToast(`已恢复「${result.restoredTo}」`);
         window.location.hash = hrefForKb(result.restoredTo);
       } catch (error) {
@@ -1082,8 +1143,7 @@ function bind() {
             name,
             dir,
             onRestored: async (restoredTo) => {
-              await loadKbs();
-              await loadTrash();
+              await refreshAfterTrashChange();
               showToast(`已恢复为「${restoredTo}」`);
               window.location.hash = hrefForKb(restoredTo);
             },
@@ -1129,11 +1189,53 @@ function bind() {
   app.querySelectorAll("[data-filter='status']").forEach((button) => {
     button.onclick = () => { state.filter = button.dataset.value; render(); };
   });
+  // 回收站已删除资料：搜索 300ms 防抖 + Enter + 输入法组合，排序切换立即生效。
+  const trashSearch = app.querySelector("[data-trash-query]");
+  if (trashSearch) {
+    let composing = false;
+    let timer = 0;
+    const applyTrashQuery = async () => {
+      clearTimeout(timer);
+      state.trash.query = trashSearch.value;
+      state.trash.selectedDocs = [];
+      const result = await loadTrash({ resetSelection: true });
+      if (!result?.stale) focusTrashQueryInput();
+    };
+    trashSearch.oncompositionstart = () => { composing = true; clearTimeout(timer); };
+    trashSearch.oncompositionend = () => { composing = false; void applyTrashQuery(); };
+    trashSearch.oninput = (event) => {
+      state.trash.query = trashSearch.value;
+      if (composing || event.isComposing) return;
+      clearTimeout(timer);
+      timer = setTimeout(() => { void applyTrashQuery(); }, 300);
+    };
+    trashSearch.onkeydown = (event) => {
+      if (event.key !== "Enter" || composing || event.isComposing) return;
+      event.preventDefault();
+      void applyTrashQuery();
+    };
+  }
+  const trashSort = app.querySelector("[data-trash-sort]");
+  if (trashSort) {
+    trashSort.onchange = () => {
+      state.trash.sort = trashSort.value || "deleted_desc";
+      state.trash.selectedDocs = [];
+      void loadTrash({ resetSelection: true });
+    };
+  }
 }
 
 /** 搜索框整页重绘后聚焦并把光标放回末尾（输入法组合结束也走这里）。 */
 function focusQueryInput() {
   const next = app.querySelector("[data-filter='query']");
+  if (!next) return;
+  next.focus();
+  next.setSelectionRange(next.value.length, next.value.length);
+}
+
+/** 回收站搜索框重绘后恢复焦点与光标（不抢其他输入的焦点）。 */
+function focusTrashQueryInput() {
+  const next = app.querySelector("[data-trash-query]");
   if (!next) return;
   next.focus();
   next.setSelectionRange(next.value.length, next.value.length);
@@ -1187,7 +1289,8 @@ function boot() {
     state.docs.selected = [];
     stopStd();
     const current = route();
-    if (current.page === "trash") loadTrash();
+    // 进入回收站时保留上次搜索/排序，但旧勾选不带入新页面。
+    if (current.page === "trash") loadTrash({ resetSelection: true });
     else if (current.page === "detail") loadDetail(current.name, current.tab);
     else render();
   });

@@ -232,19 +232,54 @@ test("文档删除/恢复/重试与跨库移动方法：POST + 编码路径 + JS
   assert.deepEqual(JSON.parse(calls[6].options.body), { target: "目标" });
 });
 
-test("全局回收站与批量彻底删除：URL、方法与请求体", async () => {
+test("全局回收站搜索/排序：URL 编码、空 query 省略、sort 始终下发", async () => {
   calls.length = 0;
   await api.trashDocs();
+  await api.trashDocs({ query: "继电 保护", sort: "title_asc" });
+  await api.trashDocs({ query: "", sort: "kb_desc" });
+  // 空 sort 回落到默认 deleted_desc；query 与 sort 都支持中文/空格编码。
+  await api.trashDocs({ query: "台账", sort: "" });
+
+  assert.equal(calls.length, 4);
+  for (const call of calls) {
+    assert.equal(call.options.method, "GET");
+    // 只读接口不带工作台写请求标记。
+    assert.equal(call.options.headers["x-kb-ui"], undefined);
+    assert.equal(call.options.body, undefined);
+  }
+  assert.equal(calls[0].url, "/kb/api/trash/docs?sort=deleted_desc");
+  const searched = new URL(calls[1].url, "http://dsh.internal");
+  assert.equal(searched.pathname, "/kb/api/trash/docs");
+  assert.equal(searched.searchParams.get("query"), "继电 保护");
+  assert.equal(searched.searchParams.get("sort"), "title_asc");
+  assert.match(calls[1].url, /query=%E7%BB%A7%E7%94%B5\+%E4%BF%9D%E6%8A%A4/);
+
+  assert.equal(calls[2].url, "/kb/api/trash/docs?sort=kb_desc");
+  const defaulted = new URL(calls[3].url, "http://dsh.internal");
+  assert.equal(defaulted.searchParams.get("query"), "台账");
+  assert.equal(defaulted.searchParams.get("sort"), "deleted_desc");
+});
+
+test("跨库批量彻底删除与新库级彻底删除：URL、方法与请求体", async () => {
+  calls.length = 0;
+  await api.purgeTrashDocs([
+    { kb: "标准", id: "d1" },
+    { kb: "乙库", id: "d2", title: "忽略的额外字段" },
+  ], "彻底删除 2 篇");
   await api.purgeDocs("标准", { ids: ["d1", "d2"], confirm: "标准" });
   await api.purgeDocs("标准", { all: true, confirm: "标准" });
   await api.purgeDocs("标准", { ids: ["d1"], all: true, confirm: "标准" });
 
   assert.equal(calls.length, 4);
-  assert.equal(calls[0].url, "/kb/api/trash/docs");
-  assert.equal(calls[0].options.method, "GET");
-  // 只读接口不带工作台写请求标记。
-  assert.equal(calls[0].options.headers["x-kb-ui"], undefined);
-  assert.equal(calls[0].options.body, undefined);
+  assert.equal(calls[0].url, "/kb/api/trash/docs/purge");
+  assert.equal(calls[0].options.method, "POST");
+  assert.equal(calls[0].options.headers["x-kb-ui"], "1");
+  assert.equal(calls[0].options.headers["content-type"], "application/json");
+  // 客户端只上传 kb/id，标题等展示字段不进入请求体。
+  assert.deepEqual(JSON.parse(calls[0].options.body), {
+    items: [{ kb: "标准", id: "d1" }, { kb: "乙库", id: "d2" }],
+    confirm: "彻底删除 2 篇",
+  });
 
   const purgeUrl = "/kb/api/kbs/%E6%A0%87%E5%87%86/docs/purge";
   for (const call of calls.slice(1)) {

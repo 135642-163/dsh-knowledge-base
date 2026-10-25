@@ -5,10 +5,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  MULTI_KB_PURGE_HINT, PURGE_DOCS_WARNING, TRASH_DOCS_COPY,
-  purgeDocsConfirmBody, renderTrash, renderTrashBulk, renderTrashTabs,
-  sameTrashKb, trashPurgeTarget, trashRestoreTargets, trashSelectionAllSelected, trashSelectionHas,
-  trashSelectionKb, trashSelectionToggleAll, trashSelectionToggleOne, trashTab,
+  PURGE_DOCS_WARNING, TRASH_DOCS_COPY, TRASH_DOC_SORTS, TRASH_PURGE_WARNING,
+  TRASH_QUERY_PLACEHOLDER, purgeDocsConfirmBody, renderTrash, renderTrashBulk,
+  renderTrashDocsToolbar, renderTrashPurgeBody, renderTrashTabs, sameTrashKb,
+  trashPurgePhrase, trashPurgeTarget, trashRestoreTargets, trashSelectionAllSelected,
+  trashSelectionHas, trashSelectionKb, trashSelectionToggleAll, trashSelectionToggleOne, trashTab,
 } from "../ui/views/trash.js";
 
 const icons = { trash: '<svg data-icon="trash"></svg>' };
@@ -49,12 +50,16 @@ function makeState({
   error = "",
   docsError = "",
   busy = false,
+  query = "",
+  sort = "deleted_desc",
 } = {}) {
   return {
     trash: {
       items: archived,
       docs: { items: docs, total, truncated, error: docsError },
       selectedDocs,
+      query,
+      sort,
       loading,
       error,
       busy,
@@ -162,6 +167,50 @@ test("已删除资料分区有说明、总数、库徽标与行内恢复/彻底�
   // 已删除资料分区不渲染归档库操作。
   assert.doesNotMatch(html, /data-action="restore-kb"/);
   assert.doesNotMatch(html, /data-action="purge-kb"/);
+});
+
+test("已删除资料工具条：搜索框、六种排序、过滤后的篇数与截断提示", () => {
+  const html = render(makeState({
+    docs: [deletedDoc("标准", "d1", { title: "电压偏差" })],
+    total: 501,
+    truncated: true,
+    query: "电压",
+    sort: "title_desc",
+  }), "docs");
+
+  assert.match(html, /class="table-tools trash-docs-tools"/);
+  assert.match(html, /data-trash-query value="电压" placeholder="搜索库名、标题或类型…" aria-label="搜索已删除资料"/);
+  assert.match(html, new RegExp(`placeholder="${TRASH_QUERY_PLACEHOLDER}"`));
+  assert.match(html, /<select data-trash-sort aria-label="已删除资料排序">/);
+  for (const [value, label] of TRASH_DOC_SORTS) {
+    assert.match(html, new RegExp(`<option value="${value}"${value === "title_desc" ? " selected" : ""}>${label}</option>`));
+  }
+  assert.match(html, /共 501 篇/);
+  assert.match(html, /仅显示前 500 篇/);
+  assert.match(html, /<td>电压偏差<\/td>/);
+
+  const escaped = renderTrashDocsToolbar({ query: '<电压&"', sort: "unknown", total: 0 });
+  assert.match(escaped, /value="&lt;电压&amp;&quot;"/);
+  // 未知排序值回落到默认项，避免下拉框没有选中项。
+  assert.match(escaped, /<option value="deleted_desc" selected>删除时间（新→旧）<\/option>/);
+});
+
+test("搜索命中 0 篇与回收站本来就空是两种空状态", () => {
+  const filtered = render(makeState({ total: 0, query: "不存在" }), "docs");
+  assert.match(filtered, /没有匹配的已删除资料/);
+  assert.match(filtered, /data-action="trash-docs-clear-query">清除搜索/);
+  assert.match(filtered, /data-trash-query value="不存在"/);
+  assert.match(filtered, /共 0 篇/);
+  assert.doesNotMatch(filtered, /没有已删除的资料/);
+
+  const empty = render(makeState({ total: 0, query: "" }), "docs");
+  assert.match(empty, /没有已删除的资料/);
+  assert.doesNotMatch(empty, /没有匹配的已删除资料/);
+  assert.doesNotMatch(empty, /trash-docs-clear-query/);
+
+  // 只有空白搜索词也按“未搜索”处理。
+  const blank = render(makeState({ total: 0, query: "   " }), "docs");
+  assert.match(blank, /没有已删除的资料/);
 });
 
 test("移动来源的行渲染撤销移动而不是恢复，勾选与彻底删除仍保留", () => {
@@ -370,7 +419,7 @@ test("trashSelectionToggleAll 补齐当前列表，再点取消本列表并保�
   assert.equal(trashSelectionAllSelected([], []), false);
 });
 
-test("批量工具条：同库可彻底删除，跨库禁用并说明原因", () => {
+test("批量工具条：跨库选择同样可彻底删除，不再展示同库限制提示", () => {
   const same = renderTrashBulk({
     selected: [{ kb: "标准", id: "d1" }, { kb: "标准", id: "d2" }],
     fmtNumber,
@@ -378,15 +427,26 @@ test("批量工具条：同库可彻底删除，跨库禁用并说明原因", ()
   assert.match(same, /已选 2 篇/);
   assert.match(same, /data-action="trash-docs-restore-selected">恢复所选/);
   assert.match(same, /data-action="trash-docs-purge-selected">彻底删除所选/);
-  assert.doesNotMatch(same, new RegExp(MULTI_KB_PURGE_HINT));
   assert.match(same, /data-action="trash-doc-clear">取消选择/);
 
   const mixed = renderTrashBulk({
     selected: [{ kb: "标准", id: "d1" }, { kb: "乙库", id: "d2" }],
     fmtNumber,
   });
-  assert.match(mixed, new RegExp(`data-action="trash-docs-purge-selected" disabled>彻底删除所选`));
-  assert.match(mixed, new RegExp(MULTI_KB_PURGE_HINT));
+  assert.match(mixed, /data-action="trash-docs-purge-selected">彻底删除所选/);
+  assert.doesNotMatch(mixed, /彻底删除一次只能处理同一个库的资料/);
+  assert.equal((mixed.match(/disabled/g) ?? []).length, 0);
+
+  // 完整页面同样把跨库选择交给批量工具条，按钮不禁用。
+  const page = render(makeState({
+    docs: [deletedDoc("标准", "d1"), deletedDoc("乙库", "d2")],
+    selectedDocs: [
+      { kb: "标准", id: "d1", title: "资料 d1" },
+      { kb: "乙库", id: "d2", title: "资料 d2" },
+    ],
+  }), "docs");
+  assert.match(page, /data-action="trash-docs-purge-selected">彻底删除所选/);
+  assert.match(page, /已选 2 篇/);
 
   assert.equal(renderTrashBulk({ selected: [], fmtNumber }), "");
 });
@@ -438,19 +498,22 @@ test("purgeDocsConfirmBody 支持清空本库（只有 total）与零篇", () =>
   assert.match(single, /· 唯一一篇\n共 1 篇/);
 });
 
-test("trashPurgeTarget 拒绝空选择与跨库选择", () => {
+test("trashPurgeTarget 只拒绝空选择；跨库选择允许并返回全部条目", () => {
   assert.deepEqual(trashPurgeTarget([]), {
     ok: false,
     kb: "",
     entries: [],
     reason: "请先选择要彻底删除的资料",
   });
+
   const mixed = trashPurgeTarget([
     { kb: "标准", id: "d1", title: "A" },
     { kb: "乙库", id: "d2", title: "B" },
   ]);
-  assert.equal(mixed.ok, false);
-  assert.equal(mixed.reason, MULTI_KB_PURGE_HINT);
+  assert.equal(mixed.ok, true);
+  assert.equal(mixed.kb, "");
+  assert.deepEqual(mixed.entries.map((entry) => `${entry.kb}/${entry.id}`), ["标准/d1", "乙库/d2"]);
+  assert.equal(mixed.reason, "");
 
   const same = trashPurgeTarget([
     { kb: "标准", id: "d1", title: "A" },
@@ -460,6 +523,31 @@ test("trashPurgeTarget 拒绝空选择与跨库选择", () => {
   assert.equal(same.kb, "标准");
   assert.deepEqual(same.entries.map((entry) => entry.id), ["d1", "d2"]);
   assert.equal(same.reason, "");
+});
+
+test("trashPurgePhrase 与跨库确认正文：库名:标题、最多 10 条、篇数/库数与警告", () => {
+  assert.equal(trashPurgePhrase(3), "彻底删除 3 篇");
+  assert.equal(trashPurgePhrase("2"), "彻底删除 2 篇");
+  assert.equal(trashPurgePhrase(-1), "彻底删除 0 篇");
+  assert.equal(trashPurgePhrase("bad"), "彻底删除 0 篇");
+
+  const items = Array.from({ length: 12 }, (_, index) => ({
+    kb: index % 2 === 0 ? "标准" : "乙库",
+    id: `d${index + 1}`,
+    title: `资料 ${index + 1}`,
+  }));
+  const body = renderTrashPurgeBody(items);
+  assert.match(body, /^标准：资料 1\n乙库：资料 2\n/);
+  assert.match(body, /标准：资料 9/);
+  assert.match(body, /…等 12 篇/);
+  assert.doesNotMatch(body, /资料 11/);
+  assert.match(body, /共 12 篇，来自 2 个库/);
+  assert.match(body, new RegExp(TRASH_PURGE_WARNING));
+  assert.match(body, /共 12 篇，来自 2 个库\n\n彻底删除会移除原件/);
+
+  const single = renderTrashPurgeBody([{ kb: "标准", id: "d1", title: "" }]);
+  assert.match(single, /^标准：d1\n共 1 篇，来自 1 个库/);
+  assert.match(single, new RegExp(TRASH_PURGE_WARNING));
 });
 
 // ---------------------------------------------------------------------------
