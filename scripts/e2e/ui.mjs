@@ -173,6 +173,12 @@ export class TestContext {
     this.page = page;
     this.helpers = createPageHelpers(page, this.token);
     this.helpers.baseUrl = this.baseUrl;
+    // 全新 DSH_HOME 的 token 只在根入口接受一次，先打开根页面让浏览器保存会话，
+    // 否则直接访问 /kb/ 会停在授权页导致首个用例超时。
+    if (this.token) {
+      await page.goto(withToken(`${this.baseUrl}/`, this.token), { waitUntil: "domcontentloaded" });
+      await page.waitForTimeout(500);
+    }
     this.pages.push(page);
     return page;
   }
