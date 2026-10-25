@@ -8,17 +8,17 @@
 
 | 工具 | 作用 |
 | --- | --- |
-| `kb_import` | 导入文件或目录（.docx / .doc 自动转换 / .pptx / .xlsx / .xlsm / .pdf / .md / .txt / .epub / .mobi / .azw3，扫描版 PDF 自动逐页 OCR 中文，自动识别文字层损坏页并只对问题页 OCR，文字层双栏页自动重排；Word OMML 公式转 LaTeX；Excel 按工作表转 Markdown 表格；.txt 自动识别 UTF-8/UTF-16/GBK；MOBI/AZW3 自动经 Calibre 转 EPUB）。旧版 .doc/.ppt 与 MOBI/AZW3 一律在后台任务中转换；正在导入中的同名文档自动跳过。**导入前自动查重**：同库重合跳过、跨库重合默认跳过并报告（见下文） |
+| `kb_import` | 导入文件或目录（.docx / .doc 自动转换 / .pptx / .xlsx / .xlsm / .pdf / .md / .txt / .epub / .mobi / .azw3，扫描版 PDF 自动逐页 OCR 中文，自动识别文字层损坏页并只对问题页 OCR，文字层双栏页自动重排；Word OMML 公式转 LaTeX；Excel 按工作表转 Markdown 表格；.txt 自动识别 UTF-8/UTF-16/GBK；MOBI/AZW3 自动经 Calibre 转 EPUB）。旧版 .doc/.ppt 与 MOBI/AZW3 一律在后台任务中转换；正在导入中的同名文档自动跳过。**导入前自动查重**：同库重合跳过、跨库重合默认跳过并报告（见下文）；标准/书籍正文/封面优先，其他资料只用文件名 |
 | `kb_reparse` | 从库内 `sources/` 重新解析文档（无需重新上传），用于 OCR/解析器升级后刷新旧管线产物；`doc` 单个、`all=true` 批量，支持 `forceOcr`、`forceOcrPages`/`skipOcrPages`、后台任务 |
 | `kb_list` | 列出知识库 / 知识库内文档与状态（旧管线/已修订/文字层损坏/OCR 低置信会标注），每条带一行摘要与标签；省略 `kb` 时只列本会话范围内的库；默认最多 50 条，支持 `limit/offset/query/status/kind` 分页过滤（`kind=note` 只看笔记、`kind=source` 只看资料）；本库有维护规范时会提示 |
-| `kb_query` | 全文检索（ripgrep 正则，中文短语直接搜；标准号自动兼容 GBT=GB/T=GB_T=GB∕T 与年份分隔符变体）；按标题/标题行/命中密度/更新时间排序，每文档默认 5 条；`kb="*"` 跨库检索；限定模式下省略 `kb` 检索范围内全部库；命中项带 part、页码与笔记类型 |
-| `kb_read` | 按分块精读、读大纲、读整篇；大纲条目带页码/部分，读取时返回页码范围；支持虚拟页 `doc="schema"`（维护规范）、`doc="index"`（内容索引）、`doc="log"`（操作日志），按 part 分页读取 |
+| `kb_query` | 全文检索（纯文本优先 FTS5/BM25 条款索引，正则/索引不可用时回退 ripgrep；中文短语直接搜；标准号自动兼容 GBT=GB/T=GB_T=GB∕T 与年份分隔符变体）；按标题/标题行/命中密度/更新时间排序，每文档默认 5 条；`kb="*"` 跨库检索；限定模式下省略 `kb` 检索范围内全部库；命中项带 part、页码、条款与笔记类型；返回结构化 `sources`（含深链）供界面引用 |
+| `kb_read` | 按分块精读、读大纲、读整篇；大纲条目带页码/部分，读取时返回页码范围与结构化 `sources`；支持虚拟页 `doc="schema"`（维护规范）、`doc="index"`（内容索引）、`doc="log"`（操作日志），按 part 分页读取 |
 | `kb_view` | 查看原始页面图片（PDF 按页渲染；Word/PPT/EPUB/MOBI 提取内嵌图）——公式、原理图、电路图专用 |
 | `kb_edit` | 精确替换修订（持续修改完善）；`doc="schema"` 可修订该库维护规范（index/log 自动维护，不能编辑） |
 | `kb_describe` | 给文档写一行摘要与标签（编目）：摘要会显示在 `kb_list` 与 `index.md`，重解析/重导入不会覆盖模型写的摘要；存量文档可 `all=true` + `auto=true` 批量回填缺失摘要（抽取式，不递增版本号，`limit` 分批） |
 | `kb_retitle` | 修正标题：单篇传 `doc`（默认按 `cleanTitle` 去掉站点域名、`GB_T`、序号、span 残留等噪声），批量传 `all=true`（默认 `dryRun=true` 只预览，确认后 `dryRun=false` 应用）；会重建合并版首行标题、保留历史、版本+1 |
 | `kb_trust` | 标注来源可信度：`high`（已发布现行标准、正式教材）/ `medium`（企业文件、培训资料、报批稿）/ `low`（草案、征求意见稿、已废止标准）/ `unknown`（清除）；支持单篇、`docs` 列表、`all=true` + `query`/`stage` 过滤（批量默认 dryRun）。检索会优先高可信、标注低可信并提醒用户 |
-| `kb_lint` | 机械体检：导入失败、旧管线、文字层损坏/OCR 低置信、内容重复、同标准号同期同阶段重复、同号多版本、未编目、笔记无来源、续/修订版提示、无入链笔记、临时/锁文件（`~$*`、`.~lock.*`、`Thumbs.db`/`desktop.ini`/`.DS_Store`）、缺 schema；输出分组问题与建议动作（`kb_reparse`/`kb_describe`/`kb_remove`/`kb_edit`）；限定模式下省略 `kb` 逐库体检 |
+| `kb_lint` | 机械体检：导入失败、旧管线、文字层损坏/OCR 低置信、内容重复、同标准号同期同阶段重复、同号多版本、正文完整性/文件名与封面不一致、未编目、笔记无来源、续/修订版提示、无入链笔记、临时/锁文件（`~$*`、`.~lock.*`、`Thumbs.db`/`desktop.ini`/`.DS_Store`）、缺 schema；输出分组问题与建议动作（`kb_reparse`/`kb_describe`/`kb_remove`/`kb_edit`）；限定模式下省略 `kb` 逐库体检 |
 | `kb_edit_batch` | 批量精确修订（事务语义）：一次提交 1–50 条 `{doc, old_string, new_string, replaceAll?}`，**先全部校验再写入**；任一条失败整批不改并回滚已写分块；`dryRun=true` 只校验。适合“一次改 10–15 页”的跨文档维护；同一文档一批只允许一条编辑 |
 | `kb_snapshot` | 库级快照：把 `kb.json`、`schema/index/log`、派生 `markdown/`（可选 `sources/`）打包到知识库 `snapshots/`，用于批量编辑/重解析前留档；`list=true` 列出已有快照 |
 | `kb_add_note` | 写入编译页/笔记（单篇上限 2MB）：`kind=summary/entity/concept/topic/note`、`tags`、`sources`（docId#页码 或 [[标题]]）；**同一标题再次调用=更新同一篇**（版本+1、保留历史），不要用「续」「修订版」另起新页 |
@@ -169,7 +169,7 @@ exports/                   导出产物
     `test/e2e/.artifacts`（目录以 `.` 开头，workflow 用 `include-hidden-files: true` 才会收集）。
 - 全新 CI profile 没有历史会话/模型凭据：胶囊用例自动 **skip** 并说明原因；工作台/回收站/搜索排序/移动/重试/预览用例
   照常执行，其余失败仍会让 job 红。
-- 本地有真实 profile 与凭据时 7 项全跑；CI 为核心 5 项通过 + 胶囊 skip（Office 可选预览在无转换引擎时也会 skip）。
+- 本地有真实 profile 与凭据时跑完整套件（当前 11 项；来源面板在 CLI 0.1.x 会 skip）；CI 为核心用例通过 + 胶囊/来源面板按宿主 skip（Office 可选预览在无转换引擎时也会 skip）。
 - E2E 宿主兼容两种 profile 布局：优先 profile 自带 `node_modules`，否则使用 `profiles/node_modules` 共享目录；
   全新 CI profile 缺 `pnpm-lock.yaml` / `pnpm-workspace.yaml` 时跳过，不再启动失败。
 
@@ -179,6 +179,75 @@ exports/                   导出产物
 - 跨库批量彻底删除仍逐篇调用 `removeDoc`，不是多库事务；单篇失败保留在 `failed` 里，需要人工重试。
 - E2E 胶囊用例在全新 profile（无历史会话/模型凭据）自动 skip，CI 不覆盖胶囊交互。
 - Chromium 下载在部分网络/CDN 不可用；E2E 套件优先 WebKit，只装 WebKit 也能跑。
+
+## 0.26.0 资料元数据、摄取规范化与引用溯源
+
+**人工编目与标签筛选**：工作台资料弹窗可直接编辑**标题、摘要与标签**，保存走
+`PATCH /kb/api/kbs/:name/docs/:id/metadata`，服务端把 `summarySource` 标为 `manual`；
+人工标题写 `titleSource=manual`，重新导入/重解析也不会被自动标题覆盖。人工摘要不会被
+重新导入/重解析降级（优先级 manual > model > auto）。资料页新增标签下拉与
+行内标签按钮，支持 `GET /docs?tag=` 筛选和 `facets.tags` 计数。
+
+**摄取元数据**：导入时保存 `rawTitle/canonicalTitle/standardNo/Year/Part/Stage`、
+`sourceHash`、`textHash`、`contentIntegrity`、`trust` 启发式与 `trustSource`。
+标准/书籍允许**正文/封面优先**：文件名写 `GB`、封面写 `GB/T` 时按封面处理；但必须同时比较
+正文完整性，封面完好、正文缺失（`cover-only/partial`）不会被当成完整版本。
+其他资料（通知、台账、图纸、普通 md/txt/note）只用文件名/标题，不做正文优先。
+
+**去重**：`sourceHash + 标准号+年+部分+阶段 + textHash + 标题 key`；同号不同阶段
+（征求意见/报批/发布）不算重复。完整版不会被残缺版挡住，残缺版也不会覆盖完整版。
+旧库可用回填脚本补齐身份元数据：
+
+```bash
+node scripts/backfill-doc-meta.mjs --root ~/.dsh/knowledge --kb 标准 --dry-run --hash --std --content --text
+node scripts/backfill-doc-meta.mjs --root ~/.dsh/knowledge --kb 标准 --apply --hash --std --content --text
+node scripts/backfill-doc-meta.mjs --root ~/.dsh/knowledge --kb 标准 --dry-run --retitle
+node scripts/backfill-doc-meta.mjs --root ~/.dsh/knowledge --kb 标准 --dry-run --normalize-titles
+node scripts/tag-doc-library.mjs --root ~/.dsh/knowledge --kb 标准 --dry-run
+```
+
+`--retitle` 只改明显格式噪声；`--normalize-titles` 处理书名号/括注标准号/裸标准号标题，
+按「标准号 名称」重排，保留报批稿/征求意见稿并清理“上传版(1)”等后缀。
+真实「标准」库（911 篇）已回填：911 篇 ready、904 篇有来源；结构化标准号 850 篇、
+正文元数据 860 篇，标题规范化覆盖全部 904 篇来源文档，**裸标准号 0**（本轮从 254 篇补到 0；含 84 篇封面/首屏、47 篇 PDF 字号、40 篇英文 IEC/EN 封面，其余按系列/已知名称补全）；
+历史 11 组同号重复未保留项和 1 篇发布通知已由用户彻底删除；当前 0 篇 deleted。
+回填前清单备份在 `/tmp/kb-standard-20261025-before-font-titles.json`。`DL/T587—2025+…` 已规范为
+`DL/T 587-2025 继电保护和安全自动装置运行管理规程`；`GB 19963.2-2024` 与
+`GB/T 19963.2-2024 …` 已用同族完整标题补全，便于人眼区分。
+
+**标签**：`scripts/tag-doc-library.mjs` 按标准前缀标「国家标准/行业标准/企业标准/团体标准/
+国际标准」，按标题/摘要标「电能质量/继电保护/变压器/变电试验/绝缘/新能源/直流输电」；
+只增人工标签、移除已不匹配的旧自动标签。当前 911 篇中 871 篇有标签，分布：
+国家标准 367、行业标准 252、电能质量 233、企业标准 138、国际标准 92、新能源 103、
+变压器 49、绝缘 38、继电保护 30、直流输电 16、变电试验 7、团体标准 5。
+仍无标签的 40 篇主要是 7 篇笔记、索引/手册、附件/通知，以及暂无标准号的草案；
+不强行归类。
+
+**上传状态**：上传弹窗明确区分「上传中（文件尚未解析）」「已上传，待解析」「解析中」
+「解析完成」「上传失败」「上传完成，解析未完成」「没有新资料（全部重复）」；
+逐文件显示重复跳过原因，不再把「文件已上传」显示成解析完成。
+
+**引用与溯源**：`kb_query`/`kb_read` 返回结构化 `sources`
+（`kb/docId/title/page/clause/snippet/deepLink`），并通过 `presentationMeta` 交给客户端；
+笔记自身的依据来源仍在 `noteSources`（0.26 起 `sources` 专指“本轮引用来源”）；
+聊天里 `kb_query`/`kb_read` 工具行与每轮末尾的「本轮来源」面板可点击：
+来源卡片在聊天内直接打开原件预览弹窗，不再跳转整个工作台：PDF/Office 通过服务端
+`viewer.html` iframe 连续滚动全部页面；viewer 自带页码/缩放/旋转/下载/打印工具栏。
+`kb_query` 自动携带查询词；`kb_read` 新增 `keywords` 参数，模型应把用户问题提炼的
+2–6 个检索词传入。viewer 只高亮这些**检索关键词**（不把条款号当关键词），并滚到命中最多的一页；
+页码不再作为强依赖。
+WebKit 原生 PDF iframe 会下载/空白，故用逐页 PNG 组成的 HTML viewer；文本/图片/笔记走
+`source?inline=1` 或 `content`。旧文档的 `parts/index.json` 页码已回填 748 篇；
+`kb_read` 引用页按条款在分块中的实际页计算，旧 source meta 也会按 clause 反查页码和关键词。
+工作台本身仍支持 `/kb/?kb=&doc=&page=&clause=` 深链，PDF/Office 预览会追加
+`#page=N&zoom=page-fit`。本轮**不做** assistant 正文角标：宿主当前没有非破坏性的
+assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown 渲染。
+
+**检索（#4，FTS5 核心已接入）**：条款级分块 + SQLite FTS5/BM25、中文分词、token 预算与引用格式、
+向量/rerank 评估门槛见 `docs/specs/2026-10-25-kb-metadata-ingest-sources-design.md` §8；
+`lib/clauses.js`（条款切分）与 `lib/fts-index.js`（SQLite FTS5/BM25）已实现，并接入
+`kb_query`：纯文本查询优先 FTS5，正则/索引不可用/无命中回退 ripgrep。当前真实「标准」库
+索引 911 篇、14.95 万条款、224MB；增量同步、后台构建和 60 条机制评测已完成：Doc/Page Recall@10 95%，MRR 0.761，p95 47.5ms；见 `docs/specs/2026-10-25-retrieval-eval.md`。
 
 ## 0.24.0 回收站治理
 
@@ -905,27 +974,34 @@ npm run test:e2e      # 自托管临时 DSH web 宿主并跑完整流程
 - 覆盖流程：已删除资料的搜索（库名/标题/类型/来源文件）、六种排序、筛选空态与清除搜索、跨库多选；
   回收站两个页签（恢复、逐字输入库名彻底删除、批量删除、清空本库）、
   跨库移动 → 撤销 → 再次移动 → 目标副本删除后的墓碑恢复、失败资料重试、
-  PDF/笔记/Office 原件预览、输入框胶囊（清空/全选/应用/外部点击关闭）。
+  PDF/笔记/Office 原件预览、资料编目（摘要/标签保存 + 标签筛选）、上传解析状态与重复跳过、
+  `?doc=&page=` 深链预览/缺资料 toast、输入框胶囊（清空/全选/应用/外部点击关闭）。
+  来源面板用例会写一个合成 session 并挂到临时 workspace；CLI 0.1.x 的历史投影不把
+  `tool/result` 关联到工具行（工具行停在 running），该用例会 **skip** 并说明原因；
+  桌面/支持 tool result meta 的宿主会继续断言工具行来源、本轮来源与深链跳转。
+  工具行/面板渲染与降级本身由 `test/sources-client.test.mjs` 覆盖。
 - 浏览器优先 WebKit（DSH 桌面端引擎），失败回退 Chromium；失败产物写到
   `test/e2e/.artifacts/<timestamp>/`（截图、URL、console 错误、宿主日志），
   正常也会打印本次产物目录。
 - 可选环境变量：`DSH_E2E_URL` 复用已启动宿主（要求其 `kbRoot` 在临时目录，或显式
   `DSH_E2E_ALLOW_MUTATE=1`）、`DSH_E2E_TOKEN`（全新 DSH_HOME 首次启动会要求 token，
   E2E 会从宿主日志自动读取；外部宿主可用此变量显式提供）、`DSH_E2E_BROWSER=chromium`、
-  `DSH_E2E_KEEP=1`、`DSH_E2E_PYTHON=<python>`。
+  `DSH_E2E_KEEP=1`、`DSH_E2E_PYTHON=<python>`、`DSH_E2E_ONLY=<用例名子串>`（只跑匹配用例，
+  调试用）、`DSH_E2E_DSH_BIN=<dsh 路径>`、`DSH_E2E_SOURCE_PROFILE=<profile>`。
 - 浏览器下载走 Playwright CDN；受限网络可用 `PLAYWRIGHT_DOWNLOAD_HOST=<mirror>`
   后重试 `npm run e2e:install`。Chromium 下载失败（CDN/镜像缺对应版本）不影响套件，
   可只装 WebKit：`npx playwright install webkit`（套件本来就优先 WebKit）。
 - **CI（GitHub Actions，`.github/workflows/ci.yml`）**：
   - `unit` job（ubuntu）：`npm ci` → `typecheck` → `npm test`，每次 push/PR 自动跑。
   - `e2e` job：**手动 `workflow_dispatch` + `run_e2e=true`**，在自托管
-    `[self-hosted, macOS, dsh-profile]` runner 上跑完整 7 项（runner 需有 `dsh`、
-    已登录的 web profile/工作区会话，胶囊不会 skip）；失败上传 `test/e2e/.artifacts`。
+    `[self-hosted, macOS, dsh-profile]` runner 上跑完整套件（runner 需有 `dsh`、
+    已登录的 web profile/工作区会话，胶囊不会 skip）；来源面板是否执行取决于宿主是否
+    保留 tool result meta。失败上传 `test/e2e/.artifacts`。
   - 为什么不在 GitHub 托管 runner 上自动跑：全新 `DSH_HOME` 首次启动会要求一次性
     token，浏览器/同源 API 的认证链路在托管 runner 上不稳定，且没有历史会话/模型凭据
-    （胶囊无法挂载）。自托管 runner 复用已配置 profile，结果与本地一致（7/7）。
-  - 本地有凭据 profile 7 项全通过（7/7）；E2E 中的回收站用例会真实执行一次
-    **跨库批量彻底删除**。
+    （胶囊无法挂载）。自托管 runner 复用已配置 profile，结果与本地一致（当前 10/10 + 1 skip）。
+  - 本地有凭据 profile 当前 **10 passed / 0 failed / 1 skipped**（skip = CLI 0.1.x
+    未投影 tool result meta），E2E 中的回收站用例会真实执行一次**跨库批量彻底删除**。
 
 ## 使用示例（对 harness 直接说）
 

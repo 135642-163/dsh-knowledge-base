@@ -101,11 +101,11 @@ test("bulk retitle defaults to dry-run and only applies when asked", async () =>
   const { root, kbDir, tools, exec } = await setup();
   try {
     for (const [name, title] of [
-      ["a.md", "GB_T 11032-2020 电压_www.upbz.net"],
+      ["a.md", "电能质量资料_www.upbz.net"],
       ["b.md", "2. 供电营业规则"],
     ]) {
       const src = join(root, name);
-      await writeFile(src, "# 内容\n\n测试正文。\n", "utf8");
+      await writeFile(src, `# 内容\n\n${name} 测试正文。\n`, "utf8");
       await tools.get("kb_import").execute({ path: src, kb: "测试库", title }, exec);
     }
     const preview = await tools.get("kb_retitle").execute(
@@ -116,7 +116,7 @@ test("bulk retitle defaults to dry-run and only applies when asked", async () =>
     assert.equal(preview.applied, 0);
     assert.equal(preview.total, 2);
     let manifest = await readManifest(kbDir);
-    assert.ok(manifest.docs.some((d) => d.title === "GB_T 11032-2020 电压_www.upbz.net"));
+    assert.ok(manifest.docs.some((d) => d.title === "电能质量资料_www.upbz.net"));
 
     const applied = await tools.get("kb_retitle").execute(
       { kb: "测试库", all: true, dryRun: false },
@@ -125,7 +125,7 @@ test("bulk retitle defaults to dry-run and only applies when asked", async () =>
     assert.equal(applied.dryRun, false);
     assert.equal(applied.applied, 2);
     manifest = await readManifest(kbDir);
-    assert.ok(manifest.docs.some((d) => d.title === "GB/T 11032-2020 电压"));
+    assert.ok(manifest.docs.some((d) => d.title === "电能质量资料"));
     assert.ok(manifest.docs.some((d) => d.title === "供电营业规则"));
     assert.equal(manifest.docs.every((d) => d.status === "ready" && d.version >= 2), true);
   } finally {

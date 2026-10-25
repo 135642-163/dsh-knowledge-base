@@ -46,6 +46,7 @@ export function attachDocsControls({ app, state, load, timers = { set: setTimeou
   const setTimer = timers?.set ?? setTimeout;
   const clearTimer = timers?.clear ?? clearTimeout;
   const search = app?.querySelector?.("[data-docs-query]") ?? null;
+  const tagSelect = app?.querySelector?.("[data-docs-tag]") ?? null;
   const sizeSelects = collect(app, "[data-docs-size]");
   const jumpButtons = collect(app, "[data-docs-jump]");
   const pageInputs = collect(app, "[data-docs-page]");
@@ -71,6 +72,7 @@ export function attachDocsControls({ app, state, load, timers = { set: setTimeou
   function requestSnapshot() {
     return {
       query: String(state.docs.query ?? ""),
+      tag: String(state.docs.tag ?? ""),
       offset: Math.max(0, Math.round(Number(state.docs.offset) || 0)),
       limit: docsPageSize(state.docs.limit),
     };
@@ -153,6 +155,16 @@ export function attachDocsControls({ app, state, load, timers = { set: setTimeou
       if (event?.key !== "Enter" || composing || event?.isComposing) return;
       event.preventDefault?.();
       void applyQuery();
+    });
+  }
+
+  if (tagSelect) {
+    on(tagSelect, "change", () => {
+      cancelTimer();
+      state.docs.tag = String(tagSelect.value ?? "").trim();
+      state.docs.offset = 0;
+      state.docs.selected = [];
+      void requestDocs();
     });
   }
 

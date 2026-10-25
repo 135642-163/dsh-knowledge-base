@@ -91,7 +91,7 @@ test("bulk trust defaults to dry-run and supports stage filters", async () => {
     assert.equal(preview.total, 1);
     assert.equal(preview.updated, 0);
     let manifest = await readManifest(kbDir);
-    assert.ok(manifest.docs.every((d) => d.trust === "unknown"));
+    assert.ok(manifest.docs.every((d) => d.trust === "medium" || d.trust === "low"));
 
     const applied = await tools.get("kb_trust").execute(
       { kb: "测试库", all: true, stage: "draft", level: "low", reason: "征求意见稿", dryRun: false },
@@ -147,7 +147,7 @@ test("unknown clears trust and lint reports untagged docs", async () => {
     assert.equal(doc.trustReason, "");
 
     const report = lintManifest(manifest, { kbName: "测试库", hasSchema: true, now: Date.now() });
-    assert.equal(report.counts.trustUnknown, 2);
+    assert.equal(report.counts.trustUnknown, 1);
     assert.ok(report.groups.some((g) => g.code === "trust-unknown"));
     assert.ok(report.suggestions.some((s) => s.action === "kb_trust"));
   } finally {

@@ -12,7 +12,7 @@
  * 环境变量：DSH_E2E_URL / DSH_E2E_BROWSER=webkit|chromium / DSH_E2E_KEEP=1 /
  *          DSH_E2E_VERBOSE=1 / DSH_E2E_PYTHON=<python>。
  */
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -27,12 +27,19 @@ import * as retry from "./tests/retry.mjs";
 import * as preview from "./tests/preview.mjs";
 import * as previewOffice from "./tests/preview-office.mjs";
 import * as capsule from "./tests/capsule.mjs";
+import * as metadata from "./tests/metadata.mjs";
+import * as deepLink from "./tests/deep-link.mjs";
+import * as upload from "./tests/upload.mjs";
+import * as sources from "./tests/sources.mjs";
+import { attachSessionToWorkspace, detachSessionFromWorkspace, writeSourcesSession } from "./session-fixture.mjs";
 
 const root = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const runStartedAt = new Date();
 const stamp = runStartedAt.toISOString().replace(/[:.]/g, "-").slice(0, 19);
 const artifactsDir = join(root, "test", "e2e", ".artifacts", stamp);
-const tests = [trashSearchSort, trash, move, retry, preview, previewOffice, capsule];
+const allTests = [trashSearchSort, trash, move, retry, preview, previewOffice, metadata, upload, deepLink, sources, capsule];
+const only = String(process.env.DSH_E2E_ONLY ?? "").trim();
+const tests = only ? allTests.filter((test) => String(test.name ?? "").includes(only)) : allTests;
 
 const logLines = [];
 let activeHost = null;
@@ -72,10 +79,31 @@ async function main() {
   let browser = null;
   let setupError = null;
   const results = [];
-  const seedInfo = { office: null };
+  const seedInfo = { office: null, syntheticSessionId: null, syntheticSessionDir: null };
 
   try {
-    host = await startHost({ artifactsDir, log });
+    host = await startHost({
+      artifactsDir,
+      log,
+      beforeStart: async ({ home, profileDir }) => {
+        let sessionCwd = profileDir;
+        try {
+          const store = JSON.parse(await readFile(join(home, "storages", "workspace.json"), "utf8"));
+          const paths = Object.values(store?.tables?.workspaces ?? {})
+            .map((workspace) => String(workspace?.path ?? ""))
+            .filter(Boolean);
+          sessionCwd = paths.find((path) => path.includes("知识库")) ?? paths[0] ?? profileDir;
+        } catch {
+          /* 没有 workspace 存储时退回 profileDir */
+        }
+        const fixture = await writeSourcesSession({ home, profileDir, cwd: sessionCwd });
+        const workspace = await attachSessionToWorkspace({ home, sessionId: fixture.sessionId, cwd: sessionCwd });
+        log(`synthetic sources session: ${fixture.sessionId}`);
+        seedInfo.syntheticSessionId = fixture.sessionId;
+        seedInfo.syntheticSessionDir = fixture.dir;
+        seedInfo.workspaceSnapshot = workspace;
+      },
+    });
     activeHost = host;
     assertExternalRootIsSafe(host, process.env);
 
@@ -100,6 +128,7 @@ async function main() {
         log,
       });
       ctx.office = seedInfo.office;
+      ctx.syntheticSessionId = seedInfo.syntheticSessionId ?? null;
       const started = Date.now();
       try {
         log(`RUN  ${test.name}`);
@@ -166,6 +195,8 @@ async function main() {
     activeBrowser = null;
     if (host) await host.stop().catch(() => {});
     activeHost = null;
+    if (seedInfo.syntheticSessionDir) await rm(seedInfo.syntheticSessionDir, { recursive: true, force: true }).catch(() => {});
+    await detachSessionFromWorkspace(seedInfo.workspaceSnapshot, seedInfo.syntheticSessionId).catch(() => {});
     if (host?.keep) log(`kept temp paths: profile=${host.profileDir} kbRoot=${host.kbRoot}`);
 
     const counts = [
@@ -198,6 +229,8 @@ async function shutdown(signal) {
   console.log(`\n[E2E] ${signal}: cleaning up temporary host …`);
   try { await activeBrowser?.browser?.close(); } catch { /* ignore */ }
   try { await activeHost?.stop(); } catch { /* ignore */ }
+  try { if (seedInfo.syntheticSessionDir) await rm(seedInfo.syntheticSessionDir, { recursive: true, force: true }); } catch { /* ignore */ }
+  try { await detachSessionFromWorkspace(seedInfo.workspaceSnapshot, seedInfo.syntheticSessionId); } catch { /* ignore */ }
   process.exit(signal === "SIGINT" ? 130 : 143);
 }
 

@@ -144,13 +144,22 @@ test("apply registers sidebar and composer slots", () => {
     },
   };
   mod.apply(ctx);
-  assert.deepEqual(calls.inject, ["sidebar.footer.action", "conversation.input.left"]);
-  assert.deepEqual(calls.register.map((row) => [row.decl.name, row.decl.id, row.decl.order]), [
+  assert.deepEqual(calls.inject, [
+    "sidebar.footer.action",
+    "conversation.input.left",
+    "tool.call.toolview",
+    "conversation.chat.turnTail",
+    "conversation.chat.assistant-actions",
+  ]);
+  assert.deepEqual(calls.register.map((row) => [row.decl.name, row.decl.id ?? row.decl.key, row.decl.order]), [
     ["sidebar.footer.action", "kb-workbench", 10],
     ["conversation.input.left", "kb-scope", 20],
+    ["tool.call.toolview", "kb_query", undefined],
+    ["tool.call.toolview", "kb_read", undefined],
+    ["conversation.chat.turnTail", "kb-sources", 30],
+    ["conversation.chat.assistant-actions", "kb-citations", 20],
   ]);
-  assert.equal(typeof calls.register[0].component, "function");
-  assert.equal(typeof calls.register[1].component, "function");
+  assert.equal(calls.register.every((row) => typeof row.component === "function"), true);
 });
 
 test("entry renders the label in wide mode and opens on click", () => {

@@ -146,6 +146,16 @@ button { font: inherit; color: inherit; }
 .trust-dot-mark { font-size: 8px; line-height: 1; }
 .card-foot { display: flex; gap: 6px; align-items: center; font-size: 11px; flex-wrap: wrap; }
 .tag { background: var(--panel-2); border-radius: 999px; padding: 1px 7px; }
+.doc-tags { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: 6px; vertical-align: middle; }
+.doc-tags .tag { border: 1px solid transparent; color: var(--muted); font: inherit; font-size: 11px; cursor: pointer; }
+.doc-tags .tag:hover, .doc-tags .tag.active { border-color: var(--accent); color: var(--accent); }
+.tag-more { color: var(--muted); font-size: 11px; padding: 1px 4px; }
+.docs-tag-filter { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
+.docs-tag-filter select { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; color: inherit; font: inherit; max-width: 180px; }
+.docs-tag-active { border: 1px solid var(--accent); color: var(--accent); background: transparent; cursor: pointer; font: inherit; }
+.doc-meta-editor { margin-top: 12px; padding-top: 8px; border-top: 1px dashed var(--line); }
+.doc-meta-editor textarea { min-height: 72px; resize: vertical; }
+.meta-actions { justify-content: flex-end; margin-top: 0; }
 .empty-card { background: var(--panel); border: 1px dashed var(--line); border-radius: var(--radius); padding: 60px 20px; text-align: center; }
 .empty-icon { color: var(--accent); display: flex; justify-content: center; margin-bottom: 8px; }
 .detail-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 14px; }

@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ComponentType } from "react";
 import { chipLabel, selectionPayload } from "../../lib/scope-view.js";
+import { dedupeSources, sourceHref, sourceLabel } from "../../ui/sources-view.js";
+import type { KbSource } from "../../ui/sources-view.js";
 
 export const inject = ["slots"];
 
@@ -16,7 +18,13 @@ type KbSummary = {
   mergedInto?: string | null;
 };
 type ScopeSlotProps = { sessionId?: string };
-type SlotDeclaration = { name: string; id: string; order?: number };
+type SlotDeclaration = {
+  name: string;
+  id?: string;
+  key?: string;
+  order?: number;
+  select?: (owner: any) => unknown;
+};
 type SlotContext = {
   slots: {
     inject(name: string, callback: () => void): void;
@@ -72,6 +80,41 @@ const CSS = `
 .dsh-kb-scope-primary:disabled { opacity: 0.5; cursor: default; }
 .dsh-kb-scope-link { margin-left: auto; color: var(--dsw-alias-label-secondary, #666) !important; }
 .dsh-kb-scope-toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 1300; padding: 6px 12px; border-radius: 999px; background: rgba(0, 0, 0, 0.78); color: #fff; font-size: 12px; }
+.dsh-kb-source-row { display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; border: 1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.28)); border-radius: 8px; margin: 4px 0; font-size: 12px; }
+.dsh-kb-source-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.dsh-kb-source-title { font-weight: 600; color: var(--dsw-alias-label-primary, #111); }
+.dsh-kb-source-meta { color: var(--dsw-alias-label-tertiary, #888); font-size: 11px; }
+.dsh-kb-source-toggle { border: 0; border-radius: 6px; background: transparent; color: var(--dsw-alias-state-business-primary, #4d6bfe); font: inherit; font-size: 12px; cursor: pointer; padding: 2px 6px; }
+.dsh-kb-source-toggle:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.dsh-kb-sources-list { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
+.dsh-kb-source-link { display: flex; flex-direction: column; gap: 2px; padding: 5px 7px; border-radius: 7px; color: var(--dsw-alias-label-primary, #111); text-decoration: none; }
+.dsh-kb-source-link:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.dsh-kb-source-snippet { color: var(--dsw-alias-label-secondary, #666); font-size: 11px; line-height: 1.4; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.dsh-kb-source-card { display: flex; flex-direction: column; gap: 3px; padding: 7px 9px; border: 1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.22)); border-radius: 8px; color: var(--dsw-alias-label-primary, #111); text-decoration: none; background: var(--dsw-alias-bg-layer-2, rgba(127,127,127,.04)); }
+.dsh-kb-source-card:hover { border-color: var(--dsw-alias-state-business-primary, #4d6bfe); }
+.dsh-kb-source-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.dsh-kb-source-card-title { font-weight: 600; line-height: 1.4; }
+.dsh-kb-source-card-page { flex: none; color: var(--dsw-alias-state-business-primary, #4d6bfe); font-size: 11px; white-space: nowrap; }
+.dsh-kb-source-card-open { color: var(--dsw-alias-label-tertiary, #888); font-size: 11px; }
+.dsh-kb-citation-action { border: 0; background: transparent; color: var(--dsw-alias-label-tertiary, #777); font: inherit; font-size: 12px; cursor: pointer; padding: 2px 6px; border-radius: 6px; }
+.dsh-kb-citation-action:hover { color: var(--dsw-alias-state-business-primary, #4d6bfe); background: var(--dsw-alias-interactive-bg-hover); }
+.dsh-kb-source-flash { outline: 2px solid var(--dsw-alias-state-business-primary, #4d6bfe); outline-offset: 2px; }
+.dsh-kb-preview-backdrop { position: fixed; inset: 0; z-index: 1400; display: grid; place-items: center; padding: 18px; background: rgba(0,0,0,.55); }
+.dsh-kb-preview { display: flex; flex-direction: column; width: min(1120px, 94vw); height: min(90vh, 900px); overflow: hidden; border: 1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.28)); border-radius: 12px; background: var(--dsw-alias-bg-layer-1, #fff); color: var(--dsw-alias-label-primary, #111); box-shadow: 0 24px 80px rgba(0,0,0,.4); }
+.dsh-kb-preview-head { flex: none; display: flex; align-items: center; gap: 10px; min-height: 42px; padding: 0 8px 0 14px; border-bottom: 1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.28)); font-size: 13px; font-weight: 600; }
+.dsh-kb-preview-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dsh-kb-preview-page { flex: none; color: var(--dsw-alias-state-business-primary, #4d6bfe); font-size: 12px; font-weight: 400; }
+.dsh-kb-preview-close { flex: none; width: 30px; height: 30px; border: 0; border-radius: 8px; background: transparent; color: var(--dsw-alias-label-secondary, #666); font-size: 20px; cursor: pointer; }
+.dsh-kb-preview-close:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary, #111); }
+.dsh-kb-preview-body { flex: 1; min-height: 0; display: grid; place-items: center; background: var(--dsw-alias-bg-layer-2, #f5f5f7); color: var(--dsw-alias-label-secondary, #666); font-size: 13px; }
+.dsh-kb-preview-frame { width: 100%; height: 100%; border: 0; background: #fff; }
+.dsh-kb-preview-pages { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 100%; padding: 8px; box-sizing: border-box; }
+.dsh-kb-preview-image { flex: 1; min-height: 0; max-width: 100%; object-fit: contain; background: #fff; box-shadow: 0 2px 12px rgba(0,0,0,.12); }
+.dsh-kb-preview-nav { flex: none; display: flex; align-items: center; gap: 10px; color: var(--dsw-alias-label-secondary, #666); font-size: 12px; }
+.dsh-kb-preview-nav button { border: 1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.28)); border-radius: 6px; background: transparent; color: inherit; font: inherit; padding: 3px 9px; cursor: pointer; }
+.dsh-kb-preview-nav button:disabled { opacity: .4; cursor: default; }
+.dsh-kb-sources-turn { border: 1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.28)); border-radius: 10px; padding: 8px 10px; margin: 8px 0; background: var(--dsw-alias-bg-layer-1, #fff); color: var(--dsw-alias-label-primary, #111); font-size: 12px; }
+.dsh-kb-sources-turn h4 { margin: 0 0 6px; font-size: 12px; font-weight: 600; }
 `;
 
 function ensureCss() {
@@ -549,6 +592,254 @@ export function KbScopeCapsule({ sessionId }: ScopeSlotProps) {
   );
 }
 
+type ToolSourceRowProps = {
+  toolName?: string;
+  phase?: "preparing" | "start" | "result";
+  block?: { meta?: { sources?: unknown }; isError?: boolean } | null;
+  useDisclosure?: () => { expanded: boolean; toggle: () => void };
+};
+
+type TurnTailProps = {
+  turn?: unknown;
+  seq?: number;
+  matched?: { turn?: unknown };
+  useChat?: (selector: (snapshot: any) => unknown) => unknown;
+};
+
+function sourcesOfBlock(block: ToolSourceRowProps["block"]): KbSource[] {
+  const raw = block?.meta?.sources;
+  if (!Array.isArray(raw)) return [];
+  return dedupeSources(raw as KbSource[], 20);
+}
+
+function sourcePreviewBase(source: KbSource) {
+  return `${API}/kbs/${encodeURIComponent(source.kb ?? "")}/docs/${encodeURIComponent(source.docId)}`;
+}
+
+function sourcePageLabel(source: KbSource): string {
+  const page = source.page;
+  return typeof page === "number" && Number.isInteger(page) && page > 0 ? `第 ${page} 页` : "";
+}
+
+async function sourcePreviewData(source: KbSource): Promise<{
+  mode: "viewer" | "frame";
+  url: string;
+  page?: number;
+  totalPages?: number;
+}> {
+  const base = sourcePreviewBase(source);
+  let detail: any = null;
+  try {
+    const response = await fetch(`${base}`, { headers: { accept: "application/json" } });
+    if (response.ok) detail = await response.json();
+  } catch {
+    detail = null;
+  }
+  const name = String(detail?.sourceFile ?? "").toLowerCase();
+  const office = /\.(docx?|pptx?|xlsx?)$/.test(name);
+  const pdf = /\.pdf$/.test(name);
+  const note = detail?.type === "note";
+  let page = source.page;
+  // 兼容修复前产生的旧 source meta：当时没有 page；按 clause 反查一次页码。
+  if (!(typeof page === "number" && page > 0) && source.clause) {
+    try {
+      const response = await fetch(`${base}/page?clause=${encodeURIComponent(source.clause)}`, { headers: { accept: "application/json" } });
+      if (response.ok) {
+        const body = await response.json();
+        if (Number.isInteger(body?.page) && body.page > 0) page = body.page;
+      }
+    } catch {
+      /* 保留无页码回退 */
+    }
+  }
+  if (pdf || office) {
+    // 原生 iframe PDF 在 WebKit 会下载/空白；用服务端全页 HTML viewer iframe，
+    // 连续滚动完整文档，并在加载后滚到引用页。
+    const current = typeof page === "number" && page > 0 ? page : 1;
+    const total = Number(detail?.pages) > 0 ? Number(detail.pages) : undefined;
+    const params = new URLSearchParams({ page: String(current) });
+    // 只高亮检索关键词；绝不要把条款号当关键词（旧 source meta 可能只有 clause）。
+    const terms = Array.isArray(source.keywords) ? source.keywords.filter((word) => word && word !== source.clause) : [];
+    if (terms.length > 0) params.set("q", terms.join("|"));
+    return {
+      mode: "viewer",
+      url: `${base}/viewer.html?${params.toString()}`,
+      page: current,
+      ...(total ? { totalPages: total } : {}),
+    };
+  }
+  let url = note ? `${base}/content` : `${base}/source?inline=1`;
+  if (typeof page === "number" && Number.isInteger(page) && page > 0) url += `#page=${page}&zoom=page-fit`;
+  return { mode: "frame", url, ...(typeof page === "number" ? { page } : {}) };
+}
+
+function SourceLinks({ sources, limit = 12 }: { sources: KbSource[]; limit?: number }) {
+  const [preview, setPreview] = useState<{ source: KbSource; mode?: "viewer" | "frame"; url?: string; page?: number; totalPages?: number; error?: string } | null>(null);
+  const open = async (event: any, source: KbSource) => {
+    event?.preventDefault?.();
+    setPreview({ source });
+    try {
+      const data = await sourcePreviewData(source);
+      setPreview({ source, ...data });
+    } catch (error) {
+      setPreview({ source, error: String((error as any)?.message ?? error) });
+    }
+  };
+  return (
+    <div className="dsh-kb-sources-list">
+      {sources.slice(0, limit).map((source) => {
+        const page = source.page;
+        const parts = [source.clause ? `第 ${source.clause} 条` : "", typeof page === "number" && Number.isInteger(page) && page > 0 ? `第 ${page} 页` : "", source.kb ? `来自 ${source.kb}` : ""].filter(Boolean);
+        return (
+          <a
+            key={`${source.kb ?? ""}-${source.docId}-${source.page ?? ""}-${source.clause ?? ""}`}
+            className="dsh-kb-source-link dsh-kb-source-card"
+            href={sourceHref(source)}
+            target="_blank"
+            rel="noreferrer"
+            title={source.snippet ?? ""}
+            onClick={(event) => void open(event, source)}
+          >
+            <span className="dsh-kb-source-card-head">
+              <span className="dsh-kb-source-card-title">{source.title ?? source.docId}</span>
+              {parts.length > 0 ? <span className="dsh-kb-source-card-page">{parts.join(" · ")}</span> : null}
+            </span>
+            {source.snippet ? <span className="dsh-kb-source-snippet">{source.snippet}</span> : null}
+            <span className="dsh-kb-source-card-open">打开原件并定位 →</span>
+          </a>
+        );
+      })}
+      {preview && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              className="dsh-kb-preview-backdrop"
+              onMouseDown={(event) => { if (event.target === event.currentTarget) setPreview(null); }}
+            >
+              <div className="dsh-kb-preview" role="dialog" aria-modal="true" aria-label="原件预览">
+                <div className="dsh-kb-preview-head">
+                  <span className="dsh-kb-preview-title">{preview.source.title ?? preview.source.docId}</span>
+                  {preview.mode === "viewer" ? <span className="dsh-kb-preview-page">关键词高亮</span> : null}
+                  {preview.mode !== "viewer" && sourcePageLabel(preview.source) ? <span className="dsh-kb-preview-page">{sourcePageLabel(preview.source)}</span> : null}
+                  <button type="button" className="dsh-kb-preview-close" aria-label="关闭预览" onClick={() => setPreview(null)}>×</button>
+                </div>
+                <div className="dsh-kb-preview-body">
+                  {preview.error ? <div>原件预览失败：{preview.error}</div>
+                    : preview.url ? <iframe className="dsh-kb-preview-frame" src={preview.url} title="原件预览" />
+                    : <div>正在打开原件…</div>}
+                </div>
+              </div>
+            </div>,
+            document.body
+          )
+        : null}
+    </div>
+  );
+}
+
+function KbCitationAction({ messageId }: { messageId?: string }) {
+  const onClick = (event: any) => {
+    if (typeof document === "undefined") return;
+    const button = event?.currentTarget as HTMLElement | null;
+    const root = button?.closest?.("[data-turn-tail]") ?? document;
+    const target = root.querySelector?.(".dsh-kb-sources-turn")
+      ?? root.querySelector?.(".dsh-kb-source-row")
+      ?? document.querySelector?.(".dsh-kb-sources-turn")
+      ?? document.querySelector?.(".dsh-kb-source-row");
+    if (!target) return;
+    target.scrollIntoView?.({ behavior: "smooth", block: "center" });
+    target.classList?.add("dsh-kb-source-flash");
+    setTimeout(() => target.classList?.remove("dsh-kb-source-flash"), 1800);
+  };
+  return (
+    <button type="button" className="dsh-kb-citation-action" title={messageId ? "查看本条回答引用的资料" : "查看引用资料"} onClick={onClick}>
+      引用
+    </button>
+  );
+}
+
+function KbToolSourcesRow({ toolName, phase, block, useDisclosure }: ToolSourceRowProps) {
+  const title = toolName === "kb_read" ? "知识库精读" : "知识库检索";
+  const sources = sourcesOfBlock(block);
+  const disclosure = useDisclosure?.();
+  const expanded = disclosure?.expanded ?? false;
+  if (phase === "result" && block?.isError) {
+    return <div className="dsh-kb-source-row"><span className="dsh-kb-source-title">{title}失败</span></div>;
+  }
+  if (phase !== "result") {
+    return (
+      <div className="dsh-kb-source-row">
+        <span className="dsh-kb-source-title">{title}</span>
+        <span className="dsh-kb-source-meta">正在检索…</span>
+      </div>
+    );
+  }
+  if (sources.length === 0) {
+    return (
+      <div className="dsh-kb-source-row">
+        <span className="dsh-kb-source-title">{title}</span>
+        <span className="dsh-kb-source-meta">没有可定位的来源</span>
+      </div>
+    );
+  }
+  return (
+    <div className="dsh-kb-source-row">
+      <div className="dsh-kb-source-head">
+        <span className="dsh-kb-source-title">{title}</span>
+        <span className="dsh-kb-source-meta">{sources.length} 个来源</span>
+        <button
+          type="button"
+          className="dsh-kb-source-toggle"
+          aria-expanded={expanded}
+          onClick={() => disclosure?.toggle()}
+        >
+          {expanded ? "收起来源" : "展开来源"}
+        </button>
+      </div>
+      {expanded ? <SourceLinks sources={sources} /> : <SourceLinks sources={sources} limit={3} />}
+    </div>
+  );
+}
+
+function collectNodeSources(block: any, out: KbSource[]) {
+  if (!block || typeof block !== "object") return;
+  if (Array.isArray(block.meta?.sources)) out.push(...block.meta.sources);
+  if (Array.isArray(block.subCalls)) {
+    for (const child of block.subCalls) collectNodeSources(child, out);
+  }
+}
+
+function turnNumberOf(turn: unknown): number | null {
+  if (typeof turn === "number" && Number.isFinite(turn)) return turn;
+  if (turn && typeof turn === "object") {
+    const value = (turn as any).turn ?? (turn as any).number ?? (turn as any).index;
+    return typeof value === "number" && Number.isFinite(value) ? value : null;
+  }
+  return null;
+}
+
+function KbSourcesTurnPanel({ turn, matched, useChat }: TurnTailProps) {
+  const nodes: any = useChat ? useChat((snapshot: any) => snapshot?.nodes) : null;
+  const turnNo = turnNumberOf(turn ?? matched?.turn);
+  const collected: KbSource[] = [];
+  if (nodes && typeof nodes.values === "function") {
+    for (const node of nodes.values()) {
+      if (!node || node.kind !== "tool-call") continue;
+      const location = node.location;
+      const nodeTurn = location?.turn?.turn ?? location?.turn ?? null;
+      if (turnNo !== null && nodeTurn !== null && nodeTurn !== turnNo) continue;
+      collectNodeSources(node.data?.root, collected);
+    }
+  }
+  const sources = dedupeSources(collected, 20);
+  if (sources.length === 0) return null;
+  return (
+    <section className="dsh-kb-sources-turn" aria-label="本轮来源">
+      <h4>本轮来源（{sources.length}）</h4>
+      <SourceLinks sources={sources} limit={12} />
+    </section>
+  );
+}
+
 export function apply(ctx: SlotContext) {
   ensureCss();
   ctx.slots.inject("sidebar.footer.action", () => {
@@ -556,5 +847,27 @@ export function apply(ctx: SlotContext) {
   });
   ctx.slots.inject("conversation.input.left", () => {
     ctx.slots.register({ name: "conversation.input.left", id: "kb-scope", order: 20 }, KbScopeCapsule);
+  });
+  ctx.slots.inject("tool.call.toolview", () => {
+    ctx.slots.register({ name: "tool.call.toolview", key: "kb_query" }, KbToolSourcesRow);
+    ctx.slots.register({ name: "tool.call.toolview", key: "kb_read" }, KbToolSourcesRow);
+  });
+  ctx.slots.inject("conversation.chat.turnTail", () => {
+    // DSH 不同版本把 turnTail 声明为 list 或 chain：chain 需要 select；
+    // 先按 chain 注册，失败再按 list 注册。
+    try {
+      ctx.slots.register(
+        { name: "conversation.chat.turnTail", id: "kb-sources", order: 30, select: (owner: any) => owner },
+        KbSourcesTurnPanel
+      );
+    } catch {
+      ctx.slots.register(
+        { name: "conversation.chat.turnTail", id: "kb-sources", order: 30 },
+        KbSourcesTurnPanel
+      );
+    }
+  });
+  ctx.slots.inject("conversation.chat.assistant-actions", () => {
+    ctx.slots.register({ name: "conversation.chat.assistant-actions", id: "kb-citations", order: 20 }, KbCitationAction);
   });
 }

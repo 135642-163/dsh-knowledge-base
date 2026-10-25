@@ -233,6 +233,8 @@ function docs(kb, state, { fmtNumber, icons }) {
   const name = kb?.name ?? "";
   const page = state.docs;
   const query = String(page.query ?? "");
+  const tag = String(page.tag ?? "");
+  const facets = page.facets && Array.isArray(page.facets.tags) ? page.facets : { tags: [] };
   // 输入框显示的是正在输入的词；结果属于真正应用过的 appliedQuery。
   // 两者不一致时（防抖/请求在途）不把旧结果说成新词的结果。
   const appliedQuery = String(page.appliedQuery ?? query);
@@ -249,7 +251,7 @@ function docs(kb, state, { fmtNumber, icons }) {
   // 「已删除」筛选只在有回收站内容时出现；正在看回收站时即使刚清空也保留入口。
   const showDeleted = deleted > 0 || status === "deleted";
   const toolbar = (extra) => docsToolbar({
-    query, limit, status, deleted, showDeleted, busy, fmtNumber, icons, ...extra,
+    query, limit, status, tag, facets, deleted, showDeleted, busy, fmtNumber, icons, ...extra,
   });
   if (searching) {
     // 防抖/请求在途：只保留工具栏与「正在搜索…」，不把上一轮的行/表格挂在新搜索词下。
@@ -261,24 +263,28 @@ function docs(kb, state, { fmtNumber, icons }) {
     `;
   }
   if (total === 0) {
-    if (query.trim() === "" && status === "") {
+    if (query.trim() === "" && status === "" && tag === "") {
       return `<div class="state">还没有资料，点右上角的「上传资料」开始导入。</div>`;
     }
     // 有搜索词/状态筛选但无结果：保留工具栏（可继续改词、清除或切回全部），不显示分页。
     const filtered = query.trim() !== "";
+    const tagged = tag !== "";
     const message = filtered
       ? "没有匹配的资料"
-      : status === "failed"
-        ? "没有导入失败的资料"
-        : status === "deleted"
-          ? "没有已删除的资料"
-          : "没有导入中的资料";
+      : tagged
+        ? "没有匹配该标签的资料"
+        : status === "failed"
+          ? "没有导入失败的资料"
+          : status === "deleted"
+            ? "没有已删除的资料"
+            : "没有导入中的资料";
     return `
       <div class="panel">
         ${toolbar({ total, pages: 1, pageNo: 1, showPager: false })}
         <div class="state docs-empty">
           <p>${message}</p>
           ${filtered ? `<button class="btn" data-docs-clear>清除搜索</button>` : ""}
+          ${tagged && !filtered ? `<button class="btn" data-action="docs-tag-clear">清除标签</button>` : ""}
         </div>
       </div>
     `;
@@ -316,6 +322,7 @@ function docs(kb, state, { fmtNumber, icons }) {
                   ${doc.deleted ? `<span class="badge">已删除</span>` : ""}
                   ${doc.status === "failed" ? `<span class="badge warn">失败</span>` : ""}
                   ${doc.movedTo?.kb ? `<span class="badge accent">已移至 ${escapeHtml(doc.movedTo.kb)}</span>` : ""}
+                  ${renderDocTags(doc, tag)}
                 </td>
                 <td class="muted">${escapeHtml(doc.type ?? "")}</td>
                 <td class="muted">${fmtNumber(doc.pages)}</td>
@@ -332,6 +339,15 @@ function docs(kb, state, { fmtNumber, icons }) {
   `;
 }
 
+function renderDocTags(doc, activeTag) {
+  const tags = Array.isArray(doc?.tags) ? doc.tags : [];
+  if (tags.length === 0) return "";
+  const shown = tags.slice(0, 3);
+  const rest = tags.length - shown.length;
+  return `<span class="doc-tags">${shown.map((tag) => `
+    <button type="button" class="tag${tag === activeTag ? " active" : ""}" data-action="docs-tag" data-tag="${escapeAttr(tag)}" aria-pressed="${tag === activeTag}">#${escapeHtml(tag)}</button>`).join("")}${rest > 0 ? `<span class="tag-more" title="${escapeAttr(tags.join("、"))}">+${rest}</span>` : ""}</span>`;
+}
+
 function docActionButton(doc, action, { busy, retrying }) {
   const label = action === "retry" && retrying ? "重试中…" : DOC_ACTION_LABELS[action];
   const disabled = busy || (action === "retry" && retrying);
@@ -340,8 +356,9 @@ function docActionButton(doc, action, { busy, retrying }) {
   return `<button type="button" class="btn mini${danger}" data-action="docs-${action}" data-id="${escapeAttr(doc.id)}"${target}${disabled ? " disabled" : ""}>${label}</button>`;
 }
 
-function docsToolbar({ query, limit, status, deleted = 0, showDeleted = false, busy = false, total, pages, pageNo, fmtNumber, icons, showPager }) {
+function docsToolbar({ query, limit, status, tag = "", facets = { tags: [] }, deleted = 0, showDeleted = false, busy = false, total, pages, pageNo, fmtNumber, icons, showPager }) {
   const statuses = DOCS_STATUSES.filter((value) => value !== "deleted" || showDeleted);
+  const tags = Array.isArray(facets?.tags) ? facets.tags : [];
   return `
     <div class="table-tools">
       <div class="segmented docs-status" role="group" aria-label="按状态筛选资料">
@@ -356,6 +373,15 @@ function docsToolbar({ query, limit, status, deleted = 0, showDeleted = false, b
         ${icons?.search ?? ""}
         <input type="search" data-docs-query value="${escapeAttr(query)}" placeholder="搜索标题、摘要或标签…" aria-label="搜索资料" autocomplete="off" />
       </label>
+      ${tags.length > 0 || tag !== "" ? `
+        <label class="docs-tag-filter">
+          <span class="muted">标签</span>
+          <select data-docs-tag aria-label="按标签筛选">
+            <option value="">全部标签</option>
+            ${tags.map((item) => `<option value="${escapeAttr(item.name)}"${item.name === tag ? " selected" : ""}>${escapeHtml(item.name)}（${fmtNumber(item.count)}）</option>`).join("")}
+          </select>
+        </label>` : ""}
+      ${tag !== "" ? `<button type="button" class="badge accent docs-tag-active" data-action="docs-tag-clear" title="清除标签筛选">标签：${escapeHtml(tag)} ×</button>` : ""}
       <label class="docs-size">
         <span class="muted">每页</span>
         <select data-docs-size aria-label="每页条数">

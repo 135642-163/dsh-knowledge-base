@@ -4,6 +4,7 @@ import { hrefForKb, hrefForOverview, hrefForTrash, parseHash } from "./router.js
 import { renderOverview } from "./views/overview.js";
 import { docsPageSize, docsStatus, renderDetail, selectionToggle, selectionToggleOne } from "./views/detail.js";
 import { attachDocsControls, createRequestGate } from "./docs-controls.js";
+import { parsePreviewDeepLink } from "./deep-link.js";
 import {
   purgeDocsConfirmBody, renderTrash, renderTrashPurgeBody, trashDocKey, trashPurgePhrase,
   trashPurgeTarget, trashRestoreTargets, trashSelectionToggleAll, trashSelectionToggleOne,
@@ -30,7 +31,7 @@ const state = {
   detailError: "",
   docs: {
     items: [], total: 0, offset: 0, limit: 50, query: "", appliedQuery: "", status: "",
-    selected: [], busy: false, retrying: [],
+    tag: "", facets: { tags: [] }, selected: [], busy: false, retrying: [],
   },
   notes: { items: [], total: 0, loading: false, error: "" },
   trash: {
@@ -113,7 +114,7 @@ async function loadDetail(name, tab) {
     state.detail = null;
     state.docs = {
       items: [], total: 0, offset: 0, limit: 50, query: "", appliedQuery: "", status: "",
-      selected: [], busy: false, retrying: [],
+      tag: "", facets: { tags: [] }, selected: [], busy: false, retrying: [],
     };
     state.notes = { items: [], total: 0, loading: false, error: "" };
   }
@@ -136,12 +137,14 @@ async function loadDetail(name, tab) {
       // 切换筛选，否则旧结果不能挂在新条件下面（本轮直接丢弃，等下一次请求）。
       const query = String(state.docs.query ?? "");
       const status = docsStatus(state.docs.status);
+      const tag = String(state.docs.tag ?? "");
       const limit = docsPageSize(state.docs.limit);
       const offset = Math.max(0, Math.round(Number(state.docs.offset) || 0));
-      const docs = await api.docs(name, { offset, limit, query, status });
+      const docs = await api.docs(name, { offset, limit, query, status, tag });
       if (!detailGate.isCurrent(token)
         || query !== String(state.docs.query ?? "")
-        || status !== docsStatus(state.docs.status)) return { stale: true };
+        || status !== docsStatus(state.docs.status)
+        || tag !== String(state.docs.tag ?? "")) return { stale: true };
       state.docs = {
         ...state.docs,
         items: docs.docs,
@@ -151,6 +154,8 @@ async function loadDetail(name, tab) {
         query,
         appliedQuery: query,
         status,
+        tag,
+        facets: docs.facets ?? { tags: [] },
       };
     } else if (tab === "notes") {
       // 笔记列表与资料共用同一份详情 token：切库/切 tab 后在途响应自动作废。
@@ -980,6 +985,29 @@ function bind() {
         return;
       }
       await loadDetail(current.name, "docs");
+    } else if (action === "docs-tag") {
+      const current = route();
+      if (current.page !== "detail") return;
+      const tag = String(target.dataset.tag ?? "").trim();
+      state.docs.tag = tag;
+      state.docs.selected = [];
+      state.docs.offset = 0;
+      if (current.tab !== "docs") {
+        window.location.hash = hrefForKb(current.name, "docs");
+        return;
+      }
+      await loadDetail(current.name, "docs");
+    } else if (action === "docs-tag-clear") {
+      const current = route();
+      if (current.page !== "detail") return;
+      state.docs.tag = "";
+      state.docs.selected = [];
+      state.docs.offset = 0;
+      if (current.tab !== "docs") {
+        window.location.hash = hrefForKb(current.name, "docs");
+        return;
+      }
+      await loadDetail(current.name, "docs");
     } else if (action === "tab") {
       const current = route();
       window.location.hash = hrefForKb(current.name, target.dataset.tab);
@@ -1280,6 +1308,36 @@ function hideToast() {
   if (node) { node.hidden = true; node.className = "toast"; }
 }
 
+/** 深链 ?kb=&doc=&page=&clause=：加载完成后打开预览；失败给 toast，不阻塞工作台。 */
+async function openDeepLinkPreview() {
+  const link = parsePreviewDeepLink(window.location.search);
+  if (!link.docId) return;
+  const kb = link.kb || state.kbs.find((item) => item.mergedInto == null)?.name || "";
+  const clear = () => {
+    const params = new URLSearchParams(window.location.search);
+    params.delete("kb");
+    params.delete("doc");
+    params.delete("page");
+    params.delete("clause");
+    const query = params.toString();
+    window.history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`);
+  };
+  if (!kb) {
+    showToast("资料不存在或已删除", "error");
+    clear();
+    return;
+  }
+  try {
+    const doc = await api.doc(kb, link.docId);
+    if (!doc || doc.deleted) throw new Error("资料不存在或已删除");
+    openPreviewModal({ name: kb, doc, icons, initialPage: link.page });
+    clear();
+  } catch {
+    showToast("资料不存在或已删除", "error");
+    clear();
+  }
+}
+
 function boot() {
   clearStdTimer();
   window.addEventListener("hashchange", () => {
@@ -1303,9 +1361,10 @@ function boot() {
   });
   window.addEventListener("pagehide", () => { clearStdTimer(); });
   const current = route();
-  loadKbs().then(() => {
-    if (current.page === "trash") loadTrash();
-    else if (current.page === "detail") loadDetail(current.name, current.tab);
+  loadKbs().then(async () => {
+    if (current.page === "trash") await loadTrash();
+    else if (current.page === "detail") await loadDetail(current.name, current.tab);
+    await openDeepLinkPreview();
   });
 }
 

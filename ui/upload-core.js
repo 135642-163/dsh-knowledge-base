@@ -105,12 +105,55 @@ export function createQueue(concurrency = 2) {
 const STATUS_LABELS = {
   pending: "等待",
   uploading: "上传中",
-  uploaded: "已上传",
+  uploaded: "已上传，待解析",
+  queued: "等待解析",
+  parsing: "解析中",
+  parsed: "已解析",
   failed: "失败",
   rejected: "已跳过",
-  ok: "成功",
+  ok: "已解析",
   skipped: "跳过",
 };
+
+/** 逐文件状态文案：上传阶段与解析阶段分开，不能把“已上传”说成“已完成”。 */
+export function fileStageLabel(item, phase = "") {
+  const stage = String(item?.stage ?? "");
+  if (stage === "parsing") return "解析中";
+  if (stage === "parsed") return "已解析";
+  if (stage === "skipped") {
+    return item?.reason === "duplicate" || /duplicate|重复/.test(String(item?.reason ?? ""))
+      ? "重复跳过"
+      : "导入中跳过";
+  }
+  if (stage === "failed") return "解析失败";
+  const status = String(item?.status ?? "");
+  if (status === "skipped") {
+    return item?.reason === "duplicate" || /duplicate|重复/.test(String(item?.reason ?? ""))
+      ? "重复跳过"
+      : "导入中跳过";
+  }
+  if (status === "failed" && phase === "uploading") return "上传失败";
+  if (status === "failed") return "解析失败";
+  return statusLabel(status);
+}
+
+/** 顶部阶段标题：明确“上传”与“解析”的边界。 */
+export function uploadPhaseTitle(state = {}) {
+  const phase = String(state.phase ?? "");
+  const kb = state.kb ? ` · ${state.kb}` : "";
+  if (phase === "uploading") return "上传中（文件尚未解析）";
+  if (phase === "starting") return "文件已上传，正在启动解析…";
+  if (phase === "importing") return `解析中${kb}`;
+  if (phase === "done") return `解析完成${kb}`;
+  if (phase === "empty") return "没有新资料（全部重复）";
+  if (phase === "error") {
+    const files = Array.isArray(state.files) ? state.files : [];
+    const uploadFailed = files.some((item) => item.status === "failed" && !item.stage);
+    const uploaded = files.filter((item) => item.status === "uploaded").length;
+    return uploadFailed && uploaded === 0 ? "上传失败" : "上传完成，解析未完成";
+  }
+  return "上传资料";
+}
 
 export function statusLabel(status) {
   return STATUS_LABELS[status] ?? String(status ?? "");
@@ -128,7 +171,7 @@ export function summarizeResults(result) {
 const TRANSITIONS = {
   select: { start: "uploading" },
   uploading: { uploaded: "starting" },
-  starting: { started: "importing", failed: "error" },
+  starting: { started: "importing", empty: "empty", failed: "error" },
   importing: { settled: "done", failed: "error" },
 };
 

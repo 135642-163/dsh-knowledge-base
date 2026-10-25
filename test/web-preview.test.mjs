@@ -568,15 +568,16 @@ test("GET preview.pdf converts once, serves inline PDF and reuses the cache", as
   assert.equal(engine.calls.length, 1, "second request must hit the cache");
 });
 
-test("GET preview.pdf rejects non-Office sources with 415", async () => {
+test("GET preview.pdf serves native PDF sources inline without Office conversion", async () => {
   const { kbRoot } = await setup();
   const engine = injectedConverter();
-  const { res, json } = await call(
+  const { res } = await call(
     { kbRoot, previewEngine: { cliPath: "/injected/cli.js", convert: engine.convert } },
     makeReq({ url: apiUrl("/docs/pdfdoc/preview.pdf") })
   );
-  assert.equal(res.status, 415);
-  assert.equal(json.error.code, "PREVIEW_UNSUPPORTED");
+  assert.equal(res.status, 200);
+  assert.equal(res.headers["content-type"], "application/pdf");
+  assert.match(res.headers["content-disposition"], /^inline; /);
   assert.equal(engine.calls.length, 0);
 });
 

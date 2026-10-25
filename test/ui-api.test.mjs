@@ -198,6 +198,27 @@ test("cancelJob 用 POST 打 /jobs/:id/cancel 并解包 job", async () => {
   assert.equal(calls[0].options.headers["x-kb-ui"], "1");
 });
 
+test("patchDocMetadata 用 PATCH 打 metadata 路径并带 x-kb-ui", async () => {
+  calls.length = 0;
+  await api.patchDocMetadata("标准", "d1", { summary: "人工摘要", tags: ["并网"] });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, "/kb/api/kbs/%E6%A0%87%E5%87%86/docs/d1/metadata");
+  assert.equal(calls[0].options.method, "PATCH");
+  assert.equal(calls[0].options.headers["x-kb-ui"], "1");
+  assert.deepEqual(JSON.parse(calls[0].options.body), { summary: "人工摘要", tags: ["并网"] });
+});
+
+test("docs 把 tag 放进查询串，空 tag 不传", async () => {
+  calls.length = 0;
+  await api.docs("标准", { tag: "并网", offset: 0, limit: 50 });
+  const url = new URL(calls[0].url, "http://dsh.internal");
+  assert.equal(url.searchParams.get("tag"), "并网");
+  calls.length = 0;
+  await api.docs("标准", { tag: "", offset: 0, limit: 50 });
+  const empty = new URL(calls[0].url, "http://dsh.internal");
+  assert.equal(empty.searchParams.has("tag"), false);
+});
+
 test("文档删除/恢复/重试与跨库移动方法：POST + 编码路径 + JSON 体", async () => {
   calls.length = 0;
   await api.deleteDoc("标准", "d1");

@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { importFileInto } from "../lib/pipeline.js";
 import { createProgress, writeProgressFile } from "../lib/progress.js";
 import { readManifest } from "../lib/store.js";
+import { addToDedupIndex, buildDedupIndexFromRoot } from "../lib/dedup-index.js";
 import { refreshIndexIfStale } from "../lib/wiki.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -26,7 +27,7 @@ if (payload.startsWith("@")) {
   await rm(argsFile, { force: true }).catch(() => {});
 }
 const args = JSON.parse(payload);
-const { kbRoot, kb, files = [], config = {}, reportFile, progressFile } = args;
+const { kbRoot, kb, files = [], config = {}, reportFile, progressFile, dedup = null } = args;
 
 if (!kbRoot || !kb || files.length === 0) {
   process.stderr.write("worker: 缺少 kbRoot/kb/files 参数\n");
@@ -35,6 +36,18 @@ if (!kbRoot || !kb || files.length === 0) {
 
 const kbDir = join(kbRoot, kb);
 await mkdir(kbDir, { recursive: true });
+let dedupIndex = null;
+if (dedup) {
+  try {
+    dedupIndex = await buildDedupIndexFromRoot({
+      root: kbRoot,
+      targetKb: kb,
+      kbNames: Array.isArray(dedup.kbNames) ? dedup.kbNames : null,
+    });
+  } catch (error) {
+    process.stderr.write(`worker: 去重索引构建失败（继续导入）: ${String(error?.message ?? error)}\n`);
+  }
+}
 const jobConfig = { ...config, langPath: config.langPath ?? join(pluginRoot, "data", "tessdata") };
 
 const progress = createProgress(files);
@@ -84,6 +97,7 @@ for (let i = 0; i < files.length; i++) {
   const f = files[i];
   const label = `${i + 1}/${files.length}`;
   progress.current = progress.files[i].path;
+  progress.files[i].stage = "parsing";
   await writeProgress();
   try {
     const report = await importFileInto(kbDir, {
@@ -95,14 +109,19 @@ for (let i = 0; i < files.length; i++) {
       ...(f.storedSourcePath !== undefined ? { storedSourcePath: f.storedSourcePath } : {}),
       ...(f.forceReparse ? { forceReparse: true } : {}),
       config: jobConfig,
+      ...(dedup ? { dedupIndex, allowCrossKb: dedup.allowCrossKb === true } : {}),
       onProgress: (msg) => process.stdout.write(`KB:PROGRESS [${label}] ${msg}\n`),
     });
     if (report.skipped === true) {
-      results.push({ title: f.title, docId: report.docId ?? null, status: "skipped" });
-      process.stdout.write(`KB:SKIP [${label}] ${report.title}: 该文档正在导入中，已跳过\n`);
+      const reason = report.reason || "importing";
+      const message = reason === "importing" ? "该文档正在导入中，已跳过" : `重复跳过（${reason}）`;
+      results.push({ title: f.title, docId: report.docId ?? null, status: "skipped", reason });
+      process.stdout.write(`KB:SKIP [${label}] ${report.title}: ${message}\n`);
       progress.done += 1;
       progress.skip += 1;
       progress.files[i].status = "skipped";
+      progress.files[i].stage = "skipped";
+      progress.files[i].reason = reason;
       await writeProgress();
       continue;
     }
@@ -122,6 +141,16 @@ for (let i = 0; i < files.length; i++) {
     progress.done += 1;
     progress.ok += 1;
     progress.files[i].status = "ok";
+    progress.files[i].stage = "parsed";
+    if (dedupIndex) {
+      try {
+        const manifest = await readManifest(kbDir);
+        const doc = (manifest.docs ?? []).find((item) => item.id === report.docId);
+        if (doc) addToDedupIndex(dedupIndex, doc, { kb, dir: kb });
+      } catch {
+        /* 索引更新失败不影响已完成的导入 */
+      }
+    }
     await writeProgress();
   } catch (error) {
     const message = String(error?.message ?? error);
@@ -129,6 +158,7 @@ for (let i = 0; i < files.length; i++) {
     progress.done += 1;
     progress.fail += 1;
     progress.files[i].status = "failed";
+    progress.files[i].stage = "failed";
     progress.files[i].error = scrubProgressError(message, f);
     await writeProgress();
     process.stdout.write(`KB:FAIL [${label}] ${f.title}: ${message}\n`);

@@ -80,9 +80,11 @@ test("note stores kind/tags/sources and backlinks resolve both ways", async () =
     assert.deepEqual(doc.linksOut, [docId]);
 
     const noteRead = await tools.get("kb_read").execute({ kb: "测试库", doc: note.docId, part: 1 }, exec);
+    assert.equal(noteRead.noteSources.length, 1);
+    assert.equal(noteRead.noteSources[0].title, "电能质量资料");
+    assert.equal(noteRead.noteSources[0].page, 2);
     assert.equal(noteRead.sources.length, 1);
-    assert.equal(noteRead.sources[0].title, "电能质量资料");
-    assert.equal(noteRead.sources[0].page, 2);
+    assert.equal(noteRead.sources[0].docId, note.docId);
     const noteText = tools.get("kb_read").output.render({}, noteRead)[0].text;
     assert.match(noteText, /依据来源：电能质量资料（第 2 页）/);
 

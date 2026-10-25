@@ -17,7 +17,7 @@ async function makeKb(root, name, titles, manifestName = name) {
     title,
     type: "text",
     status: "ready",
-    chars: 10,
+    chars: 1200,
     parts: 1,
     version: 1,
   }));

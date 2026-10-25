@@ -89,10 +89,15 @@ test("PUT 落盘保留目录结构并更新 batch.json", async () => {
   assert.equal(res.status, 200);
   assert.equal(json.path, "电气/说明.md");
   assert.ok(json.size > 0);
+  assert.match(json.hash, /^[0-9a-f]{64}$/);
   const stored = await readFile(join(kbRoot, "标准", "import-tmp", "ui-batches", id, "电气", "说明.md"), "utf8");
   assert.equal(stored, "# 说明\n");
   const batch = JSON.parse(await readFile(join(kbRoot, "标准", "import-tmp", "ui-batches", id, "batch.json"), "utf8"));
   assert.deepEqual(batch.files.map((f) => f.path), ["电气/说明.md"]);
+  assert.equal(batch.files[0].hash, json.hash);
+  const files = buildImportFiles(join(kbRoot, "标准"), batch);
+  assert.equal(files[0].sourceHash, json.hash);
+  assert.equal(files[0].rawTitle, "说明");
 });
 
 test("PUT 拒绝路径穿越、反斜杠、非法扩展名、超限与超文件数", async () => {

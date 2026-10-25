@@ -8,7 +8,7 @@
  * localStorage，下次打开该库的上传弹窗时恢复进度）。
  */
 import { api, ApiError } from "../api.js";
-import { classifyFiles, createQueue, formatBytes, nextPhase, statusLabel, summarizeResults } from "../upload-core.js";
+import { classifyFiles, createQueue, fileStageLabel, formatBytes, nextPhase, statusLabel, summarizeResults, uploadPhaseTitle } from "../upload-core.js";
 
 const DIRECTORY_HINT = "暂不支持拖拽文件夹，请用「选择目录」";
 
@@ -170,13 +170,7 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
     const done = state.job?.progress ?? null;
     const result = state.job?.result ?? null;
     const summary = summarizeResults(result);
-    const phaseText = {
-      uploading: "上传中",
-      starting: "正在启动导入",
-      importing: "导入中",
-      done: "导入完成",
-      error: "出错",
-    }[state.phase] ?? state.phase;
+    const phaseText = uploadPhaseTitle(state);
     const failedUploads = state.files.filter((item) => item.status === "failed");
     const duplicates = Array.isArray(result?.duplicates) ? result.duplicates : [];
     const similar = Array.isArray(result?.similar) ? result.similar : [];
@@ -189,7 +183,7 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
       actions.push(`<button type="button" class="btn" data-close>取消上传</button>`);
     } else if (state.phase === "importing") {
       actions.push(`<button type="button" class="btn" data-close>关闭（后台继续导入）</button>`);
-    } else if (state.phase === "done" || state.phase === "error") {
+    } else if (state.phase === "done" || state.phase === "empty" || state.phase === "error") {
       if (state.phase === "error" && state.batchId && !state.jobId && state.batchStatus === "open") {
         actions.push(`<button type="button" class="btn" data-action="retry-import">重试导入</button>`);
       }
@@ -215,7 +209,7 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
           <div class="uprow uprow-progress">
             <span class="upname" title="${escapeAttr(item.path)}">${escapeHtml(item.path)}</span>
             <span class="upbar"><i style="width:${Math.max(0, Math.min(100, Math.round((item.percent ?? 0) * 100)))}%"></i></span>
-            <span class="muted">${escapeHtml(statusLabel(item.status))}${item.error ? `：${escapeHtml(item.error)}` : ""}</span>
+            <span class="muted">${escapeHtml(fileStageLabel(item, state.phase))}${item.error ? `：${escapeHtml(item.error)}` : ""}</span>
           </div>`).join("")}</div>` : ""}
         ${state.phase === "starting" ? `<p class="muted">正在创建导入任务…</p>` : ""}
         ${state.phase === "importing" && done ? `
@@ -223,16 +217,17 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
             <span class="muted">成功 ${done.ok ?? 0} · 失败 ${done.fail ?? 0} · 跳过 ${done.skip ?? 0}</span></div>
           <p class="muted">${escapeHtml(done.current ?? "")}</p>
           <div class="uplist">${(done.files ?? []).map((item) => `
-            <div class="uprow"><span class="upname" title="${escapeAttr(item.path)}">${escapeHtml(item.path)}</span><span class="muted">${escapeHtml(statusLabel(item.status))}</span></div>`).join("")}</div>
+            <div class="uprow"><span class="upname" title="${escapeAttr(item.path)}">${escapeHtml(item.path)}</span><span class="muted">${escapeHtml(fileStageLabel(item, state.phase))}</span></div>`).join("")}</div>
           <p class="muted">可关闭窗口，导入会在后台继续；重新打开会自动恢复进度。</p>` : ""}
         ${state.phase === "importing" && !done ? `<p class="muted">正在读取进度…</p>` : ""}
-        ${(state.phase === "done" || state.phase === "error") ? `
+        ${(state.phase === "done" || state.phase === "empty" || state.phase === "error") ? `
+          ${state.phase === "empty" ? `<p class="muted">没有新资料：全部与库内/其它知识库重合，未启动解析。</p>` : ""}
           ${summary.files.length > 0 ? `
             <div class="progress-line"><strong>成功 ${summary.ok} · 失败 ${summary.failed} · 跳过 ${summary.skipped}</strong></div>
             <div class="uplist">${summary.files.map((item) => `
               <div class="uprow"><span class="upname" title="${escapeAttr(item.path ?? item.title ?? "")}">${escapeHtml(item.title || item.path || "")}</span>
-                <span class="muted">${escapeHtml(statusLabel(item.status))}${item.status === "skipped" ? "（文档正在导入中）" : ""}${item.error ? `：${escapeHtml(item.error)}` : ""}</span></div>`).join("")}</div>` : ""}
-          ${summary.skipped > 0 ? `<p class="muted">${summary.skipped} 个文件因文档正在导入中已跳过，可稍后重试。</p>` : ""}
+                <span class="muted">${escapeHtml(fileStageLabel(item, state.phase))}${item.reason === "duplicate" ? "（与库内资料重复）" : item.status === "skipped" ? "（文档正在导入中）" : ""}${item.error ? `：${escapeHtml(item.error)}` : ""}</span></div>`).join("")}</div>` : ""}
+          ${summary.skipped > 0 ? `<p class="muted">${summary.skipped} 个文件被跳过${state.job?.result?.duplicates?.length ? `（重合 ${state.job.result.duplicates.length} 个）` : "，可稍后重试"}。</p>` : ""}
           ${failedUploads.length > 0 ? `
             <p class="form-error">${failedUploads.length} 个文件上传失败，可用「${retryLabel}」重新上传。</p>
             <div class="uplist">${failedUploads.map((item) => `
@@ -446,7 +441,7 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
     state.pollRetry = 0;
     if (!imported.jobId) {
       state.importStarted = false;
-      state.phase = "done";
+      state.phase = imported.status === "empty" ? "empty" : "done";
       state.job = {
         result: {
           ok: 0,
@@ -543,7 +538,9 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
         render();
         onFinished?.();
       } else {
-        state.phase = nextPhase(state.phase, "settled");
+        const summary = summarizeResults(job.result);
+        const allSkipped = summary.total > 0 && summary.ok === 0 && summary.failed === 0 && summary.skipped > 0;
+        state.phase = allSkipped ? "empty" : nextPhase(state.phase, "settled");
         state.resumeJob = false;
         forget();
         render();

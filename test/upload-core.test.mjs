@@ -3,7 +3,10 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { classifyFiles, createQueue, extOf, formatBytes, nextPhase, relPathFor, statusLabel, summarizeResults } from "../ui/upload-core.js";
+import {
+  classifyFiles, createQueue, extOf, fileStageLabel, formatBytes, nextPhase, relPathFor, statusLabel,
+  summarizeResults, uploadPhaseTitle,
+} from "../ui/upload-core.js";
 
 const LIMITS = { maxBytes: 10, maxFiles: 2, extensions: [".md", ".pdf"] };
 
@@ -92,7 +95,8 @@ test("createQueue 单个任务失败不阻塞后续任务并排空", async () =>
 
 test("statusLabel 与 summarizeResults", () => {
   assert.equal(statusLabel("pending"), "等待");
-  assert.equal(statusLabel("ok"), "成功");
+  assert.equal(statusLabel("ok"), "已解析");
+  assert.equal(statusLabel("uploaded"), "已上传，待解析");
   const summary = summarizeResults({ ok: 1, fail: 1, skip: 1, files: [{ status: "ok" }, { status: "failed" }, { status: "skipped" }] });
   assert.equal(summary.total, 3);
   assert.equal(summary.failed, 1);
@@ -105,10 +109,25 @@ test("formatBytes 人类可读", () => {
   assert.equal(formatBytes(2 * 1024 ** 3), "2.0 GB");
 });
 
+test("阶段文案区分上传/解析/全重复/失败", () => {
+  assert.equal(fileStageLabel({ status: "uploaded" }, "starting"), "已上传，待解析");
+  assert.equal(fileStageLabel({ status: "ok", stage: "parsing" }, "importing"), "解析中");
+  assert.equal(fileStageLabel({ status: "skipped", reason: "duplicate" }, "done"), "重复跳过");
+  assert.equal(fileStageLabel({ status: "failed", stage: "failed" }, "importing"), "解析失败");
+  assert.equal(fileStageLabel({ status: "failed" }, "uploading"), "上传失败");
+  assert.equal(uploadPhaseTitle({ phase: "uploading" }), "上传中（文件尚未解析）");
+  assert.equal(uploadPhaseTitle({ phase: "starting" }), "文件已上传，正在启动解析…");
+  assert.equal(uploadPhaseTitle({ phase: "empty" }), "没有新资料（全部重复）");
+  assert.equal(uploadPhaseTitle({ phase: "done", kb: "标准" }), "解析完成 · 标准");
+  assert.equal(uploadPhaseTitle({ phase: "error", files: [{ status: "failed" }] }), "上传失败");
+  assert.equal(uploadPhaseTitle({ phase: "error", files: [{ status: "uploaded" }] }), "上传完成，解析未完成");
+});
+
 test("nextPhase 覆盖上传/导入状态机", () => {
   assert.equal(nextPhase("select", "start"), "uploading");
   assert.equal(nextPhase("uploading", "uploaded"), "starting");
   assert.equal(nextPhase("starting", "started"), "importing");
+  assert.equal(nextPhase("starting", "empty"), "empty");
   assert.equal(nextPhase("importing", "settled"), "done");
   assert.equal(nextPhase("importing", "failed"), "error");
   assert.equal(nextPhase("uploading", "unexpected"), "uploading");

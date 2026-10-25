@@ -171,7 +171,7 @@ test("防抖把两次快速输入合并成一次请求，并记录真正应用�
   await flush();
 
   assert.equal(h.calls.length, 1);
-  assert.deepEqual(h.calls[0], { query: "继电保护", offset: 0, limit: 50 });
+  assert.deepEqual(h.calls[0], { query: "继电保护", tag: "", offset: 0, limit: 50 });
   assert.equal(h.state.docs.query, "继电保护");
   assert.equal(h.state.docs.appliedQuery, "继电保护");
   assert.equal(h.state.docs.offset, 0);

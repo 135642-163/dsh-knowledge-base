@@ -25,8 +25,8 @@ test("v4 manifest is migrated in memory with empty kb metadata", async () => {
   }), "utf8");
 
   const manifest = await readManifest(dir);
-  assert.equal(SCHEMA_VERSION, 5);
-  assert.equal(manifest.schemaVersion, 5);
+  assert.equal(SCHEMA_VERSION, 6);
+  assert.equal(manifest.schemaVersion, 6);
   assert.equal(manifest.description, "");
   assert.deepEqual(manifest.tags, []);
   assert.equal(manifest.mergedInto, null);
@@ -57,14 +57,14 @@ test("kb metadata round-trips and listKbs exposes it", async () => {
   assert.deepEqual(kbs[0].tags, ["电气", "一次"]);
 });
 
-test("readManifest creates a v5 empty manifest when missing", async () => {
+test("readManifest creates a v6 empty manifest when missing", async () => {
   const root = await tempRoot();
   const dir = join(root, "空库");
   const manifest = await readManifest(dir);
-  assert.equal(manifest.schemaVersion, 5);
+  assert.equal(manifest.schemaVersion, 6);
   assert.equal(manifest.description, "");
   assert.deepEqual(manifest.tags, []);
   const written = JSON.parse(await readFile(join(dir, "kb.json"), "utf8"));
-  assert.equal(written.schemaVersion, 5);
+  assert.equal(written.schemaVersion, 6);
   assert.equal(written.description, "");
 });

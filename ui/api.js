@@ -80,6 +80,12 @@ export const api = {
     return request("GET", `/kbs/${encodeURIComponent(name)}/docs?${query.toString()}`);
   },
   doc: (name, id) => request("GET", `/kbs/${encodeURIComponent(name)}/docs/${encodeURIComponent(id)}`),
+  /** 人工编目：摘要/标签；summarySource 由服务端置为 manual。 */
+  patchDocMetadata: (name, id, body) => request(
+    "PATCH",
+    `/kbs/${encodeURIComponent(name)}/docs/${encodeURIComponent(id)}/metadata`,
+    body,
+  ),
   /** 软删除（默认）或永久删除；永久删除必须逐字给出 confirm=标题。 */
   deleteDoc: (name, id, { permanent = false, confirm } = {}) => request(
     "POST",

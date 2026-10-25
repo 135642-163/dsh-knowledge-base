@@ -1,5 +1,7 @@
 import { api, ApiError } from "../api.js";
 import { formatBytes } from "../upload-core.js";
+import { docMetaUnchanged, parseDocTagsInput, summarySourceLabel } from "./doc-meta.js";
+import { clampPage, withPageFragment } from "../deep-link.js";
 
 // 弹窗关闭统一走 closeOverlay：同时摘掉 Esc 监听并从栈里移除。
 // 预览弹窗叠在资料详情弹窗上时，只有最上层响应 Esc。
@@ -276,14 +278,17 @@ export function previewKindFor(doc) {
  * content 仅 note/text 需要：{ markdown, truncated } 或 { error }；
  * loadingText 覆盖 Office 转换中的提示（安装完成重新载入时用）。
  */
-export function renderPreviewBody({ kind, urls = {}, content, loadingText } = {}) {
+export function renderPreviewBody({ kind, urls = {}, content, loadingText, page = null } = {}) {
   const download = escapeAttr(urls.download ?? "");
+  const pageNo = Number.isInteger(page) && page > 0 ? page : null;
   if (kind === "pdf" || kind === "office") {
-    const src = escapeAttr(kind === "pdf" ? urls.inline ?? "" : urls.pdf ?? "");
+    const base = kind === "pdf" ? urls.inline ?? "" : urls.pdf ?? "";
+    const src = escapeAttr(withPageFragment(base, pageNo));
     const loading = kind === "office"
       ? `<p class="muted preview-loading">${escapeHtml(loadingText ?? "正在转换原件，首次可能需要几秒…")}</p>`
       : "";
-    return `${loading}<iframe class="preview-frame" src="${src}" title="原件预览"></iframe>`;
+    const pageNote = pageNo ? `<p class="muted preview-page">已定位到第 ${pageNo} 页</p>` : "";
+    return `${pageNote}${loading}<iframe class="preview-frame" src="${src}" title="原件预览"></iframe>`;
   }
   if (kind === "image") {
     return `<img class="preview-image" src="${escapeAttr(urls.inline ?? "")}" alt="原件预览" />`;
@@ -303,7 +308,8 @@ export function renderPreviewBody({ kind, urls = {}, content, loadingText } = {}
       `;
     }
     const truncated = content?.truncated ? `<p class="muted">内容较长，仅显示前 2 MB。</p>` : "";
-    return `<pre class="preview-text">${escapeHtml(content?.markdown ?? "")}</pre>${truncated}`;
+    const pageNote = pageNo ? `<p class="muted preview-page">该资料没有页码，已打开正文。</p>` : "";
+    return `${pageNote}<pre class="preview-text">${escapeHtml(content?.markdown ?? "")}</pre>${truncated}`;
   }
   return `
     <div class="state preview-unsupported">
@@ -454,8 +460,13 @@ export async function installOfficeEngineAndWait({
  * Office 先查引擎状态，已安装才内嵌 preview.pdf，未安装则显示一键安装面板。
  * 弹窗在请求返回前被关闭时，结果直接丢弃（不再写 DOM）。
  */
-export function openPreviewModal({ name, doc, icons } = {}) {
+export function openPreviewModal({ name, doc, icons, initialPage = null } = {}) {
   const kind = previewKindFor(doc);
+  const requestedPage = Number.isInteger(initialPage) && initialPage > 0 ? initialPage : null;
+  const page = requestedPage ? clampPage(requestedPage, doc?.pages) : null;
+  const pageNote = requestedPage && Number(doc?.pages) > 0 && page !== requestedPage
+    ? `<p class="muted preview-page">页码超出范围，已定位到第 ${page} 页。</p>`
+    : "";
   const urls = {
     inline: api.sourceInlineUrl(name, doc?.id ?? ""),
     pdf: api.previewPdfUrl(name, doc?.id ?? ""),
@@ -467,6 +478,7 @@ export function openPreviewModal({ name, doc, icons } = {}) {
   const node = overlay(`
     <div class="modal-form preview-form">
       <h2>${escapeHtml(doc?.title ?? "原件预览")}</h2>
+      ${pageNote}
       <div class="preview-body"><p class="state">加载中…</p></div>
       <div class="modal-actions">
         ${downloadAction}
@@ -481,7 +493,7 @@ export function openPreviewModal({ name, doc, icons } = {}) {
   };
   const paintOfficeFrame = ({ loadingText, version } = {}) => {
     const pdf = version === undefined ? urls.pdf : cacheBustUrl(urls.pdf, version);
-    paint(renderPreviewBody({ kind: "office", urls: { ...urls, pdf }, loadingText }));
+    paint(renderPreviewBody({ kind: "office", urls: { ...urls, pdf }, loadingText, page }));
     // 转换/载入提示在 iframe 真正载入后隐藏。
     body?.querySelector("iframe")?.addEventListener("load", () => {
       body.querySelector(".preview-loading")?.remove();
@@ -552,14 +564,14 @@ export function openPreviewModal({ name, doc, icons } = {}) {
 
   if (kind === "note" || kind === "text") {
     api.docContent(name, doc?.id ?? "").then((content) => {
-      paint(renderPreviewBody({ kind, urls, content }));
+      paint(renderPreviewBody({ kind, urls, content, page }));
     }).catch((failure) => {
-      paint(renderPreviewBody({ kind, urls, content: { error: failure?.message ?? String(failure) } }));
+      paint(renderPreviewBody({ kind, urls, content: { error: failure?.message ?? String(failure) }, page }));
     });
   } else if (kind === "office") {
     void checkOfficeEngine();
   } else {
-    paint(renderPreviewBody({ kind, urls }));
+    paint(`${pageNote}${renderPreviewBody({ kind, urls, page })}`);
     body?.querySelector("iframe")?.addEventListener("load", () => {
       body.querySelector(".preview-loading")?.remove();
     }, { once: true });
@@ -570,19 +582,39 @@ export function openPreviewModal({ name, doc, icons } = {}) {
 /** 失败文档详情正文（纯函数，便于单测）。 */
 export function renderDocModalBody({ name, id, doc } = {}) {
   const failed = doc?.status === "failed";
+  const importing = doc?.status === "importing";
   const warnings = Array.isArray(doc?.warnings) ? doc.warnings : [];
   const deleted = doc?.deleted === true || doc?.status === "deleted";
+  const editable = !deleted && !importing;
+  const tagsValue = (doc?.tags ?? []).join(", ");
   return `
     <div class="modal-form">
       <h2>${escapeHtml(doc?.title ?? "文档")}</h2>
-      ${deleted ? `<p class="muted">该文档已移入回收站。</p>` : ""}
+      ${deleted ? `<p class="muted">该文档已移入回收站，恢复后才能编辑摘要/标签。</p>` : ""}
+      ${importing ? `<p class="muted">文档正在导入，解析完成后才能编辑摘要/标签。</p>` : ""}
       <div class="kv"><span>ID</span><strong>${escapeHtml(doc?.id ?? id ?? "")}</strong></div>
       <div class="kv"><span>类型</span><strong>${escapeHtml(doc?.type ?? "")}</strong></div>
       <div class="kv"><span>页数 / 字数</span><strong>${doc?.pages ?? 0} / ${doc?.chars ?? 0}</strong></div>
       <div class="kv"><span>可信度</span><strong>${escapeHtml(doc?.trust ?? "unknown")}</strong></div>
       <div class="kv"><span>来源文件</span><strong>${escapeHtml(doc?.sourceFile || "—")}</strong></div>
-      <div class="kv"><span>摘要</span><strong>${escapeHtml(doc?.summary || "—")}</strong></div>
-      <div class="kv"><span>标签</span><strong>${escapeHtml((doc?.tags ?? []).join("、") || "—")}</strong></div>
+      ${doc?.standardNo ? `<div class="kv"><span>标准号</span><strong>${escapeHtml(doc.standardNo)}${doc.stageLabel ? `（${escapeHtml(doc.stageLabel)}）` : ""}</strong></div>` : ""}
+      ${editable ? `
+        <div class="doc-meta-editor">
+          <label class="field"><span>标题 <span class="muted">（人工修改后重新导入也会保留）</span></span>
+            <input name="doc-title" maxlength="200" value="${escapeAttr(doc?.title ?? "")}" placeholder="资料名称" autocomplete="off" />
+          </label>
+          <label class="field"><span>摘要 <span class="muted">（来源：${escapeHtml(summarySourceLabel(doc?.summarySource))}）</span></span>
+            <textarea name="doc-summary" maxlength="500" rows="3" placeholder="一句话说明这篇资料…">${escapeHtml(doc?.summary || "")}</textarea>
+          </label>
+          <label class="field"><span>标签（逗号分隔，最多 20 个）</span>
+            <input name="doc-tags" value="${escapeAttr(tagsValue)}" placeholder="并网, 海上风电" autocomplete="off" />
+          </label>
+          <div class="modal-actions meta-actions">
+            <button type="button" class="btn primary" data-save-meta disabled>保存名称/摘要/标签</button>
+          </div>
+        </div>` : `
+        <div class="kv"><span>摘要</span><strong>${escapeHtml(doc?.summary || "—")}</strong></div>
+        <div class="kv"><span>标签</span><strong>${escapeHtml((doc?.tags ?? []).join("、") || "—")}</strong></div>`}
       ${failed ? `
         <div class="doc-error">
           <pre class="doc-error-text">${escapeHtml(doc?.error || "导入失败")}</pre>
@@ -678,6 +710,7 @@ export function openDocModal({ name, id, icons, notify = () => {}, onChanged } =
   let doc = null;
   let retrying = false;
   let removing = false;
+  let savingMeta = false;
 
   function showError(message) {
     const error = node.querySelector("[data-doc-error]");
@@ -693,6 +726,69 @@ export function openDocModal({ name, id, icons, notify = () => {}, onChanged } =
     });
     node.querySelector("[data-retry]")?.addEventListener("click", () => { void retry(); });
     node.querySelector("[data-remove]")?.addEventListener("click", () => { void remove(); });
+
+    const titleInput = node.querySelector('[name="doc-title"]');
+    const summaryInput = node.querySelector('[name="doc-summary"]');
+    const tagsInput = node.querySelector('[name="doc-tags"]');
+    const saveButton = node.querySelector("[data-save-meta]");
+    if (saveButton && (titleInput || summaryInput || tagsInput)) {
+      const refreshDirty = () => {
+        if (savingMeta) return;
+        saveButton.disabled = docMetaUnchanged(doc, {
+          title: titleInput?.value ?? "",
+          summary: summaryInput?.value ?? "",
+          tags: tagsInput?.value ?? "",
+        });
+      };
+      titleInput?.addEventListener("input", refreshDirty);
+      summaryInput?.addEventListener("input", refreshDirty);
+      tagsInput?.addEventListener("input", refreshDirty);
+      saveButton.addEventListener("click", () => { void saveMeta(); });
+      refreshDirty();
+    }
+  }
+
+  async function saveMeta() {
+    if (!doc || savingMeta) return;
+    const saveButton = node.querySelector("[data-save-meta]");
+    const title = node.querySelector('[name="doc-title"]')?.value ?? doc.title ?? "";
+    const summary = node.querySelector('[name="doc-summary"]')?.value ?? doc.summary ?? "";
+    const tags = node.querySelector('[name="doc-tags"]')?.value ?? (doc.tags ?? []).join(", ");
+    if (docMetaUnchanged(doc, { title, summary, tags })) return;
+    if (!String(title).trim()) {
+      showError("标题不能为空");
+      return;
+    }
+    savingMeta = true;
+    if (saveButton) {
+      saveButton.disabled = true;
+      saveButton.textContent = "保存中…";
+    }
+    try {
+      const saved = await api.patchDocMetadata(name, id, {
+        title: String(title).replace(/\s+/g, " ").trim().slice(0, 200),
+        summary,
+        tags: parseDocTagsInput(tags),
+      });
+      if (!node.isConnected) return;
+      paint(saved.doc);
+      notify("已保存名称/摘要/标签");
+      try {
+        await onChanged?.();
+      } catch {
+        /* 列表刷新失败不影响保存结果 */
+      }
+    } catch (failure) {
+      if (node.isConnected) {
+        if (saveButton) {
+          saveButton.disabled = false;
+          saveButton.textContent = "保存名称/摘要/标签";
+        }
+        showError(errorText(failure));
+      }
+    } finally {
+      savingMeta = false;
+    }
   }
 
   function paint(next) {

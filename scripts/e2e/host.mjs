@@ -293,6 +293,7 @@ export async function startHost({
   env = process.env,
   statusTimeoutMs = DEFAULT_STATUS_TIMEOUT_MS,
   log = () => {},
+  beforeStart = null,
 } = {}) {
   const external = String(env?.DSH_E2E_URL ?? "").trim();
   if (external !== "") {
@@ -311,6 +312,9 @@ export async function startHost({
   const logs = createLogCapture();
   const kbRoot = await mkdtemp(join(tmpdir(), "kb-e2e-"));
   const temp = await makeTempProfile({ sourceProfile, home, kbRoot, log, artifactsDir });
+  if (typeof beforeStart === "function") {
+    await beforeStart({ home, profileDir: temp.profileDir, profileName: temp.profileName, kbRoot, artifactsDir, log });
+  }
   const port = await findFreePort();
   const baseUrl = `http://127.0.0.1:${port}`;
   const bin = String(env?.DSH_E2E_DSH_BIN ?? "dsh");
