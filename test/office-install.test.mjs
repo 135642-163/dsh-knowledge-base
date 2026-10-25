@@ -44,7 +44,7 @@ function fakeChild({ stdout = "", stderr = "", code = 0, delay = 0, hang = false
       if (stdout) child.stdout.emit("data", Buffer.from(stdout));
       if (stderr) child.stderr.emit("data", Buffer.from(stderr));
       child.emit("close", code);
-    }, delay).unref?.();
+    }, delay);
   }
   return child;
 }

@@ -66,31 +66,30 @@ export async function run(ctx) {
   assert.equal(a1.status, "ready", "A1 服务端状态应为 ready");
   assert.equal(a1.deleted, false, "A1 服务端不应处于删除状态");
 
-  // 逐字输入库名彻底删除 A2。
+  // 跨库批量彻底删除 A2（甲库）+ B1（乙库）：逐字输入「彻底删除 2 篇」。
   await openTrashDocs(ctx);
-  const purgeRow = page.locator(".trash-doc-row").filter({ hasText: FIXTURES.docs.a2.title });
-  await purgeRow.locator('button[data-action="trash-doc-purge"]').click();
-  let modal = await ctx.helpers.modal();
-  await modal.locator('input[name="confirm"]').fill(FIXTURES.kbs.primary);
-  await modal.locator('button[type="submit"]').click();
-  await modal.waitFor({ state: "detached" });
-  await poll(async () => (await page.locator(".trash-doc-row").filter({ hasText: FIXTURES.docs.a2.title }).count()) === 0, {
-    message: "A2 彻底删除后不应再出现",
-  });
-
-  // 勾选 B1 批量彻底删除（跨库接口 + 逐字输入「彻底删除 N 篇」）。
-  const b1Row = page.locator(".trash-doc-row").filter({ hasText: FIXTURES.docs.b1.title });
-  await b1Row.locator('input[data-action="trash-doc-select"]').check();
+  for (const title of [FIXTURES.docs.a2.title, FIXTURES.docs.b1.title]) {
+    await page.locator(".trash-doc-row").filter({ hasText: title })
+      .locator('input[data-action="trash-doc-select"]').check();
+  }
   const bulk = page.locator(".trash-bulk");
   await bulk.waitFor();
+  assert.ok((await bulk.innerText()).includes("已选 2 篇"), "跨库选择应显示 2 篇");
   await bulk.locator('button[data-action="trash-docs-purge-selected"]').click();
-  modal = await ctx.helpers.modal();
-  await modal.locator('input[name="confirm"]').fill("彻底删除 1 篇");
+  let modal = await ctx.helpers.modal();
+  await modal.locator('input[name="confirm"]').fill("彻底删除 2 篇");
   await modal.locator('button[type="submit"]').click();
   await modal.waitFor({ state: "detached" });
-  await poll(async () => (await page.locator(".trash-doc-row").filter({ hasText: FIXTURES.docs.b1.title }).count()) === 0, {
-    message: "B1 批量彻底删除后不应再出现",
-  });
+  await poll(async () => {
+    const rows = page.locator(".trash-doc-row");
+    return (await rows.count()) === 1
+      && (await rows.filter({ hasText: FIXTURES.docs.a2.title }).count()) === 0
+      && (await rows.filter({ hasText: FIXTURES.docs.b1.title }).count()) === 0;
+  }, { message: "跨库批量删除后应只剩 A4" });
+  const a2Doc = await ctx.api.doc(FIXTURES.kbs.primary, FIXTURES.docs.a2.id).catch(() => null);
+  assert.equal(a2Doc, null, "A2 应已被彻底删除");
+  const b1Doc = await ctx.api.doc(FIXTURES.kbs.target, FIXTURES.docs.b1.id).catch(() => null);
+  assert.equal(b1Doc, null, "B1 应已被彻底删除");
 
   // 详情页「已删除」筛选 → 清空本库已删除资料（A4）。
   await ctx.goto(`/kb/#/kb/${encodeURIComponent(FIXTURES.kbs.primary)}/docs`);

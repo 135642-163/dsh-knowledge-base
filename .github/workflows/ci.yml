@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      run_capsule:
+        description: "Run capsule E2E on the self-hosted macOS runner (needs a configured DSH profile/session)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -84,4 +89,35 @@ jobs:
           path: test/e2e/.artifacts
           if-no-files-found: ignore
           # 目录名以 . 开头：upload-artifact 默认不收集隐藏文件，必须显式开启。
+          include-hidden-files: true
+
+  # Fresh GitHub-hosted profiles have no session/credentials, so the capsule
+  # test self-skips there. This optional job runs the same suite on a
+  # self-hosted macOS runner whose DSH profile already has a workspace/session
+  # (and therefore mounts the composer capsule). Trigger it manually with
+  # "Run workflow" and run_capsule=true. The runner must have the labels
+  # [self-hosted, macOS, dsh-profile] and a working `dsh` + Playwright WebKit.
+  e2e-capsule:
+    name: Capsule E2E (self-hosted configured profile)
+    if: github.event_name == 'workflow_dispatch' && inputs.run_capsule
+    runs-on: [self-hosted, macOS, dsh-profile]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Install Playwright WebKit
+        run: npx playwright install webkit
+      - name: Run E2E (capsule included)
+        run: npm run test:e2e
+      - name: Upload E2E artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-capsule-artifacts
+          path: test/e2e/.artifacts
+          if-no-files-found: ignore
           include-hidden-files: true
