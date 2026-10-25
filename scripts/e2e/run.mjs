@@ -21,6 +21,7 @@ import { createApi } from "./api.mjs";
 import { seedFixtures } from "./seed.mjs";
 import { launchBrowser, TestContext, SkipError } from "./ui.mjs";
 import * as trash from "./tests/trash.mjs";
+import * as trashSearchSort from "./tests/trash-search-sort.mjs";
 import * as move from "./tests/move.mjs";
 import * as retry from "./tests/retry.mjs";
 import * as preview from "./tests/preview.mjs";
@@ -31,7 +32,7 @@ const root = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const runStartedAt = new Date();
 const stamp = runStartedAt.toISOString().replace(/[:.]/g, "-").slice(0, 19);
 const artifactsDir = join(root, "test", "e2e", ".artifacts", stamp);
-const tests = [trash, move, retry, preview, previewOffice, capsule];
+const tests = [trashSearchSort, trash, move, retry, preview, previewOffice, capsule];
 
 const logLines = [];
 let activeHost = null;
