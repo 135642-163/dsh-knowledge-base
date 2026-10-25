@@ -367,7 +367,7 @@ ctx.systemPrompt.section({
 
 ## 15. 测试计划
 
-### 15.1 自动化（`node:test`；0.21.0 新增 188 例，312 → **500**；0.21.1 复审后 **508**；0.22.0 **620**；0.23.0 **730**——见 §15.3、§15.4 与 §21.8、§22.7）
+### 15.1 自动化（`node:test`；0.21.0 新增 188 例，312 → **500**；0.21.1 复审后 **508**；0.22.0 **620**；0.23.0 **733**——见 §15.3、§15.4 与 §21.8、§22.7）
 
 - `scope-store.test.mjs`（17）：**文件层**——缺失文件读空、原子写 + `0600`、进程内串行队列（20 并发）、mutator 返回 falsy 时不写盘、同步视图 mtime+size 缓存与冻结视图、损坏/超限文件（读空、拒写 `SCOPE_UNUSABLE`）、清理回写只在变化时发生、`removeScopeKb`/`renameScopeKb` 库名同步、未知条目字段保留。sessionId 校验、mode/kbs 结构校验、50 上限、TTL 过期与失效库 prune、归档/合并判定由 `scope.test.mjs` / `scope-api.test.mjs` 覆盖。
 - `scope.test.mjs`（37）：条目归一化/50 上限/非法 sessionId、子会话快照 + `inheritedFrom`、父无条目 → all、父变化不回溯、只读解析（GET）不落快照、写失败降级为只读解析、`setScope` 严格校验（不存在/归档/合并）、`resolveSingleKb`/`resolveDocTarget` 单测（含软删除与虚拟文档）。
@@ -412,7 +412,7 @@ ctx.systemPrompt.section({
   `web-http.test.mjs` 5 → 6（`serveFile` 读流错误销毁响应）。
 - 全部用例使用临时目录，不依赖本机知识库；`check:client` / `check-ui` 为独立门禁，不计入用例数。
 
-### 15.4 0.23.0 新增与变更用例（`npm test` 730/730）
+### 15.4 0.23.0 新增与变更用例（`npm test` 733/733）
 
 - 0.22.0（`afe344d`）基线 **620**；0.23.0 净增 **110** 例：新增文件 88 例，现有文件 +22 例
   （含发布前终审补的 8 例）。
@@ -667,7 +667,7 @@ ctx.systemPrompt.section({
 
 ## 22. 0.23.0 资料治理与失败处理
 
-> 版本 0.23.0（基线 0.22.0 / `npm test` 620；本版 **730**，见 §15.4、§22.7）。
+> 版本 0.23.0（基线 0.22.0 / `npm test` 620；本版 **733**，见 §15.4、§22.7）。
 > 本轮补齐工作台的资料生命周期（软删除/恢复/彻底删除）、同根目录内的跨库安全移动与撤销、
 > 失败资料重试；总览卡片改为「单条类型条 + 可信度圆点」方案 B；Office 原件预览增加一键安装
 > LibreOfficeKit 转换引擎（需用户显式同意）。
@@ -897,7 +897,7 @@ ctx.systemPrompt.section({
 
 ### 22.7 测试
 
-- `npm test`：**730/730** 通过（0.22.0 基线 620，净增 110：新增文件 88 例、现有文件 +22 例，
+- `npm test`：**733/733** 通过（0.22.0 基线 620，净增 113：新增文件 88 例、现有文件 +25 例，
   其中发布前终审补 8 例），含 `check:client` 与 `check-ui`；逐文件明细见 §15.4。
 - `npm run typecheck`、`npm run check:client`、`node scripts/check-ui.mjs` 全绿。
 - 重点覆盖：软删/恢复原状态/彻底删除标题确认（含「只能从回收站发起」409 与 31 分钟卡死导入的
@@ -912,7 +912,7 @@ ctx.systemPrompt.section({
 
 ### 22.8 验收记录（2026-10-25）
 
-- [x] 自动化：`npm test` **730/730**（含 `check:client`、`check-ui`）；`npm run typecheck`、
+- [x] 自动化：`npm test` **733/733**（含 `check:client`、`check-ui`）；`npm run typecheck`、
   `npm run check:client`、`node scripts/check-ui.mjs` 均通过。
 - [x] 真实宿主（临时 `dsh --profile web --port 55942` + 临时 `kbRoot` + WKWebView 脚本）：
   - 跨库移动：资料 tab 勾选「移动测试文档」→「移动到…」→ 目标「乙库」→ 预检 → 确认 → 结果
@@ -935,7 +935,7 @@ ctx.systemPrompt.section({
   - `screenshot-23-overview-bars.png` 拍摄于 `6446e83` 之前：截图中类型条与可信度圆点已渲染，行首
     「可信度」标签由 `6446e83` 补入，标签渲染经 `renderOverview` 模板检查（输出含
     `<span class="trust-label muted">可信度</span>`）确认；未重新截图。
-- 与 §15 的对应：本轮用例总数在 §15.1 更新为 **730**，逐文件明细补在 §15.4。
+- 与 §15 的对应：本轮用例总数在 §15.1 更新为 **733**，逐文件明细补在 §15.4。
 
 ### 22.9 已知限制与跟进
 

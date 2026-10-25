@@ -3642,6 +3642,7 @@ Expected: `--ff-only` 成功；HEAD 为 `chore: release 0.21.0 …`，其后还�
 | 5 | Office 转换引擎一键安装：`/office/status` + `/office/install`、consent、后台任务与进度、`~/.dsh/tools/libreoffice-kit`（`DSH_OFFICE_KIT_HOME`）、`capabilities` 校验、预览内安装面板与完成后重载 | `176d4d6` | `lib/web/office-install.js`、`lib/web/api.js`、`lib/web/preview.js`、`lib/web/server.js`、`ui/api.js`、`ui/style.css`、`ui/views/modals.js`、`test/office-install.test.mjs`、`test/web-office-api.test.mjs`、`test/ui-preview.test.mjs` |
 | 6 | 可信度圆点行补「可信度」标签 | `6446e83` | `ui/views/overview.js`、`ui/style.css` |
 | 7 | 终审修复：移动提交期冲突误删目标文件、彻底删除仅限回收站、撤销检测目标已修改、卡死 importing 的永久删除逃生口、日志路径白名单、重试错误脱敏 | `a4dbb5d` | `lib/transfer.js`、`lib/web/api.js`、`ui/views/modals.js`、`ui/views/overview.js`、`test/*` |
+| 8 | 类型条改回连续整条（含暖色）、移动弹窗仅在存在冲突时显示重复策略 | `160d646` | `ui/views/overview.js`、`ui/views/modals.js`、`ui/style.css` |
 
 - **真实宿主验收（2026-10-25，临时 `dsh --profile web --port 55942` + 临时 `kbRoot` + WKWebView 脚本）**：
   「移动测试文档」甲库 → 乙库，结果「成功 1 · 跳过 0 · 失败 0」；源库该文档进入「已删除」且行内为
@@ -3650,11 +3651,11 @@ Expected: `--ff-only` 成功；HEAD 为 `chore: release 0.21.0 …`，其后还�
   截图见 `/Users/littlesun/workspace/deepseek/project/知识库/.acceptance/screenshot-23-*.png`。
   说明：Office 一键安装 UI 由单测覆盖，本机已装引擎、未做真实重新下载；删除/移动/重试的真实 DOM
   流程走一次性 WKWebView 脚本，不是 Playwright。
-- **测试**：`npm test` **730/730**（0.22.0 基线 620，净增 110：新增文件 88、现有文件 +22）；
+- **测试**：`npm test` **733/733**（0.22.0 基线 620，净增 113：新增文件 88、现有文件 +25）；
   `npm run typecheck`、`npm run check:client`、`node scripts/check-ui.mjs` 全绿。
   逐文件明细见 spec §15.4，本轮说明见 spec §22。
 - **发布**：版本 0.23.0（`package.json`、`package-lock.json` 根与 `packages[""]`、`lib/version.js`），
-  README 新增 `## 0.23.0 资料治理`，更新 `officeKitCli`/环境变量说明与测试段（730）；
+  README 新增 `## 0.23.0 资料治理`，更新 `officeKitCli`/环境变量说明与测试段（733）；
   spec 追加 §22 与 §15.4。
 - **已知跟进**：
   - 批量彻底删除仍未提供（批量只软删除）；
