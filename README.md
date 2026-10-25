@@ -807,8 +807,35 @@ npm test          # node:test（777 个用例）；覆盖查重精度、同名�
 ```
 
 > **自动化边界**：`npm test` 覆盖回收站的可导出纯函数与 API；旧响应作废（`loadTrash` token）、
-> 刷新后清空选择、跨库恢复循环与清空本库按钮接线属于 DOM 交互，只由 0.24.0 的一次性
-> WKWebView 验收覆盖，不在自动化用例内。
+> 刷新后清空选择、跨库恢复循环与清空本库按钮接线属于 DOM 交互，由 `npm run test:e2e` 的
+> 真实浏览器流程覆盖；`npm test` 本身仍不需要浏览器。
+
+## 端到端测试（Playwright）
+
+`npm test` 之外另有一条真实浏览器 E2E（**不在** `npm test` 内，不改变发布包运行时）：
+
+```bash
+npm run e2e:install   # 首次安装 WebKit + Chromium（约 300 MB；可重复执行）
+npm run test:e2e      # 自托管临时 DSH web 宿主并跑完整流程
+```
+
+- 自托管：临时 profile `e2e-<6hex>`（软链真实 `web` profile 的 `node_modules`）+ 临时
+  `kbRoot`（`os.tmpdir()/kb-e2e-*`），结束或中断自动清理；**不会修改**
+  `~/.dsh/profiles/web` 或真实知识库。
+- 固定数据：甲库/乙库（活跃）+ 丙库（归档）；直接写 `kb.json`、`sources/`、`markdown/`，
+  覆盖 ready / deleted / failed / note / PDF / docx。
+- 覆盖流程：回收站两个页签（恢复、逐字输入库名彻底删除、批量删除、清空本库）、
+  跨库移动 → 撤销 → 再次移动 → 目标副本删除后的墓碑恢复、失败资料重试、
+  PDF/笔记/Office 原件预览、输入框胶囊（清空/全选/应用/外部点击关闭）。
+- 浏览器优先 WebKit（DSH 桌面端引擎），失败回退 Chromium；失败产物写到
+  `test/e2e/.artifacts/<timestamp>/`（截图、URL、console 错误、宿主日志），
+  正常也会打印本次产物目录。
+- 可选环境变量：`DSH_E2E_URL` 复用已启动宿主（要求其 `kbRoot` 在临时目录，或显式
+  `DSH_E2E_ALLOW_MUTATE=1`）、`DSH_E2E_BROWSER=chromium`、`DSH_E2E_KEEP=1`、
+  `DSH_E2E_PYTHON=<python>`。
+- 浏览器下载走 Playwright CDN；受限网络可用 `PLAYWRIGHT_DOWNLOAD_HOST=<mirror>`
+  后重试 `npm run e2e:install`。Chromium 下载失败（CDN/镜像缺对应版本）不影响套件，
+  可只装 WebKit：`npx playwright install webkit`（套件本来就优先 WebKit）。
 
 ## 使用示例（对 harness 直接说）
 

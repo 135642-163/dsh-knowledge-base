@@ -18,3 +18,6 @@ Thumbs.db
 
 # 开发调试脚本（含本地个人路径，不随仓库发布）
 dev/
+
+# E2E 产物（Playwright 截图/宿主日志/失败证据）
+test/e2e/.artifacts/
