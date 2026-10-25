@@ -130,6 +130,7 @@ export function rewritePatch(sourceText, kbRoot) {
         defaultKb: default`;
   const preambleText = preamble
     .filter((line) => !/dsh-knowledge|install-to-machine/i.test(line))
+    .filter((line) => !/^\s*\[\]\s*$/.test(line))
     .join("\n")
     .trim();
   const output = [
