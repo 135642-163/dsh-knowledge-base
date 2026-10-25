@@ -836,6 +836,13 @@ npm run test:e2e      # 自托管临时 DSH web 宿主并跑完整流程
 - 浏览器下载走 Playwright CDN；受限网络可用 `PLAYWRIGHT_DOWNLOAD_HOST=<mirror>`
   后重试 `npm run e2e:install`。Chromium 下载失败（CDN/镜像缺对应版本）不影响套件，
   可只装 WebKit：`npx playwright install webkit`（套件本来就优先 WebKit）。
+- **CI（GitHub Actions，`.github/workflows/ci.yml`）**：
+  - `unit` job（ubuntu）：`npm ci` → `typecheck` → `npm test`。
+  - `e2e` job（macos-14）：安装 `@deepseek-ai/dsh@0.2.1-rc.2` → 首次 `dsh web` 生成临时
+    `DSH_HOME` profile → 用 `install-to-machine.sh` 注册本仓库 → 安装 Playwright WebKit →
+    跑 `npm run test:e2e`；失败时上传 `test/e2e/.artifacts`。
+  - 全新 CI profile 没有历史会话/模型凭据，胶囊用例会自动 **skip** 并说明原因；
+    工作台/回收站/移动/重试/预览用例照常执行，其余失败仍会让 job 红。
 
 ## 使用示例（对 harness 直接说）
 

@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: Unit / build / UI checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  e2e:
+    name: Playwright E2E (WebKit, temp DSH profile)
+    runs-on: macos-14
+    timeout-minutes: 35
+    needs: unit
+    env:
+      DSH_VERSION: 0.2.1-rc.2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      # 1) Provision a throw-away DSH profile (first boot installs profile deps).
+      - name: Provision temporary DSH profile
+        run: |
+          set -euo pipefail
+          npm i -g "@deepseek-ai/dsh@${DSH_VERSION}"
+          export DSH_HOME="$RUNNER_TEMP/dsh-home"
+          mkdir -p "$DSH_HOME"
+          echo "DSH_HOME=$DSH_HOME" >> "$GITHUB_ENV"
+          dsh web --port 55970 --no-open > "$RUNNER_TEMP/dsh-first.log" 2>&1 &
+          for i in $(seq 1 180); do
+            if curl -sf --max-time 2 http://127.0.0.1:55970/ >/dev/null; then break; fi
+            sleep 1
+          done
+          curl -sf --max-time 3 http://127.0.0.1:55970/ >/dev/null || { cat "$RUNNER_TEMP/dsh-first.log"; exit 1; }
+          pkill -f "dsh web --port 55970" || true
+          sleep 2
+
+      # 2) Register this checkout as the knowledge-wiki plugin in the temp profile.
+      - name: Register plugin into temp profile
+        run: |
+          set -euo pipefail
+          bash install-to-machine.sh "$PWD/install-to-machine.sh" "$RUNNER_TEMP/kb-e2e"
+
+      # 3) Browser: WebKit matches the DSH desktop engine. Retry via CDN if the
+      #    default Playwright host is unavailable.
+      - name: Install Playwright WebKit
+        run: |
+          set -euo pipefail
+          npx playwright install webkit || PLAYWRIGHT_DOWNLOAD_HOST=https://cdn.playwright.dev npx playwright install webkit
+
+      # 4) Self-hosting E2E: the runner copies the temp web profile into an
+      #    e2e-<hex> profile with a temp kbRoot, so the real profile is untouched.
+      #    Capsule test self-skips on a fresh profile without an existing session
+      #    or model credentials; the rest must pass.
+      - name: Run E2E
+        run: npm run test:e2e
+
+      - name: Upload E2E artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts
+          path: test/e2e/.artifacts
+          if-no-files-found: ignore

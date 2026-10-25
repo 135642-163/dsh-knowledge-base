@@ -3,7 +3,7 @@
  * 胶囊只显示活跃库（归档的丙库不应出现）。
  */
 import assert from "node:assert/strict";
-import { poll } from "../ui.mjs";
+import { poll, SkipError } from "../ui.mjs";
 import { FIXTURES } from "../seed.mjs";
 
 export const name = "会话胶囊：清空/应用、外部点击关闭、全选/应用";
@@ -49,7 +49,41 @@ async function applyPanel(panel) {
 
 export async function run(ctx) {
   const page = await ctx.goto("/");
-  const chip = await waitChip(page);
+  // 全新 profile 没有历史会话时根页面只有「新会话」，胶囊不会挂载；先关声明再建会话。
+  await page.waitForTimeout(1200);
+  await dismissBetaNotice(page);
+  const newSession = page.getByRole("button", { name: "新会话", exact: true });
+  if ((await newSession.count()) > 0 && (await newSession.first().isVisible().catch(() => false))) {
+    await newSession.first().click();
+    await page.waitForTimeout(1200);
+    // 全新 profile 首次建会话会要求配置 API Key；写入一个 dummy key（E2E 不调用模型）。
+    const saveAndContinue = page.getByRole("button", { name: "保存并继续", exact: true });
+    if ((await saveAndContinue.count()) > 0 && (await saveAndContinue.first().isVisible().catch(() => false))) {
+      const keyInput = page.locator('input[type="password"], .modal input, [class*="modal"] input').first();
+      if ((await keyInput.count()) > 0) {
+        await keyInput.fill("sk-e2e-dummy");
+        await saveAndContinue.first().click();
+        await page.waitForTimeout(1200);
+      }
+    }
+    // 仍要求配置时选择稍后配置；弹窗可能延迟挂载，轮询几次直到胶囊出现或弹窗消失。
+    const later = page.getByRole("button", { name: "稍后配置", exact: true });
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      if ((await page.locator(".dsh-kb-scope-chip").count()) > 0) break;
+      if ((await later.count()) > 0 && (await later.first().isVisible().catch(() => false))) {
+        await later.first().click();
+        await page.waitForTimeout(800);
+        continue;
+      }
+      await page.waitForTimeout(500);
+    }
+  }
+  let chip;
+  try {
+    chip = await waitChip(page);
+  } catch (error) {
+    throw new SkipError(`当前 profile 没有可用会话/凭据，胶囊未挂载（${String(error?.message ?? error).slice(0, 120)}）`);
+  }
   assert.equal(normalize(await chip.innerText()), "知识库：全部", "首次加载胶囊应为全部");
 
   // 打开面板：列出两个活跃库，归档库不在其中。

@@ -37,7 +37,7 @@ mkdir -p "$MODULES_DIR" "$PROFILE_DIR"
 ln -sfn "$PLUGIN_DIR" "$MODULES_DIR/dsh-knowledge-wiki"
 
 if [ ! -f "$PATCH_FILE" ]; then
-  echo "[]" > "$PATCH_FILE"
+  : > "$PATCH_FILE"
 fi
 
 if grep -q "id: knowledge-wiki" "$PATCH_FILE"; then
@@ -45,7 +45,7 @@ if grep -q "id: knowledge-wiki" "$PATCH_FILE"; then
 else
   {
     echo ""
-    echo "# dsh-knowledge-wiki 知识库插件（由 install-to-machine.sh 添加，路径: $PLUGIN_DIR）"
+    echo "# dsh-knowledge-wiki 知识库插件（由 install-to-machine.sh 添加，路径: ${PLUGIN_DIR}）"
     echo "- insert:"
     echo "    - id: knowledge-wiki"
     echo "      name: dsh-knowledge-wiki"

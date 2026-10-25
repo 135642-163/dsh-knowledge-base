@@ -220,13 +220,24 @@ async function makeTempProfile({ sourceProfile, home, kbRoot, log }) {
           await writeFile(join(profileDir, name), "", "utf8");
           continue;
         }
+        if (name === "pnpm-lock.yaml" || name === "pnpm-workspace.yaml") {
+          // Fresh CI profiles may be provisioned without a pnpm lockfile; the
+          // boot only needs cordis.yml/package.json plus the node_modules link.
+          continue;
+        }
         throw new HostError(`真实 profile 缺少 ${name}：${from}`);
       }
       await cp(from, join(profileDir, name));
     }
-    const sourceModules = join(sourceDir, "node_modules");
+    // 旧式/手工 profile 在 profile 目录下自带 node_modules；DSH 新装默认把
+    // 依赖放在共享的 profiles/node_modules，两种布局都要支持。
+    const profileModules = join(sourceDir, "node_modules");
+    const sharedModules = join(home, "profiles", "node_modules");
+    const sourceModules = existsSync(profileModules)
+      ? profileModules
+      : (existsSync(sharedModules) ? sharedModules : profileModules);
     if (!existsSync(sourceModules)) {
-      throw new HostError(`真实 profile 缺少 node_modules，无法离线启动：${sourceModules}`);
+      throw new HostError(`真实 profile 缺少 node_modules，无法离线启动：${profileModules}`);
     }
     await symlink(sourceModules, join(profileDir, "node_modules"), process.platform === "win32" ? "junction" : "dir");
     const sourcePatch = await readFile(join(sourceDir, "cordis.patch.yml"), "utf8").catch(() => "");
