@@ -78,6 +78,7 @@ jobs:
       #    web profile (temp kbRoot via patch rewrite), and the harness discovers
       #    the one-time auth token from the host log.
       - name: Run E2E
+        timeout-minutes: 12
         run: npm run test:e2e
 
       - name: Upload E2E artifacts
