@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import {
   MULTI_KB_PURGE_HINT, PURGE_DOCS_WARNING, TRASH_DOCS_COPY,
   purgeDocsConfirmBody, renderTrash, renderTrashBulk, renderTrashTabs,
-  sameTrashKb, trashPurgeTarget, trashSelectionAllSelected, trashSelectionHas,
+  sameTrashKb, trashPurgeTarget, trashRestoreTargets, trashSelectionAllSelected, trashSelectionHas,
   trashSelectionKb, trashSelectionToggleAll, trashSelectionToggleOne, trashTab,
 } from "../ui/views/trash.js";
 
@@ -162,6 +162,66 @@ test("已删除资料分区有说明、总数、库徽标与行内恢复/彻底�
   // 已删除资料分区不渲染归档库操作。
   assert.doesNotMatch(html, /data-action="restore-kb"/);
   assert.doesNotMatch(html, /data-action="purge-kb"/);
+});
+
+test("移动来源的行渲染撤销移动而不是恢复，勾选与彻底删除仍保留", () => {
+  const moved = deletedDoc("标准", "m1", {
+    title: "已移走",
+    movedTo: { kb: "目标库", docId: "t1", transferId: "abc123", at: "2026-10-02T00:00:00.000Z" },
+  });
+  const normal = deletedDoc("标准", "d1", { title: "普通删除" });
+  const html = render(makeState({ docs: [moved, normal] }), "docs");
+
+  assert.match(html, /data-action="trash-doc-undo-move" data-kb="标准" data-id="m1" data-target="目标库">撤销移动/);
+  assert.doesNotMatch(html, /data-action="trash-doc-restore" data-kb="标准" data-id="m1"/);
+  assert.match(html, /data-action="trash-doc-restore" data-kb="标准" data-id="d1">恢复/);
+  // 已移动行仍可勾选（供批量彻底删除）与彻底删除。
+  assert.match(html, /data-action="trash-doc-select" data-kb="标准" data-id="m1"/);
+  assert.match(html, /data-action="trash-doc-purge" data-kb="标准" data-id="m1">彻底删除/);
+});
+
+test("批量恢复排除已移动资料并提示，彻底删除仍可处理它们", () => {
+  const moved = deletedDoc("标准", "m1", {
+    title: "资料 m1",
+    movedTo: { kb: "目标库", docId: "t1", transferId: "abc123" },
+  });
+  const normal = deletedDoc("标准", "d1", { title: "资料 d1" });
+  const selected = [
+    { kb: "标准", id: "m1", title: "资料 m1", movedTo: { kb: "目标库" } },
+    { kb: "标准", id: "d1", title: "资料 d1" },
+  ];
+
+  const targets = trashRestoreTargets(selected, [moved, normal]);
+  assert.deepEqual(targets.entries.map((entry) => entry.id), ["d1"]);
+  assert.equal(targets.excluded, 1);
+  // 旧选择项没带移动标记时，以当前列表为准。
+  const stale = trashRestoreTargets([{ kb: "标准", id: "m1", title: "资料 m1" }], [moved]);
+  assert.deepEqual(stale.entries, []);
+  assert.equal(stale.excluded, 1);
+
+  const bar = renderTrashBulk({ selected, docs: [moved, normal], fmtNumber });
+  assert.match(bar, /已选 2 篇/);
+  assert.match(bar, /已排除 1 篇已移动资料，请在对应库中撤销移动/);
+  assert.match(bar, /data-action="trash-docs-restore-selected">恢复所选/);
+  assert.match(bar, /data-action="trash-docs-purge-selected">彻底删除所选/);
+
+  // 完整渲染同样把当前列表传给工具条（选择项本身可以没有 movedTo）。
+  const page = render(makeState({
+    docs: [moved, normal],
+    selectedDocs: [{ kb: "标准", id: "m1", title: "资料 m1" }, { kb: "标准", id: "d1", title: "资料 d1" }],
+  }), "docs");
+  assert.match(page, /已选 2 篇/);
+  assert.match(page, /已排除 1 篇已移动资料，请在对应库中撤销移动/);
+
+  // 全选中的都是已移动资料：恢复禁用，但彻底删除仍可用。
+  const onlyMoved = renderTrashBulk({
+    selected: [{ kb: "标准", id: "m1", title: "资料 m1", movedTo: { kb: "目标库" } }],
+    docs: [moved],
+    fmtNumber,
+  });
+  assert.match(onlyMoved, /data-action="trash-docs-restore-selected" disabled>恢复所选/);
+  assert.doesNotMatch(onlyMoved, /data-action="trash-docs-purge-selected" disabled/);
+  assert.equal(trashPurgeTarget([selected[0]]).ok, true);
 });
 
 test("已删除资料为空时给出专门空状态", () => {

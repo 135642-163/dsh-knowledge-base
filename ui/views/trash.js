@@ -2,7 +2,7 @@
  * 回收站：归档库与全局已删除资料两个分区。
  *  - 归档库：沿用 0.23.0 的列表/空状态；
  *  - 已删除资料：只列活跃库里的软删除资料（归档库随库恢复，不单独列出），
- *    支持勾选、批量恢复与按库彻底删除。
+ *    支持勾选、批量恢复（排除已跨库移动的行）、撤销移动与按库彻底删除。
  * 纯渲染与选择/确认文案都是可导出函数，DOM 交互留给 app.js 绑定。
  */
 
@@ -25,12 +25,21 @@ export function trashDocKey(doc) {
   return `${String(doc?.kb ?? "")}\u0000${String(doc?.id ?? "")}`;
 }
 
+/** 是否是跨库移动留下的源库墓碑（`movedTo.kb` 非空）；脏数据按未移动处理。 */
+function trashDocMoved(doc) {
+  return Boolean(doc?.movedTo && typeof doc.movedTo === "object"
+    && typeof doc.movedTo.kb === "string" && doc.movedTo.kb !== "");
+}
+
 function selectionEntry(doc) {
-  return {
+  const entry = {
     kb: String(doc?.kb ?? ""),
     id: String(doc?.id ?? ""),
     title: String(doc?.title ?? ""),
   };
+  // 选择项带上移动标记：批量恢复要排除它们，批量彻底删除仍可包含。
+  if (trashDocMoved(doc)) entry.movedTo = { kb: doc.movedTo.kb };
+  return entry;
 }
 
 function selectionList(selected) {
@@ -117,6 +126,19 @@ export function trashPurgeTarget(selected) {
 }
 
 /**
+ * 批量恢复的目标：排除带 `movedTo.kb` 的源库墓碑（普通恢复会造出第二份可用副本）。
+ * 选择本身仍保留这些行，以便一起彻底删除；`excluded` 供工具条提示。
+ */
+export function trashRestoreTargets(selected, docs = []) {
+  const entries = selectionList(selected);
+  const moved = new Set(
+    (Array.isArray(docs) ? docs : []).filter(trashDocMoved).map(trashDocKey)
+  );
+  const restorable = entries.filter((entry) => !trashDocMoved(entry) && !moved.has(trashDocKey(entry)));
+  return { entries: restorable, excluded: entries.length - restorable.length };
+}
+
+/**
  * 彻底删除确认正文：最多列 10 个标题 + 「共 N 篇」+ 不可恢复警告。
  * 传 total 用于「清空本库已删除资料」这类没有逐篇标题的场景。
  */
@@ -188,15 +210,22 @@ export function renderTrashArchived({ items = [], loading = false, error = "", i
   `;
 }
 
-/** 多选工具条：跨库时彻底删除禁用并展示原因。 */
-export function renderTrashBulk({ selected = [], busy = false, fmtNumber = formatNumber } = {}) {
+/** 多选工具条：跨库时彻底删除禁用并展示原因；批量恢复自动排除已移动资料。 */
+export function renderTrashBulk({
+  selected = [],
+  docs = [],
+  busy = false,
+  fmtNumber = formatNumber,
+} = {}) {
   const list = selectionList(selected);
   if (list.length === 0) return "";
   const sameKb = sameTrashKb(list);
+  const restore = trashRestoreTargets(list, docs);
   return `
     <div class="docs-bulk trash-bulk">
       <strong>已选 ${fmtNumber(list.length)} 篇</strong>
-      <button type="button" class="btn" data-action="trash-docs-restore-selected"${busy ? " disabled" : ""}>恢复所选</button>
+      <button type="button" class="btn" data-action="trash-docs-restore-selected"${busy || restore.entries.length === 0 ? " disabled" : ""}>恢复所选</button>
+      ${restore.excluded > 0 ? `<span class="muted trash-bulk-hint">已排除 ${fmtNumber(restore.excluded)} 篇已移动资料，请在对应库中撤销移动</span>` : ""}
       <button type="button" class="btn danger" data-action="trash-docs-purge-selected"${busy || !sameKb ? " disabled" : ""}>彻底删除所选</button>
       ${sameKb ? "" : `<span class="muted trash-bulk-hint">${MULTI_KB_PURGE_HINT}</span>`}
       <button type="button" class="btn" data-action="trash-doc-clear"${busy ? " disabled" : ""}>取消选择</button>
@@ -244,7 +273,7 @@ export function renderTrashDocs({
       <span class="muted">共 ${fmtNumber(total)} 篇</span>
       ${truncated ? `<span class="badge warn">仅显示前 ${fmtNumber(TRASH_DOCS_CAP)} 篇</span>` : ""}
     </div>
-    ${renderTrashBulk({ selected, busy, fmtNumber })}
+    ${renderTrashBulk({ selected, docs: items, busy, fmtNumber })}
     <div class="table-scroll">
       <table class="table trash-docs-table">
         <thead><tr>
@@ -254,6 +283,10 @@ export function renderTrashDocs({
         <tbody>
           ${items.map((doc) => {
             const checked = trashSelectionHas(selected, doc.kb, doc.id);
+            // 移动留下的源库墓碑只能撤销移动；普通恢复会与目标库副本并存。
+            const action = trashDocMoved(doc)
+              ? `<button type="button" class="btn mini" data-action="trash-doc-undo-move" data-kb="${escapeAttr(doc.kb)}" data-id="${escapeAttr(doc.id)}" data-target="${escapeAttr(doc.movedTo.kb)}"${busy ? " disabled" : ""}>撤销移动</button>`
+              : `<button type="button" class="btn mini" data-action="trash-doc-restore" data-kb="${escapeAttr(doc.kb)}" data-id="${escapeAttr(doc.id)}"${busy ? " disabled" : ""}>恢复</button>`;
             return `<tr class="trash-doc-row">
               <td class="col-check"><input type="checkbox" data-action="trash-doc-select" data-kb="${escapeAttr(doc.kb)}" data-id="${escapeAttr(doc.id)}" aria-label="选择 ${escapeAttr(doc.title)}"${checked ? " checked" : ""}${busy ? " disabled" : ""} /></td>
               <td><span class="badge trash-kb-badge">${escapeHtml(doc.kb)}</span></td>
@@ -262,7 +295,7 @@ export function renderTrashDocs({
               <td class="muted">${formatDate(doc.deletedAt)}</td>
               <td class="col-actions">
                 <div class="trash-actions">
-                  <button type="button" class="btn mini" data-action="trash-doc-restore" data-kb="${escapeAttr(doc.kb)}" data-id="${escapeAttr(doc.id)}"${busy ? " disabled" : ""}>恢复</button>
+                  ${action}
                   <button type="button" class="btn mini danger" data-action="trash-doc-purge" data-kb="${escapeAttr(doc.kb)}" data-id="${escapeAttr(doc.id)}"${busy ? " disabled" : ""}>彻底删除</button>
                 </div>
               </td>

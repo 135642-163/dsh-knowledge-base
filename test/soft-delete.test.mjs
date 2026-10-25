@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import JSZip from "jszip";
 import { apply } from "../lib/index.js";
-import { readManifest, writeManifestAtomic } from "../lib/store.js";
+import { readManifest, restoreDoc, restoreDocVersion, snapshotDocVersion, writeManifestAtomic } from "../lib/store.js";
 
 async function setup() {
   const root = await mkdtemp(join(tmpdir(), "kb-soft-delete-"));
@@ -130,6 +130,61 @@ test("failed documents can be soft-deleted and restored with the error preserved
     assert.equal(after.error, "解析失败：测试用错误");
     assert.equal(after.deletedAt, undefined);
     assert.equal(after.deletedFromStatus, undefined);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("restoreDoc refuses a source doc moved to another kb and keeps its tombstone", async () => {
+  const { root, tools, exec } = await setup();
+  try {
+    const add = await tools.get("kb_add_note").execute(
+      { kb: "软删除测试", title: "已移走", content: "目标库已有副本。" },
+      exec
+    );
+    const dir = join(root, "kb", "软删除测试");
+    await tools.get("kb_remove").execute({ kb: "软删除测试", doc: add.docId }, exec);
+    const manifest = await readManifest(dir);
+    const doc = manifest.docs.find((item) => item.id === add.docId);
+    doc.movedTo = {
+      kb: "目标库",
+      docId: "target-doc",
+      transferId: "abcdef12",
+      at: "2026-10-02T00:00:00.000Z",
+    };
+    await writeManifestAtomic(dir, manifest);
+    const deletedAt = doc.deletedAt;
+
+    // 普通恢复会与目标库副本并存；必须提示改用撤销移动。
+    await assert.rejects(
+      () => restoreDoc(dir, add.docId),
+      /文档已跨库移动，请使用撤销移动/
+    );
+    const refused = (await readManifest(dir)).docs.find((item) => item.id === add.docId);
+    assert.equal(refused.status, "deleted");
+    assert.equal(refused.deletedAt, deletedAt);
+    assert.deepEqual(refused.movedTo, doc.movedTo);
+
+    // kb_restore 工具同样把 store 的错误透出，不会偷偷恢复。
+    await assert.rejects(
+      () => tools.get("kb_restore").execute({ kb: "软删除测试", doc: add.docId }, exec),
+      /文档已跨库移动，请使用撤销移动/
+    );
+    const afterTool = (await readManifest(dir)).docs.find((item) => item.id === add.docId);
+    assert.equal(afterTool.status, "deleted");
+    assert.deepEqual(afterTool.movedTo, doc.movedTo);
+
+    // kb_restore(version=N) 走 restoreDocVersion，同样不能绕过移动墓碑。
+    const snapshot = await snapshotDocVersion(dir, { ...afterTool, version: 1 }, "test");
+    assert.ok(snapshot);
+    await assert.rejects(
+      () => restoreDocVersion(dir, add.docId, 1),
+      /文档已跨库移动，请使用撤销移动/
+    );
+    const afterVersion = (await readManifest(dir)).docs.find((item) => item.id === add.docId);
+    assert.equal(afterVersion.status, "deleted");
+    assert.equal(afterVersion.deletedAt, deletedAt);
+    assert.deepEqual(afterVersion.movedTo, doc.movedTo);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

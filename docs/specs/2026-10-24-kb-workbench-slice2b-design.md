@@ -367,7 +367,7 @@ ctx.systemPrompt.section({
 
 ## 15. 测试计划
 
-### 15.1 自动化（`node:test`；0.21.0 新增 188 例，312 → **500**；0.21.1 复审后 **508**；0.22.0 **620**；0.23.0 **733**；0.24.0 **768**——见 §15.3–§15.5 与 §21.8、§22.7、§23.4）
+### 15.1 自动化（`node:test`；0.21.0 新增 188 例，312 → **500**；0.21.1 复审后 **508**；0.22.0 **620**；0.23.0 **733**；0.24.0 **772**（含复审修复 +4）——见 §15.3–§15.5 与 §21.8、§22.7、§23.4）
 
 - `scope-store.test.mjs`（17）：**文件层**——缺失文件读空、原子写 + `0600`、进程内串行队列（20 并发）、mutator 返回 falsy 时不写盘、同步视图 mtime+size 缓存与冻结视图、损坏/超限文件（读空、拒写 `SCOPE_UNUSABLE`）、清理回写只在变化时发生、`removeScopeKb`/`renameScopeKb` 库名同步、未知条目字段保留。sessionId 校验、mode/kbs 结构校验、50 上限、TTL 过期与失效库 prune、归档/合并判定由 `scope.test.mjs` / `scope-api.test.mjs` 覆盖。
 - `scope.test.mjs`（37）：条目归一化/50 上限/非法 sessionId、子会话快照 + `inheritedFrom`、父无条目 → all、父变化不回溯、只读解析（GET）不落快照、写失败降级为只读解析、`setScope` 严格校验（不存在/归档/合并）、`resolveSingleKb`/`resolveDocTarget` 单测（含软删除与虚拟文档）。
@@ -431,26 +431,34 @@ ctx.systemPrompt.section({
   - `ui-docs.test.mjs` 20（用例数不变）：断言随新行内操作/状态筛选更新。
 - 全部用例使用临时目录，不依赖本机知识库；`check:client` / `check-ui` 为独立门禁，不计入用例数。
 
-### 15.5 0.24.0 新增与变更用例（`npm test` 768/768）
+### 15.5 0.24.0 新增与变更用例（`npm test` 772/772）
 
-- 0.23.0（`474b40d`）基线 **733**；0.24.0 净增 **35** 例：新增文件 32 例，现有文件 +3 例。
+- 0.23.0（`474b40d`）基线 **733**；0.24.0 净增 **39** 例：新增文件 34 例，现有文件 +5 例。
+  其中复审修复新增 **4** 例（`soft-delete` / `web-docs-lifecycle` 各 +1，`ui-trash` +2）。
 - 新增文件：
   - `web-trash-docs.test.mjs`（10）：`GET /trash/docs` 只列活跃非合并库（归档/合并/在用各一例）、
     字段投影与空值归一、`deletedAt` 倒序与缺失日期排最后、500 条上限与 `truncated`（恰好 500 不截断）；
     purge 的库名确认（400 `CONFIRM_REQUIRED`）、`all` 与 `ids` 二选一（400 `INVALID_ARGS`）、
     `ids` 仅接受本库已删除条目（409 `DOC_NOT_DELETED`）、去重/日志/索引刷新、`all` 清空与空回收站
     （409 `NO_DELETED_DOCS`）、部分失败不回传路径、归档库与穿越库名、写请求 UI 头与同源校验。
-  - `ui-trash.test.mjs`（22）：`?tab=docs` 才进已删除资料、未知值回落归档库、页签计数取服务端 `total`
+  - `ui-trash.test.mjs`（24，含复审 +2）：`?tab=docs` 才进已删除资料、未知值回落归档库、页签计数取服务端 `total`
     而非 500 条；归档库分区保留原列表/空态/加载错误态；已删除资料表的库徽标、行内操作、总数、
     500 提示与独立加载/错误态；防御性过滤混入的在用资料；跨库选择判定与 `kb+id` 去重；
     `toggleOne`/`toggleAll`；批量工具条同库可删/跨库禁用并说明原因；busy 禁用；确认正文
     （最多 10 标题/总篇数/不可恢复警告/清空本库的仅 `total`）；空选择与跨库 purge 目标拒绝；名称与原因转义。
+    复审补：移动来源行渲染「撤销移动」而非「恢复」（保留勾选与彻底删除）、`trashRestoreTargets`
+    以列表兜底排除已移动行、工具条「已排除 N 篇…」提示与全移动时恢复禁用。
 - 变更文件：
   - `ui-api.test.mjs` 11 → 12：`trashDocs()` 与 `purgeDocs()` 的 URL/方法/请求体（`all` 优先于 `ids`、
     只读接口不带 `x-kb-ui`）。
   - `ui-docs-actions.test.mjs` 29 → 30：「清空本库已删除资料」入口只在「已删除」筛选且库内有回收站内容时出现，
     无结果/忙碌/无已删除资料的分支。
   - `ui-router.test.mjs` 6 → 7：`#/trash?tab=docs` 的 query 解析。
+  - `soft-delete.test.mjs` 3 → 4（复审）：`restoreDoc` 与 `restoreDocVersion`（`kb_restore(version=N)`）
+    对带 `movedTo.kb` 的源库墓碑都抛「文档已跨库移动，请使用撤销移动」，状态、`deletedAt` 与
+    `movedTo` 保持不变；`kb_restore` 的普通恢复同样拒绝。
+  - `web-docs-lifecycle.test.mjs` 11 → 12（复审）：`POST .../restore` 对已移动文档回 `409 DOC_MOVED`
+    （details `{ targetKb }`），拒绝后清单仍是 `deleted`；未知文档仍 404，普通软删资料仍可恢复。
 - 全部用例使用临时目录，不依赖本机知识库；`check:client` / `check-ui` 为独立门禁，不计入用例数。
 
 ## 16. 验收标准
@@ -972,11 +980,14 @@ ctx.systemPrompt.section({
 
 ## 23. 0.24.0 回收站治理
 
-> 版本 0.24.0（基线 0.23.0 / `npm test` 733；本版 **768**，见 §15.5、§23.4）。
+> 版本 0.24.0（基线 0.23.0 / `npm test` 733；本版 **772**（含复审修复 +4），见 §15.5、§23.4）。
 > 本轮把回收站从「整库」扩展到「单篇资料」：新增全局已删除资料列举与按库批量彻底删除，
 > 工作台回收站拆成「归档库 / 已删除资料」两个分区。
 > 相关提交：`ce163c2`（回收站列举与批量彻底删除 API，含 10 例 API 测试）、
 > `b1420f3`（回收站页签与资料操作 UI，含 22 例 UI 测试与三处既有用例扩展）。
+> 复审修复（同一 0.24.0，未升版本）：移动墓碑禁止普通恢复（`409 DOC_MOVED`）、回收站行内
+> 「撤销移动」、批量恢复排除已移动资料、`refreshAfterTrashChange` 改静默更新侧栏、purge 日志/索引
+> best-effort。
 
 ### 23.1 `GET /kb/api/trash/docs`
 
@@ -1011,9 +1022,17 @@ ctx.systemPrompt.section({
   「文档不存在」），只把 `{ id, title, error: "彻底删除失败" }` 记入 `failed`；错误文案固定，
   不把 errno/绝对路径跨 API 边界回传。
 - **副作用**：每篇成功写库日志 `remove`（`detail: "彻底删除"`），全部处理完统一 `refreshKbIndex`
-  刷新 `index.md`（即使有部分失败也刷新）。
+  刷新 `index.md`（即使有部分失败也刷新）。这两步是 **best-effort**（`.catch(() => {})`）：
+  永久删除已经落盘，日志或索引刷新失败只留在服务端，不再让 200 响应变成 500。
 - **响应**：`{ kb, purged, failed: [{ id, title, error }] }`；有部分失败仍是 HTTP 200，
   全失败时 `purged` 为 0。
+
+同一组回收站写接口还包括恢复：`POST /kb/api/kbs/:name/docs/:id/restore` 先 `readDoc`，
+未知文档仍 `404 DOC_NOT_FOUND`；**带 `movedTo.kb` 的源库墓碑**直接 `409 DOC_MOVED`
+（文案「文档已跨库移动，请使用撤销移动」，details `{ targetKb }`），不调用 `restoreDoc`，
+避免源库恢复后与目标库副本同时可用。store 层 `restoreDoc` 与 `restoreDocVersion`
+（`kb_restore(version=N)` 走的历史版本恢复）对同一条件抛同样的普通 `Error`，工具也无法绕过；
+普通软删除文档的恢复状态码与副作用不变。
 
 ### 23.3 工作台回收站 UI
 
@@ -1025,17 +1044,24 @@ ctx.systemPrompt.section({
 - **已删除资料分区**：表头为 库 / 标题 / 类型 / 删除时间 / 操作，**每行带库徽标**；数据来自
   `GET /trash/docs`，渲染前再用 `deleted !== false` 挡一次脏数据；头部展示 `total`，
   `truncated` 时额外显示「仅显示前 500 篇」。归档库里的资料不在该分区出现，整库恢复后回到正常状态。
+- **行内操作**：带 `movedTo.kb` 的源库墓碑渲染 **撤销移动**（`data-action="trash-doc-undo-move"`，
+  `data-target` 为目标库名），**不渲染恢复**；其余行渲染 恢复 / 彻底删除。撤销移动调用
+  `undoMove(kb, id, { target })`，成功后 toast「已撤销移动」并刷新回收站与侧栏。已移动行仍可勾选，
+  用于彻底删除。
 - **勾选**：选择项以 `kb + "\u0000" + id` 为键（同一 id 可能出现在不同库，不能混为一篇）；
   `trashSelectionToggleOne` 按显式 `checked` 增删，`trashSelectionToggleAll` 补齐当前列表、
   再点取消当前列表并保留其它页/库的选择；选择随刷新清空。
-- **恢复所选（允许跨库）**：逐篇调用 `restoreDoc(kb, id)`；失败不中断其余条目，最后统一 toast
-  （全成功「已恢复」/「已恢复 N 篇」，部分失败「X 篇已恢复，Y 篇失败：`<原因>`」）；完成后刷新
-  回收站、侧栏库计数，并在当前详情页属于受影响库时重载详情。
+- **恢复所选（允许跨库）**：`trashRestoreTargets` 以当前列表为准排除 `movedTo` 行（旧选择项没带
+  移动标记也能识别），只逐篇调用普通行的 `restoreDoc(kb, id)`；失败不中断其余条目，最后统一 toast
+  （全成功「已恢复」/「已恢复 N 篇」，部分失败「X 篇已恢复，Y 篇失败：`<原因>`」）。被排除时工具条
+  显示「已排除 N 篇已移动资料，请在对应库中撤销移动」；全部选中行都已移动时「恢复所选」禁用，
+  但「彻底删除所选」仍可用。完成后刷新回收站、侧栏库计数，并在当前详情页属于受影响库时重载详情。
 - **彻底删除所选（只能同库）**：`trashPurgeTarget` 对空选择与跨库选择都返回可展示的原因；
-  跨库时按钮禁用并显示「彻底删除一次只能处理同一个库的资料」。确认弹窗
-  `purgeDocsConfirmBody` 列出库名、最多 10 个标题、「共 N 篇」与固定警告；`requireText: kb`
-  要求逐字输入库名。行内单篇、多选批量、清空本库共用同一确认组件与同一 API；资料页「已删除」
-  筛选里的单篇「彻底删除」仍是 0.23.0 的逐字输入**标题**确认，走 `docs/:id/delete`，不属于本 API。
+  跨库时按钮禁用并显示「彻底删除一次只能处理同一个库的资料」。`purgeDocsConfirmBody` 的正文只列
+  最多 10 个标题、「共 N 篇」与固定警告；库名由确认弹窗的**输入框**承载（`requireText: kb`，
+  标签「输入库名」），工作台调用时不把库名写进正文。行内单篇、多选批量、清空本库共用同一确认组件
+  与同一 API；资料页「已删除」筛选里的单篇「彻底删除」仍是 0.23.0 的逐字输入**标题**确认，
+  走 `docs/:id/delete`，不属于本 API。
 - **移动资料警告**：警告常量 `PURGE_DOCS_WARNING` =「彻底删除会移除原件、解析内容与历史版本，
   且撤销移动将不再可用。」被移动过的资料在源库清单里带 `movedTo`，永久删除后该记录消失，
   `undo-move` 不再可用——因此确认弹窗必须提示，不能只写「不可恢复」。
@@ -1046,21 +1072,29 @@ ctx.systemPrompt.section({
 - **竞态**：`loadTrash` 用自增 `trashToken`，响应返回时 token 不匹配直接丢弃（快速切页签/连续刷新
   不会把旧结果盖到新页签）；归档库与已删除资料用 `Promise.allSettled` 并行拉取，一边失败不影响
   另一边展示（各自给出错误与重试）；加载时清空跨页选择。
-- 操作完成后统一 `refreshAfterTrashChange`（回收站 + 库计数 + 必要时详情）；`busy` 期间行内与
-  批量按钮禁用，避免重复提交。
+- 操作完成后统一 `refreshAfterTrashChange`（回收站 + `refreshKbsQuiet` 静默更新侧栏计数 + 必要时详情，
+  不再走 `loadKbs` 的整页 loading）；`busy` 期间行内与批量按钮禁用，避免重复提交。
 
 ### 23.4 测试
 
-- `npm test` **768/768** 通过（0.23.0 基线 733，净增 35：新增文件 32 例——`web-trash-docs.test.mjs` 10、
-  `ui-trash.test.mjs` 22；现有文件 +3——`ui-api.test.mjs` 11 → 12、`ui-docs-actions.test.mjs` 29 → 30、
-  `ui-router.test.mjs` 6 → 7）；逐文件明细见 §15.5。
+- `npm test` **772/772** 通过（0.23.0 基线 733，净增 39：新增文件 34 例——`web-trash-docs.test.mjs` 10、
+  `ui-trash.test.mjs` 24；现有文件 +5——`ui-api.test.mjs` 11 → 12、`ui-docs-actions.test.mjs` 29 → 30、
+  `ui-router.test.mjs` 6 → 7、`soft-delete.test.mjs` 3 → 4、`web-docs-lifecycle.test.mjs` 11 → 12）；
+  其中复审修复新增 4 例，逐文件明细见 §15.5。
+- 复审修复用例覆盖：`restoreDoc` 与 `restoreDocVersion` 对移动墓碑抛错且不改状态；`POST .../restore`
+  回 `409 DOC_MOVED`（details `{targetKb}`）；回收站移动行渲染「撤销移动」而非「恢复」；
+  批量恢复目标排除移动行并给提示。
+- **自动化边界**：`loadTrash` 旧响应作废（token）、刷新后清空选择、跨库恢复循环与清空本库按钮接线
+  都是 DOM 交互，不在 `npm test` 的纯函数/API 用例内；按本轮验收口径，它们由一次性 WKWebView
+  真实宿主验收覆盖（见 §23.5）。新增的 `trash-doc-undo-move` 行点击接线同样不在自动化内，
+  其渲染与批量目标过滤由 `ui-trash.test.mjs` 覆盖。
 - `npm run typecheck`、`npm run check:client`、`node scripts/check-ui.mjs` 全绿；
   `check:client` / `check-ui` 为独立门禁，不计入用例数。
 
 ### 23.5 验收记录（2026-10-25）
 
-- [x] 自动化：`npm test` **768/768**（含 `check:client`、`check-ui`）；`npm run typecheck`、
-  `npm run check:client`、`node scripts/check-ui.mjs` 均通过。
+- [x] 自动化：发布时 `npm test` **768/768**；复审修复后复跑 **772/772**（含 `check:client`、
+  `check-ui`）；`npm run typecheck`、`npm run check:client`、`node scripts/check-ui.mjs` 均通过。
 - [x] 真实宿主（临时 `dsh --profile web --port 55943` + 临时 `kbRoot` + WKWebView 脚本）：
   - 造数：活跃库 **甲库 / 乙库** + 归档库 **丙库**；甲库软删除 A1、A2、A4，乙库软删除 B1，
     丙库归档前软删除 C1（丙库另有在用资料 C2）。
@@ -1076,7 +1110,11 @@ ctx.systemPrompt.section({
     `-library-trash-cleared.png`（资料页「已删除」筛选清空 A4 后的空态）。
 - **口径说明**：真实 DOM 流程仍走一次性 WKWebView 脚本（`wkflow` + 注入的 `flow.js`），不是
   Playwright 自动化；UI 回归由纯函数 / fake DOM 单测与 `check-ui` 语法门禁兜底。
-- 与 §15 的对应：本轮用例总数在 §15.1 更新为 **768**，逐文件明细补在 §15.5。
+- **复审修复口径**：本轮未新增真实宿主截图；`trash-doc-undo-move` 的点击接线与
+  `loadTrash` token、刷新后选择重置一样不在 `npm test` 内。token/选择重置按上面的
+  一次性 WKWebView 验收口径覆盖；新增的撤销移动行只做了渲染与批量目标过滤的纯函数用例，
+  真实点击留待下次宿主抽检。
+- 与 §15 的对应：本轮用例总数在 §15.1 更新为 **772**，逐文件明细补在 §15.5。
 
 ### 23.6 已知限制与跟进
 

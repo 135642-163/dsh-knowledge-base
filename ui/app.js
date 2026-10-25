@@ -5,7 +5,8 @@ import { renderOverview } from "./views/overview.js";
 import { docsPageSize, docsStatus, renderDetail, selectionToggle, selectionToggleOne } from "./views/detail.js";
 import { attachDocsControls, createRequestGate } from "./docs-controls.js";
 import {
-  purgeDocsConfirmBody, renderTrash, trashPurgeTarget, trashSelectionToggleAll, trashSelectionToggleOne,
+  purgeDocsConfirmBody, renderTrash, trashPurgeTarget, trashRestoreTargets,
+  trashSelectionToggleAll, trashSelectionToggleOne,
 } from "./views/trash.js";
 import {
   deleteConfirmBody, openConfirmModal, openCreateModal, openDocModal, openKbPickerModal, openMoveModal,
@@ -61,19 +62,22 @@ function route() {
   return parseHash(window.location.hash);
 }
 
+/** 侧栏可见库：自动创建的空 default 库不展示；一旦有内容（含归档文档/笔记）就正常显示。 */
+function visibleKbs(all) {
+  return (Array.isArray(all) ? all : []).filter((kb) => {
+    if (kb.name !== "default") return true;
+    const d = kb.docs ?? {};
+    return (d.ready ?? 0) + (d.importing ?? 0) + (d.failed ?? 0) + (d.deleted ?? 0) + (d.notes ?? 0) > 0;
+  });
+}
+
 async function loadKbs() {
   state.loading = true;
   state.error = "";
   render();
   try {
     const payload = await api.kbs();
-    const all = Array.isArray(payload?.kbs) ? payload.kbs : [];
-    // 自动创建的空 default 库不展示；一旦有内容（含归档文档/笔记）就正常显示。
-    state.kbs = all.filter((kb) => {
-      if (kb.name !== "default") return true;
-      const d = kb.docs ?? {};
-      return (d.ready ?? 0) + (d.importing ?? 0) + (d.failed ?? 0) + (d.deleted ?? 0) + (d.notes ?? 0) > 0;
-    });
+    state.kbs = visibleKbs(payload?.kbs);
   } catch (error) {
     state.error = error instanceof ApiError ? error.message : String(error?.message ?? error);
   } finally {
@@ -89,7 +93,8 @@ async function loadKbs() {
 async function refreshKbsQuiet() {
   try {
     const payload = await api.kbs();
-    state.kbs = Array.isArray(payload?.kbs) ? payload.kbs : [];
+    // 与 loadKbs 用同一套可见性规则：静默刷新不能把空 default 库冒出来。
+    state.kbs = visibleKbs(payload?.kbs);
   } catch {
     /* ignore：下一轮整页刷新会补齐 */
   }
@@ -640,7 +645,8 @@ function trashDocByKey(kb, id) {
 /** 回收站操作后的统一刷新：归档库 + 已删除资料 + 侧栏计数，必要时刷新详情。 */
 async function refreshAfterTrashChange(affectedKbs = []) {
   await loadTrash();
-  await loadKbs();
+  // 侧栏计数静默更新：不切 state.loading，避免主面板闪一下整页加载态。
+  await refreshKbsQuiet();
   const current = route();
   if (current.page === "detail" && (affectedKbs.length === 0 || affectedKbs.includes(current.name))) {
     await loadDetail(current.name, current.tab || "overview");
@@ -654,16 +660,11 @@ function purgeDocsToast(result) {
   return [`${purged} 篇已彻底删除，${failed.length} 篇失败`, "error"];
 }
 
-/** 逐篇恢复已删除资料；失败不中断其余条目，最后统一报告。 */
+/** 逐篇恢复已删除资料；已移动的行只能撤销移动，批量恢复自动排除。失败不中断其余条目。 */
 async function restoreTrashDocs(entries) {
   if (state.trash.busy) return;
-  const list = (Array.isArray(entries) ? entries : [])
-    .map((entry) => ({
-      kb: String(entry?.kb ?? ""),
-      id: String(entry?.id ?? ""),
-      title: String(entry?.title ?? ""),
-    }))
-    .filter((entry) => entry.kb !== "" && entry.id !== "");
+  // 以当前列表为准确认 movedTo：旧的选择项可能没带移动标记。
+  const { entries: list } = trashRestoreTargets(entries, state.trash.docs?.items ?? []);
   if (list.length === 0) return;
   state.trash.busy = true;
   state.trash.selectedDocs = [];
@@ -694,6 +695,27 @@ async function restoreTrashDocs(entries) {
       : `恢复失败：${reason}`,
     "error",
   );
+}
+
+/** 回收站里撤销跨库移动：源库文档恢复，目标库副本软删除进回收站。 */
+async function undoTrashMove(doc, target = "") {
+  if (state.trash.busy) return;
+  const sourceKb = String(doc?.kb ?? "");
+  const targetKb = String(target || doc?.movedTo?.kb || "");
+  if (sourceKb === "" || !doc?.id || targetKb === "") return;
+  state.trash.busy = true;
+  render();
+  try {
+    await api.undoMove(sourceKb, doc.id, { target: targetKb });
+  } catch (error) {
+    state.trash.busy = false;
+    render();
+    showToast(errorText(error), "error");
+    return;
+  }
+  state.trash.busy = false;
+  showToast("已撤销移动");
+  await refreshAfterTrashChange([sourceKb, targetKb]);
 }
 
 /** 彻底删除已删除资料：必须同一库，逐字输入库名确认。 */
@@ -967,6 +989,10 @@ function bind() {
     } else if (action === "trash-doc-restore") {
       const doc = trashDocByKey(target.dataset.kb, target.dataset.id);
       if (doc) await restoreTrashDocs([doc]);
+    } else if (action === "trash-doc-undo-move") {
+      if (state.trash.busy) return;
+      const doc = trashDocByKey(target.dataset.kb, target.dataset.id);
+      if (doc) await undoTrashMove(doc, target.dataset.target ?? "");
     } else if (action === "trash-doc-purge") {
       const doc = trashDocByKey(target.dataset.kb, target.dataset.id);
       if (doc) purgeTrashDocs([doc]);

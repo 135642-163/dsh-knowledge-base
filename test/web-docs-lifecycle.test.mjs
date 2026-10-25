@@ -205,6 +205,46 @@ test("deleted docs keep movedTo in list/read projections for undo UI", async () 
   assert.equal(read.json.deleted, true);
 });
 
+test("restore of a moved source doc returns 409 DOC_MOVED and keeps it deleted", async () => {
+  const { kbRoot, dir } = await setup();
+  const movedTo = { kb: "目标库", docId: "t1", transferId: "abc123", at: "2026-10-02T00:00:00.000Z" };
+  const manifest = await readManifest(dir);
+  manifest.docs.push({
+    id: "doc5",
+    title: "已移走",
+    type: "pdf-text",
+    status: "deleted",
+    deletedAt: "2026-10-02T00:00:00.000Z",
+    deletedFromStatus: "ready",
+    movedTo,
+    version: 1,
+  });
+  await writeManifestAtomic(dir, manifest);
+
+  const res = await call({ kbRoot }, makeReq({ method: "POST", url: docUrl("doc5", "restore") }));
+  assert.equal(res.res.status, 409);
+  assert.equal(res.json.error.code, "DOC_MOVED");
+  assert.equal(res.json.error.message, "文档已跨库移动，请使用撤销移动");
+  assert.deepEqual(res.json.error.details, { targetKb: "目标库" });
+
+  // 拒绝后清单保持墓碑：仍是 deleted，movedTo/deletedAt 原样保留。
+  const after = await docOf(dir, "doc5");
+  assert.equal(after.status, "deleted");
+  assert.equal(after.deletedAt, "2026-10-02T00:00:00.000Z");
+  assert.deepEqual(after.movedTo, movedTo);
+  assert.equal(after.deletedFromStatus, "ready");
+
+  // 未知文档仍是 404；非移动的已删除文档不受影响（用 doc1 验证正常恢复路径）。
+  const missing = await call({ kbRoot }, makeReq({ method: "POST", url: docUrl("nope", "restore") }));
+  assert.equal(missing.res.status, 404);
+  assert.equal(missing.json.error.code, "DOC_NOT_FOUND");
+  await call({ kbRoot }, makeReq({ method: "POST", url: docUrl("doc1", "delete"), body: {} }));
+  const normal = await call({ kbRoot }, makeReq({ method: "POST", url: docUrl("doc1", "restore") }));
+  assert.equal(normal.res.status, 200);
+  assert.equal(normal.json.doc.status, "ready");
+  assert.equal(normal.json.doc.movedTo, null);
+});
+
 test("soft delete accepts ready and failed docs, restore returns the original status", async () => {
   const { kbRoot, dir } = await setup();
 
