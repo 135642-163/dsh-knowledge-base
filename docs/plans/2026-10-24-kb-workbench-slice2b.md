@@ -3663,3 +3663,35 @@ Expected: `--ff-only` 成功；HEAD 为 `chore: release 0.21.0 …`，其后还�
   - 真实浏览器自动化（Playwright）仍未接入，UI 验收靠一次性 WKWebView 脚本；
   - 跨 `kbRoot` 迁移没有入口；
   - Office 一键安装尚未做真实下载（约 300 MB）与弱网/失败重试的现场验收。
+
+## 0.24.0 实施记录
+
+0.23.0 → 0.24.0 的回收站治理轮（全局已删除资料列举 + 按库批量彻底删除 + 回收站两页签）。
+任务按实际提交顺序记录：
+
+| # | 任务 | 提交 | 主要文件 |
+|---|---|---|---|
+| 1 | 回收站列举与批量彻底删除 API：`GET /trash/docs`（只扫活跃非合并库、字段投影、`deletedAt` 倒序、500 上限与 `truncated`）、`POST /kbs/:name/docs/purge`（库名确认、`all`/`ids` 二选一、只删 `isDeleted`、逐篇 `removeDoc`、日志与索引刷新、部分 `failed`、409 分支） | `ce163c2` | `lib/web/api.js`、`test/web-trash-docs.test.mjs` |
+| 2 | 回收站页签与资料操作 UI：`#/trash` / `#/trash?tab=docs` 两个分区、已删除资料表（库徽标/行内恢复/彻底删除）、跨库「恢复所选」、同库「彻底删除所选」、库名确认弹窗、清空本库、500 篇提示、移动资料撤销警告、`loadTrash` 旧响应作废 | `b1420f3` | `ui/views/trash.js`、`ui/app.js`、`ui/api.js`、`ui/views/detail.js`、`ui/style.css`、`test/ui-trash.test.mjs`、`test/ui-api.test.mjs`、`test/ui-docs-actions.test.mjs`、`test/ui-router.test.mjs` |
+
+- **真实宿主验收（2026-10-25，临时 `dsh --profile web --port 55943` + 临时 `kbRoot` + WKWebView 脚本）**：
+  造数：活跃库甲/乙 + 归档库丙；甲库软删除 A1/A2/A4，乙库软删除 B1，丙库归档前软删除 C1（另有在用资料 C2）。
+  回收站页签显示 **归档库 1 / 已删除资料 4**，C1 不出现（归档库内的资料不单独列出），每行带库徽标；
+  行内恢复 A1（恢复后 `status: ready`）、行内彻底删除 A2（输入库名 甲库）、多选同库彻底删除 B1
+  （输入库名 乙库）、资料页「已删除」筛选「清空本库已删除资料」（输入库名 甲库）清掉 A4；
+  最终 `GET /trash/docs` 的 `total` 为 0，丙库仍归档、C1/C2 完好。
+  截图见 `/Users/littlesun/workspace/deepseek/project/知识库/.acceptance/screenshot-24-trash-docs.png`、
+  `-trash-after.png`、`-library-trash-cleared.png`。
+- **测试**：`npm test` **768/768**（0.23.0 基线 733，净增 35：新增文件 32——`web-trash-docs.test.mjs` 10、
+  `ui-trash.test.mjs` 22；现有文件 +3——`ui-api.test.mjs` 11 → 12、`ui-docs-actions.test.mjs` 29 → 30、
+  `ui-router.test.mjs` 6 → 7）；`npm run typecheck`、`npm run check:client`、
+  `node scripts/check-ui.mjs` 全绿。逐文件明细见 spec §15.5，本轮说明见 spec §23。
+- **发布**：版本 0.24.0（`package.json`、`package-lock.json` 根与 `packages[""]`、`lib/version.js`），
+  README 新增 `## 0.24.0 回收站治理` 并更新测试段（768）；spec 追加 §23 与 §15.5；本文件追加本节。
+  发布提交：`chore: release 0.24.0 with trash governance`。
+- **已知跟进**：
+  - 跨库批量彻底删除未提供（一次 purge 只能一个库，跨库需逐库确认）；
+  - 回收站没有搜索/排序，已删除资料上限 500 篇；
+  - 没有自动过期清理（后续可加保留天数配置）；
+  - 归档库内的资料只能随库恢复，缺少单篇恢复粒度；
+  - 真实浏览器自动化（Playwright）仍未接入，UI 验收靠一次性 WKWebView 脚本。

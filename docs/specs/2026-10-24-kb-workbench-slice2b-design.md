@@ -367,7 +367,7 @@ ctx.systemPrompt.section({
 
 ## 15. 测试计划
 
-### 15.1 自动化（`node:test`；0.21.0 新增 188 例，312 → **500**；0.21.1 复审后 **508**；0.22.0 **620**；0.23.0 **733**——见 §15.3、§15.4 与 §21.8、§22.7）
+### 15.1 自动化（`node:test`；0.21.0 新增 188 例，312 → **500**；0.21.1 复审后 **508**；0.22.0 **620**；0.23.0 **733**；0.24.0 **768**——见 §15.3–§15.5 与 §21.8、§22.7、§23.4）
 
 - `scope-store.test.mjs`（17）：**文件层**——缺失文件读空、原子写 + `0600`、进程内串行队列（20 并发）、mutator 返回 falsy 时不写盘、同步视图 mtime+size 缓存与冻结视图、损坏/超限文件（读空、拒写 `SCOPE_UNUSABLE`）、清理回写只在变化时发生、`removeScopeKb`/`renameScopeKb` 库名同步、未知条目字段保留。sessionId 校验、mode/kbs 结构校验、50 上限、TTL 过期与失效库 prune、归档/合并判定由 `scope.test.mjs` / `scope-api.test.mjs` 覆盖。
 - `scope.test.mjs`（37）：条目归一化/50 上限/非法 sessionId、子会话快照 + `inheritedFrom`、父无条目 → all、父变化不回溯、只读解析（GET）不落快照、写失败降级为只读解析、`setScope` 严格校验（不存在/归档/合并）、`resolveSingleKb`/`resolveDocTarget` 单测（含软删除与虚拟文档）。
@@ -429,6 +429,28 @@ ctx.systemPrompt.section({
   - `ui-api.test.mjs` 10 → 11：新增 `deleteDoc` / `restoreDoc` / `reparseDoc` / `movePreflight` / `moveDocs` / `undoMove` / `officeStatus` / `installOffice` 的请求形状。
   - `ui-preview.test.mjs` 9 → 21：Office 安装态渲染（同意勾选解锁、已安装、进度、失败重试、缺工具链）、安装轮询/超时/完成后重载预览、状态查询失败兜底。
   - `ui-docs.test.mjs` 20（用例数不变）：断言随新行内操作/状态筛选更新。
+- 全部用例使用临时目录，不依赖本机知识库；`check:client` / `check-ui` 为独立门禁，不计入用例数。
+
+### 15.5 0.24.0 新增与变更用例（`npm test` 768/768）
+
+- 0.23.0（`474b40d`）基线 **733**；0.24.0 净增 **35** 例：新增文件 32 例，现有文件 +3 例。
+- 新增文件：
+  - `web-trash-docs.test.mjs`（10）：`GET /trash/docs` 只列活跃非合并库（归档/合并/在用各一例）、
+    字段投影与空值归一、`deletedAt` 倒序与缺失日期排最后、500 条上限与 `truncated`（恰好 500 不截断）；
+    purge 的库名确认（400 `CONFIRM_REQUIRED`）、`all` 与 `ids` 二选一（400 `INVALID_ARGS`）、
+    `ids` 仅接受本库已删除条目（409 `DOC_NOT_DELETED`）、去重/日志/索引刷新、`all` 清空与空回收站
+    （409 `NO_DELETED_DOCS`）、部分失败不回传路径、归档库与穿越库名、写请求 UI 头与同源校验。
+  - `ui-trash.test.mjs`（22）：`?tab=docs` 才进已删除资料、未知值回落归档库、页签计数取服务端 `total`
+    而非 500 条；归档库分区保留原列表/空态/加载错误态；已删除资料表的库徽标、行内操作、总数、
+    500 提示与独立加载/错误态；防御性过滤混入的在用资料；跨库选择判定与 `kb+id` 去重；
+    `toggleOne`/`toggleAll`；批量工具条同库可删/跨库禁用并说明原因；busy 禁用；确认正文
+    （最多 10 标题/总篇数/不可恢复警告/清空本库的仅 `total`）；空选择与跨库 purge 目标拒绝；名称与原因转义。
+- 变更文件：
+  - `ui-api.test.mjs` 11 → 12：`trashDocs()` 与 `purgeDocs()` 的 URL/方法/请求体（`all` 优先于 `ids`、
+    只读接口不带 `x-kb-ui`）。
+  - `ui-docs-actions.test.mjs` 29 → 30：「清空本库已删除资料」入口只在「已删除」筛选且库内有回收站内容时出现，
+    无结果/忙碌/无已删除资料的分支。
+  - `ui-router.test.mjs` 6 → 7：`#/trash?tab=docs` 的 query 解析。
 - 全部用例使用临时目录，不依赖本机知识库；`check:client` / `check-ui` 为独立门禁，不计入用例数。
 
 ## 16. 验收标准
@@ -947,3 +969,122 @@ ctx.systemPrompt.section({
 - 真实浏览器自动化（Playwright）仍未接入；本轮 UI 验收是一次性 WKWebView 脚本。
 - 后续可做：批量彻底删除、笔记移动（需设计无原件语义）、移动时复制历史、跨根迁移、Playwright
   回归套件、Office 安装的真实下载/失败重试现场验收。
+
+## 23. 0.24.0 回收站治理
+
+> 版本 0.24.0（基线 0.23.0 / `npm test` 733；本版 **768**，见 §15.5、§23.4）。
+> 本轮把回收站从「整库」扩展到「单篇资料」：新增全局已删除资料列举与按库批量彻底删除，
+> 工作台回收站拆成「归档库 / 已删除资料」两个分区。
+> 相关提交：`ce163c2`（回收站列举与批量彻底删除 API，含 10 例 API 测试）、
+> `b1420f3`（回收站页签与资料操作 UI，含 22 例 UI 测试与三处既有用例扩展）。
+
+### 23.1 `GET /kb/api/trash/docs`
+
+- **扫描范围**：逐库调用 `listKbs(kbRoot)`；归档库已被 `archiveKb` 移到
+  `<kbRoot>/.trash/<库名>-<YYYY-MM-DD-HH-mm-ss>[-N]/`，而 `listKbs` 只列一级非隐藏目录，
+  **归档库天然排除**；合并库（`mergedInto != null`）显式 `continue`，避免其清单里的资料与目标库重复列出。
+- **只读**：只读清单，不移动、不改写任何文件；GET 不要求 `x-kb-ui`（与写接口区分）。
+- **容错**：单库清单损坏（`readManifest` 抛错）只跳过该库，其余库的回收站照常返回。
+- **字段投影**：`{ kb, id, title, type, deleted, deletedAt, deletedFromStatus, movedTo, sourceFile, error }`；
+  `deleted` 恒为 `true`，缺失字段归一为空串，`movedTo` 非对象归一 `null`（源库回收站的「撤销移动」
+  依赖该记录）。响应里不含 `kbRoot` 等本机绝对路径。
+- **排序**：`deletedAt` 倒序；日期缺失/非法排最后（两者都不合法时保持相对顺序稳定）；
+  同一时刻按 `kb + "\u0000" + id` 做 `localeCompare`，保证重复请求/后续分页顺序一致。
+- **上限**：`TRASH_DOCS_CAP = 500`。`items` 最多 500 条，`total` 始终是真实总数，
+  `total > 500` 时 `truncated: true`（恰好 500 不截断）。归档库内的资料不计入 `items` 与 `total`。
+- **响应**：`{ items, total, truncated }`。
+
+### 23.2 `POST /kb/api/kbs/:name/docs/purge`
+
+- **鉴权**：沿用工作台写请求的 `x-kb-ui` 与同源校验（缺失 UI 头、跨源或 `sec-fetch-site: cross-site`
+  都是 `403 FORBIDDEN`）；归档库、不存在或穿越（`..`、分隔符）的库名在 `ensureKb` 处 `404 KB_NOT_FOUND`；
+  错误方法与未知路径不命中该路由（`404 NOT_FOUND`，不返回 405）。
+- **确认**：body `confirm` 去首尾空白后必须与库名完全一致，否则 `400 CONFIRM_REQUIRED`
+  （文案「彻底删除需要输入库名：`<name>`」）。
+- **参数**：`all`（必须为布尔 `true`）与 `ids` **恰好二选一**——同时给出或都没给都算
+  `400 INVALID_ARGS`。`ids` 逐项 `trim`、丢弃空串并去重（同一 id 重复提交只删一次）。
+- **条目校验**：`all=true` 只取清单里 `isDeleted` 的条目，为空则 `409 NO_DELETED_DOCS`；
+  `ids` 里每个 id 必须属于本库且 `isDeleted`，不存在/在用/属于别的库一律 `409 DOC_NOT_DELETED`
+  （details 带 `id` 与标题）。**绝不触碰在用资料**（`all` 也只选回收站）。
+- **执行**：逐篇调用 `store.removeDoc(dir, id)`——移除原件（`sources/`）、`markdown/` 解析内容与
+  `history/` 历史版本。单篇异常**不中断**批次（例如条目在校验后被并发删除时 `removeDoc` 抛
+  「文档不存在」），只把 `{ id, title, error: "彻底删除失败" }` 记入 `failed`；错误文案固定，
+  不把 errno/绝对路径跨 API 边界回传。
+- **副作用**：每篇成功写库日志 `remove`（`detail: "彻底删除"`），全部处理完统一 `refreshKbIndex`
+  刷新 `index.md`（即使有部分失败也刷新）。
+- **响应**：`{ kb, purged, failed: [{ id, title, error }] }`；有部分失败仍是 HTTP 200，
+  全失败时 `purged` 为 0。
+
+### 23.3 工作台回收站 UI
+
+- **两个页签**：`#/trash`（归档库，默认）与 `#/trash?tab=docs`（已删除资料）。`trashTab()` 只认
+  `query.tab === "docs"`，手改 URL 的其它值回落归档库；页签是普通 `<a href>`，刷新与浏览器后退
+  都能回到同一分区。页签计数：归档库 = 归档库列表长度；已删除资料 = 服务端 `total`
+  （不是被 500 条上限截断后的条数）。
+- **归档库分区**：保留 0.23.0 的列表、空状态、加载/错误态，逐库恢复与彻底删除。
+- **已删除资料分区**：表头为 库 / 标题 / 类型 / 删除时间 / 操作，**每行带库徽标**；数据来自
+  `GET /trash/docs`，渲染前再用 `deleted !== false` 挡一次脏数据；头部展示 `total`，
+  `truncated` 时额外显示「仅显示前 500 篇」。归档库里的资料不在该分区出现，整库恢复后回到正常状态。
+- **勾选**：选择项以 `kb + "\u0000" + id` 为键（同一 id 可能出现在不同库，不能混为一篇）；
+  `trashSelectionToggleOne` 按显式 `checked` 增删，`trashSelectionToggleAll` 补齐当前列表、
+  再点取消当前列表并保留其它页/库的选择；选择随刷新清空。
+- **恢复所选（允许跨库）**：逐篇调用 `restoreDoc(kb, id)`；失败不中断其余条目，最后统一 toast
+  （全成功「已恢复」/「已恢复 N 篇」，部分失败「X 篇已恢复，Y 篇失败：`<原因>`」）；完成后刷新
+  回收站、侧栏库计数，并在当前详情页属于受影响库时重载详情。
+- **彻底删除所选（只能同库）**：`trashPurgeTarget` 对空选择与跨库选择都返回可展示的原因；
+  跨库时按钮禁用并显示「彻底删除一次只能处理同一个库的资料」。确认弹窗
+  `purgeDocsConfirmBody` 列出库名、最多 10 个标题、「共 N 篇」与固定警告；`requireText: kb`
+  要求逐字输入库名。行内单篇、多选批量、清空本库共用同一确认组件与同一 API；资料页「已删除」
+  筛选里的单篇「彻底删除」仍是 0.23.0 的逐字输入**标题**确认，走 `docs/:id/delete`，不属于本 API。
+- **移动资料警告**：警告常量 `PURGE_DOCS_WARNING` =「彻底删除会移除原件、解析内容与历史版本，
+  且撤销移动将不再可用。」被移动过的资料在源库清单里带 `movedTo`，永久删除后该记录消失，
+  `undo-move` 不再可用——因此确认弹窗必须提示，不能只写「不可恢复」。
+- **清空本库**：资料页切到「已删除」筛选（`status=deleted`）且库内 `deleted > 0` 时，工具栏渲染
+  「清空本库已删除资料」；确认后调用 `purgeDocs(name, { all: true, confirm: name })`，
+  成功/失败同样按 `purged/failed` 汇总 toast。没有已删除资料的库不显示入口；该筛选下搜索无结果
+  但库内仍有回收站内容时入口保留。
+- **竞态**：`loadTrash` 用自增 `trashToken`，响应返回时 token 不匹配直接丢弃（快速切页签/连续刷新
+  不会把旧结果盖到新页签）；归档库与已删除资料用 `Promise.allSettled` 并行拉取，一边失败不影响
+  另一边展示（各自给出错误与重试）；加载时清空跨页选择。
+- 操作完成后统一 `refreshAfterTrashChange`（回收站 + 库计数 + 必要时详情）；`busy` 期间行内与
+  批量按钮禁用，避免重复提交。
+
+### 23.4 测试
+
+- `npm test` **768/768** 通过（0.23.0 基线 733，净增 35：新增文件 32 例——`web-trash-docs.test.mjs` 10、
+  `ui-trash.test.mjs` 22；现有文件 +3——`ui-api.test.mjs` 11 → 12、`ui-docs-actions.test.mjs` 29 → 30、
+  `ui-router.test.mjs` 6 → 7）；逐文件明细见 §15.5。
+- `npm run typecheck`、`npm run check:client`、`node scripts/check-ui.mjs` 全绿；
+  `check:client` / `check-ui` 为独立门禁，不计入用例数。
+
+### 23.5 验收记录（2026-10-25）
+
+- [x] 自动化：`npm test` **768/768**（含 `check:client`、`check-ui`）；`npm run typecheck`、
+  `npm run check:client`、`node scripts/check-ui.mjs` 均通过。
+- [x] 真实宿主（临时 `dsh --profile web --port 55943` + 临时 `kbRoot` + WKWebView 脚本）：
+  - 造数：活跃库 **甲库 / 乙库** + 归档库 **丙库**；甲库软删除 A1、A2、A4，乙库软删除 B1，
+    丙库归档前软删除 C1（丙库另有在用资料 C2）。
+  - 回收站页签：归档库 **1**、已删除资料 **4**；丙库的 C1 **不在**已删除资料里（归档库内的资料
+    不单独列出，随库一起恢复）；已删除资料每行带 **甲库 / 乙库** 库徽标。
+  - 操作：行内恢复 A1（甲库，恢复后 `status: ready`）→ 行内彻底删除 A2（确认弹窗输入 **甲库**）→
+    多选彻底删除 B1（同库批量，输入 **乙库**）→ 资料页「已删除」筛选点「清空本库已删除资料」
+    （输入 **甲库**）清掉 A4。
+  - 结果：最终 `GET /kb/api/trash/docs` 的 `total` 为 **0**；丙库仍是归档库，其 C1/C2 完好
+    （C1 保持软删除状态，未被全局列表列出或删除）。
+  - 截图：`.acceptance/screenshot-24-trash-docs.png`（已删除资料页签、4 行库徽标与行内操作）、
+    `-trash-after.png`（行内 + 同库批量彻底删除后列表只剩 A4、toast「已彻底删除 1 篇」的中间态）、
+    `-library-trash-cleared.png`（资料页「已删除」筛选清空 A4 后的空态）。
+- **口径说明**：真实 DOM 流程仍走一次性 WKWebView 脚本（`wkflow` + 注入的 `flow.js`），不是
+  Playwright 自动化；UI 回归由纯函数 / fake DOM 单测与 `check-ui` 语法门禁兜底。
+- 与 §15 的对应：本轮用例总数在 §15.1 更新为 **768**，逐文件明细补在 §15.5。
+
+### 23.6 已知限制与跟进
+
+- **不能跨库批量彻底删除**：一次 purge 只处理一个库，跨库需要逐库确认（恢复所选可以跨库，
+  因为恢复是逐篇独立操作）。
+- **回收站暂无搜索/排序**：已删除资料固定按 `deletedAt` 倒序、最多 500 篇；超过 500 篇时
+  只能先恢复/清理，或按库分别处理（上限是全局列表，不随库数放大）。
+- **归档库内的资料只能随库恢复**：不能在该列表里单独恢复或彻底删除归档库中的某一篇。
+- **无自动过期清理**：已删除资料一直保留，需要手动恢复或彻底删除。
+- 后续可做：跨库批量彻底删除（需逐库确认/多库事务设计）、回收站搜索与排序、
+  自动过期保留天数配置、归档库内单篇资料的恢复粒度、Playwright 回归套件。
