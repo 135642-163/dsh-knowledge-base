@@ -83,3 +83,5 @@ jobs:
           name: e2e-artifacts
           path: test/e2e/.artifacts
           if-no-files-found: ignore
+          # 目录名以 . 开头：upload-artifact 默认不收集隐藏文件，必须显式开启。
+          include-hidden-files: true

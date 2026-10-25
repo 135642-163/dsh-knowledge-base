@@ -139,7 +139,7 @@ test("sweepTrash is a no-op when retention days is 0 or negative", async () => {
 
   for (const days of [0, -1, Number.NaN]) {
     const result = await sweepTrash(kbRoot, { days, now: NOW });
-    assert.deepEqual(result, { purged: 0, skipped: 0 });
+    assert.deepEqual(result, { purged: 0, skipped: 0, capped: false, byKb: {} });
   }
   assert.ok(await docOf(dir, "old"));
   const log = await readFile(join(dir, "log.md"), "utf8");
@@ -157,7 +157,7 @@ test("sweepTrash purges expired plain docs, logs and refreshes the index", async
   await materialize(dir, "old");
 
   const result = await sweepTrash(kbRoot, { days: 30, now: NOW });
-  assert.deepEqual(result, { purged: 1, skipped: 0, byKb: { 甲库: 1 } });
+  assert.deepEqual(result, { purged: 1, skipped: 0, capped: false, byKb: { 甲库: 1 } });
   assert.equal(await docOf(dir, "old"), null);
   assert.equal(existsSync(join(dir, "markdown", "old")), false);
   assert.equal(existsSync(join(dir, "sources", "old.pdf")), false);
@@ -188,7 +188,7 @@ test("sweepTrash keeps moved tombstones, invalid/missing deletedAt and recent ro
 
   const result = await sweepTrash(kbRoot, { days: 30, now: NOW });
   // 只有无法判断年龄的两篇计入 skipped；movedTo 与未到期资料不参与清理。
-  assert.deepEqual(result, { purged: 0, skipped: 2, byKb: {} });
+  assert.deepEqual(result, { purged: 0, skipped: 2, capped: false, byKb: {} });
   assert.deepEqual((await docOf(dir, "moved")).movedTo, movedTo);
   assert.ok(await docOf(dir, "invalid"));
   assert.ok(await docOf(dir, "missing"));
@@ -214,7 +214,7 @@ test("sweepTrash skips merged and archived kbs", async () => {
   const trashedTo = await archiveKb(kbRoot, "归档库");
 
   const result = await sweepTrash(kbRoot, { days: 30, now: NOW });
-  assert.deepEqual(result, { purged: 0, skipped: 0, byKb: {} });
+  assert.deepEqual(result, { purged: 0, skipped: 0, capped: false, byKb: {} });
   assert.ok(await docOf(mergedDir, "m1"));
   assert.equal(existsSync(join(archivedDir, "kb.json")), false);
   const archivedManifest = JSON.parse(await readFile(join(trashedTo, "kb.json"), "utf8"));
@@ -238,7 +238,7 @@ test("sweepTrash continues after a per-doc failure and counts it as skipped", as
   };
 
   const result = await sweepTrash(kbRoot, { days: 30, now: NOW, removeDocImpl });
-  assert.deepEqual(result, { purged: 1, skipped: 1, byKb: { 甲库: 1 } });
+  assert.deepEqual(result, { purged: 1, skipped: 1, capped: false, byKb: { 甲库: 1 } });
   assert.deepEqual(attempted, ["old1", "old2"]);
   assert.equal(await docOf(dir, "old1"), null);
   assert.ok(await docOf(dir, "old2"));
@@ -261,7 +261,7 @@ test("sweepTrash reports purged counts per kb", async () => {
   ]);
 
   const result = await sweepTrash(kbRoot, { days: 30, now: NOW });
-  assert.deepEqual(result, { purged: 3, skipped: 0, byKb: { 甲库: 2, 乙库: 1 } });
+  assert.deepEqual(result, { purged: 3, skipped: 0, capped: false, byKb: { 甲库: 2, 乙库: 1 } });
 });
 
 // ---------------------------------------------------------------------------

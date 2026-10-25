@@ -367,7 +367,7 @@ ctx.systemPrompt.section({
 
 ## 15. 测试计划
 
-### 15.1 自动化（`node:test`；0.21.0 新增 188 例，312 → **500**；0.21.1 复审后 **508**；0.22.0 **620**；0.23.0 **733**；0.24.0 **777**（含复审修复 +4 与移动源生命周期补洞 +5）；0.25.0 **801**（+24）——见 §15.3–§15.6 与 §21.8、§22.7、§23.4、§24.4）
+### 15.1 自动化（`node:test`；0.21.0 新增 188 例，312 → **500**；0.21.1 复审后 **508**；0.22.0 **620**；0.23.0 **733**；0.24.0 **777**（含复审修复 +4 与移动源生命周期补洞 +5）；0.25.0 **801**（+24），复审修复后 **812**（+11）——见 §15.3–§15.6 与 §21.8、§22.7、§23.4、§24.4、§24.6）
 
 - `scope-store.test.mjs`（17）：**文件层**——缺失文件读空、原子写 + `0600`、进程内串行队列（20 并发）、mutator 返回 falsy 时不写盘、同步视图 mtime+size 缓存与冻结视图、损坏/超限文件（读空、拒写 `SCOPE_UNUSABLE`）、清理回写只在变化时发生、`removeScopeKb`/`renameScopeKb` 库名同步、未知条目字段保留。sessionId 校验、mode/kbs 结构校验、50 上限、TTL 过期与失效库 prune、归档/合并判定由 `scope.test.mjs` / `scope-api.test.mjs` 覆盖。
 - `scope.test.mjs`（37）：条目归一化/50 上限/非法 sessionId、子会话快照 + `inheritedFrom`、父无条目 → all、父变化不回溯、只读解析（GET）不落快照、写失败降级为只读解析、`setScope` 严格校验（不存在/归档/合并）、`resolveSingleKb`/`resolveDocTarget` 单测（含软删除与虚拟文档）。
@@ -469,9 +469,11 @@ ctx.systemPrompt.section({
     B 保持 deleted；目标副本彻底删除、目标库归档或目标库不存在（`missing`）时同样恢复成功。
 - 全部用例使用临时目录，不依赖本机知识库；`check:client` / `check-ui` 为独立门禁，不计入用例数。
 
-### 15.6 0.25.0 新增与变更用例（`npm test` 801/801）
+### 15.6 0.25.0 新增与变更用例（`npm test` 801/801；复审修复后 812/812）
 
 - 0.24.0（`e138fb2`）基线 **777**；0.25.0 净增 **24** 例：新增文件 **9** 例，现有文件 **+15** 例。
+- 复审修复（§24.6）再净增 **11** 例（`test/trash-revalidate.test.mjs` 9 + `test/config-trash.test.mjs` 2），
+  总数 **812/812**。
 - 新增文件：
   - `test-trash-sweep.test.mjs`（9）：保留期为 0/负数/NaN 时 no-op；到期普通软删除资料被彻底删除并写日志/刷新索引；
     `movedTo` 墓碑、缺失/非法 `deletedAt`、未到期行保留；归档/合并库跳过；单篇删除失败继续并计入 skipped；
@@ -1228,12 +1230,15 @@ body `{items:[{kb,id}], confirm}` → `{purged, failed, byKb}`。
   （不同写法的库名 sanitize 到同一目录时只删一次；同一 id 出现在不同库视为不同篇）。
 - `confirm` 去首尾空白后必须逐字等于 **`彻底删除 N 篇`**：N 默认是去重后的篇数；原请求含重复条目时，
   也接受原始条目数（兼容用户按勾选数输入）。否则 `400 CONFIRM_REQUIRED`，message 给出应输入的短语。
-- **先全量只读预检**：逐条 `ensureKb` + `tryReadManifest`（不补写清单），再在清单里找 `isDeleted` 条目。
+- **先全量只读预检**：逐条 `ensureKb` + `tryReadManifest`（不补写清单），再在清单里找
+  `isDeleted(doc) && doc.status !== "importing"` 的条目（导入中即使残留旧 `deletedAt` 也不参与）。
   - 库不存在/原名已归档（原目录不在根下）/清单不可读 → `409 KB_NOT_FOUND`；
   - 文档不存在或不在回收站（在用/失败/导入中但未删除）→ `409 DOC_NOT_DELETED`；
   - `details` 为 `{kb, id, title}`（首个问题条目）。任一条不合法都在删除前抛出，**一条都不会提前删**。
-- 预检通过后逐篇调用 `removeDoc`。单篇失败不中断：成功计入 `purged` 与 `byKb[kb]`；失败进入
-  `failed [{kb, id, title, error:"彻底删除失败"}]`，errno/绝对路径只留在服务端。
+- 预检通过后逐篇调用 `removeDoc(dir, id, { requireDeleted: true })`：清单锁内重新读取条目，若此时已被恢复
+  或重新进入导入，则拒绝删除。单篇失败不中断：成功计入 `purged` 与 `byKb[kb]`；失败进入
+  `failed [{kb, id, title, error}]`，`error` 是固定文案——一般 fs 失败为「彻底删除失败」，锁内复验失败为
+  「彻底删除失败：文档已不在回收站」；errno/绝对路径只留在服务端。
 - 每篇成功删除写所属库日志 `remove`（detail「彻底删除（跨库批量）」）；循环结束后每个受影响库
   刷新一次 `index.md`。两个附属写入都是 best-effort，失败不回滚已完成的永久删除。
 - 写请求要求 `x-kb-ui` 与同源；**仍逐篇 `removeDoc`**，不是跨库事务，部分失败按篇报告。
@@ -1243,20 +1248,27 @@ body `{items:[{kb,id}], confirm}` → `{purged, failed, byKb}`。
 - 配置：`trashRetentionDays`（`lib/index.js` schema）默认 `0`，`clampInt(..., 0, 3650)`；0 表示关闭。
   `registerKbWeb` 把它放进 `runtimeOpts`（测试可注入 `now` / `removeDocImpl`）。
 - `sweepTrash(kbRoot, {days, now, removeDocImpl})`：
-  - `days` 非有限或 ≤ 0 → 直接返回 `{purged:0, skipped:0}`，不扫库；
+  - `days` 非有限或 ≤ 0 → 直接返回 `{purged:0, skipped:0, capped:false, byKb:{}}`，不扫库；
   - `cutoff = now - days * 24h`；只遍历活跃（非合并）库，`tryReadManifest` 失败只跳过该库；
-  - 只处理 `isDeleted` 条目：**带 `movedTo` 的墓碑跳过**（撤销移动还要用）；`deletedAt` 缺失/非法
-    计入 `skipped`；`deletedAt >= cutoff`（恰好等于截止时间）保留；`removeDoc` 失败计入 `skipped`
-    并继续；
+  - 只处理 `isDeleted` 条目，**显式跳过 `status === "importing"`**（旧清单可能残留 `deletedAt`）；
+    **带 `movedTo` 的墓碑跳过**（撤销移动还要用）；`deletedAt` 必须是字符串且匹配 ISO 日期时间前缀
+    `^\d{4}-\d{2}-\d{2}T`，否则（缺失、日期-only、数字时间戳、非法串）计入 `skipped`；
+    `deletedAt >= cutoff`（恰好等于截止时间）保留；
+  - 删除调用 `removeDoc(dir, id, {requireDeleted:true})`：锁内复验失败（预检后被恢复/重新导入）计入
+    `skipped` 并继续；
+  - 单轮最多成功删除 **500（`MAX_SWEEP_PER_RUN`）** 篇：达到上限立即停止后续条目，返回 `capped:true`，
+    `byKb` 只统计实际删除的条目；
   - 成功删除计 `purged` 与 `byKb[kb]`，写日志 `remove`（detail「自动清理（超过 N 天）」），有变动的库
     刷新一次 `index.md`；
-  - 归档库位于 `.trash/`，不在 `listKbs` 结果里；合并库显式跳过；返回 `{purged, skipped, byKb}`。
+  - 归档库位于 `.trash/`，不在 `listKbs` 结果里；合并库显式跳过；返回
+    `{purged, skipped, capped, byKb}`。
 - `sweepTrashIfDue(opts)`：保留期 ≤ 0 返回 `null`；按 `kbRoot` 用模块级 `Map` **每小时最多一次**
   （进程内，重启后重新扫描）；**先记时间再扫描**，清理异常被吞掉并返回 `null`，不影响启动/列举。
 - 触发点：
   - `registerKbWeb` 注册路由后 `await sweepTrashIfDue(runtimeOpts)`（启动清理）；
   - `GET /trash/docs` 列举前 `await sweepTrashIfDue(opts)`（访问清理）。
-- 测试缝：`opts.now` 可传数字或函数；`opts.removeDocImpl` 签名同 `store.removeDoc(dir, id)`；
+- 测试缝：`opts.now` 可传数字或函数；`opts.removeDocImpl` 签名同
+  `store.removeDoc(dir, id, options)`（sweep 会传 `{requireDeleted:true}`，替身应转发）；
   `resetTrashSweepForTests()` 清空节流 Map，避免用例间互相影响。
 
 ### 24.2 UI
@@ -1274,10 +1286,11 @@ body `{items:[{kb,id}], confirm}` → `{purged, failed, byKb}`。
   仍显示「没有已删除的资料」；只有空白搜索词按未搜索处理。
 - 跨库批量彻底删除：`trashPurgeTarget` 只拒绝空选择，跨库时 `kb` 为 `""` 并返回全部条目；
   `trashPurgePhrase(N)` 生成 `彻底删除 N 篇`；确认正文 `renderTrashPurgeBody` 最多列 10 条
-  `库名：标题`，再给 `共 N 篇，来自 M 个库` 与 `TRASH_PURGE_WARNING`；多选批量与单行批量都走
-  `POST /trash/docs/purge`。
-- 行内彻底删除仍走本库 `POST /kbs/:name/docs/purge`，确认弹窗 `requireText: kb`（输入库名）；
-  「清空本库」仍用 `all:true` + 库名确认；目标副本仍可用的已移动行继续排除在批量恢复外（0.24.0 行为不变）。
+  `库名：标题`，再给 `共 N 篇，来自 M 个库` 与 `TRASH_PURGE_WARNING`；**多选批量（含只选 1 篇）**
+  走 `POST /trash/docs/purge`。
+- **行内单篇**彻底删除走本库 `POST /kbs/:name/docs/purge`（body `{ids:[id], confirm:库名}`），
+  确认弹窗 `requireText: kb`（输入库名）；「清空本库」仍用本库 `all:true` + 库名确认。
+  两者都在服务端锁内复验（`requireDeleted`）；目标副本仍可用的已移动行继续排除在批量恢复外（0.24.0 行为不变）。
 - 自动过期清理只有配置入口，没有 UI 开关/倒计时；UI 不感知本轮清理，只看到刷新后的列表。
 
 ### 24.3 CI 与 E2E
@@ -1287,7 +1300,8 @@ body `{items:[{kb,id}], confirm}` → `{purged, failed, byKb}`。
     `npm run typecheck` → `npm test`。`npm test` 本身还跑 `build-client --check` 与 `check-ui`。
   - `e2e`（`macos-14`，`needs: unit`，超时 35 分钟）：`npm ci` → 全局安装
     `@deepseek-ai/dsh@0.2.1-rc.2`（`DSH_VERSION`）→ 首启生成临时 profile → 注册插件 →
-    安装 Playwright WebKit → `npm run test:e2e` → 失败上传 `test/e2e/.artifacts`。
+    安装 Playwright WebKit → `npm run test:e2e` → 失败上传 `test/e2e/.artifacts`
+    （目录以 `.` 开头，upload-artifact 必须显式 `include-hidden-files: true`，`if-no-files-found: ignore` 保留）。
 - **bootstrap 顺序**：
   1. `DSH_HOME=$RUNNER_TEMP/dsh-home` 并 `mkdir -p`；
   2. `dsh web --port 55970 --no-open` 后台首启，循环 `curl` 最多 180 秒等待 HTTP 可用，然后
@@ -1316,7 +1330,7 @@ body `{items:[{kb,id}], confirm}` → `{purged, failed, byKb}`。
 
 ### 24.4 验收（2026-10-25）
 
-- [x] `npm test` **801/801**；`npm run typecheck`、`npm run check:client`、
+- [x] `npm test` **801/801**（发布验收；复审修复后 **812/812**，见 §24.6）；`npm run typecheck`、`npm run check:client`、
   `node scripts/check-ui.mjs` 全绿。
 - [x] `npm run test:e2e`（真实 profile + 本机凭据）**7 passed / 0 failed / 0 skipped**：
   - 回收站：搜索、排序与筛选空态
@@ -1333,7 +1347,7 @@ body `{items:[{kb,id}], confirm}` → `{purged, failed, byKb}`。
   `npm run test:e2e` 能自托管启动；失败产物落在 `test/e2e/.artifacts/<timestamp>/`。
 - [ ] GitHub Actions 首次真实运行待推送后观察（macOS job 首次装 DSH/浏览器，预计 10–20 分钟）。
 - [x] 版本 0.25.0（`package.json`、`package-lock.json` 根与 `packages[""]`、`lib/version.js`），
-  README 新增 `## 0.25.0 回收站增强与 CI`，spec 追加 §24 与 §15.6，`§15.1` 总数更新为 801。
+  README 新增 `## 0.25.0 回收站增强与 CI`，spec 追加 §24 与 §15.6，`§15.1` 总数更新为 801（复审后 812）。
 
 ### 24.5 已知限制与跟进
 
@@ -1342,5 +1356,34 @@ body `{items:[{kb,id}], confirm}` → `{purged, failed, byKb}`。
 - 跨库批量彻底删除仍逐篇 `removeDoc`，不是多库事务；部分失败保留在 `failed` 里，需要人工重试。
 - E2E 胶囊在全新 profile（无历史会话/模型凭据）自动 skip，CI 不覆盖胶囊交互；后续可给 CI profile
   准备可用的测试凭据。
+- E2E 覆盖回收站两页签、行内恢复、行内/批量彻底删除、清空本库、搜索/排序/筛选空态与跨库选择；
+  `loadTrash` 旧响应作废（token）、刷新后清空选择、跨库恢复循环**不在 E2E 套件内**，仍只由一次性
+  WKWebView 验收覆盖。
 - Chromium 下载在部分网络/CDN 不可用；套件优先 WebKit，只装 WebKit 即可跑。
 - UI 没有自动过期配置开关；`trashRetentionDays` 只能改 profile 配置后重启。
+
+### 24.6 复审修复（同一 0.25.0，未升版本）
+
+- **删除前锁内复验**：`store.removeDoc(dir, docId, { requireDeleted = false } = {})` 在既有清单锁内重新
+  读取条目；`requireDeleted && (!isDeleted(doc) || doc.status === "importing")` 抛
+  `文档不在回收站，拒绝彻底删除`（错误不带路径）。默认 `false` 保持 `kb_remove(soft=false)` 可删在用资料。
+- **所有回收站删除路径**都传 `requireDeleted: true`：单篇永久删除（`POST /kbs/:name/docs/:id/delete`；
+  卡死 importing 的人工逃生口是唯一例外，按非回收站条目处理）、本库 purge（`all`/`ids`）、跨库批量
+  purge、`sweepTrash`。
+- **失败语义**：锁内复验失败时批量/清理按单篇失败继续；本库与跨库 purge 的 `failed[].error` 固定为
+  「彻底删除失败：文档已不在回收站」，单篇永久删除回 `409 DOC_NOT_DELETED`；均不含路径，不回 500。
+  一般 fs 失败仍是「彻底删除失败」。
+- **重新导入的已删除资料**：`markImporting` 写 `status:"importing"` 时清除 `deletedAt`/`deletedFromStatus`，
+  `isDeleted(doc)` 立即为 `false`；sweep 与本库/跨库 purge 的预检都显式跳过 `status === "importing"`
+  （防御旧清单残留 `deletedAt`）。`commitDoc` 成功后是普通 `ready`，不会复活回收站字段。
+- **sweep 硬化**：单轮最多成功删除 `MAX_SWEEP_PER_RUN = 500` 篇，达到后先刷新本库索引再干净停止，
+  返回 `capped:true`；`byKb` 只统计实际删除。`deletedAt` 必须先是字符串且匹配 `^\d{4}-\d{2}-\d{2}T`
+  才交给 `Date.parse`，日期-only/数字时间戳/非法串一律计入 `skipped`。返回形状统一为
+  `{purged, skipped, capped, byKb}`（保留期 ≤ 0 的 no-op 也含 `capped:false` 与空 `byKb`）。
+- **CI 产物**：`upload-artifact` 增加 `include-hidden-files: true`，否则 `test/e2e/.artifacts` 这个
+  以 `.` 开头的隐藏目录不会被上传；`if-no-files-found: ignore` 保留。
+- **测试**：新增 `test/trash-revalidate.test.mjs`（9）与 `test/config-trash.test.mjs`（2），
+  `npm test` 801 → **812/812**。覆盖：恢复后 `requireDeleted` 拒绝且资料保留；sweep / 本库 purge /
+  跨库 purge 在预检后被恢复时不再误删；`markImporting` 清字段且导入完成回到 `ready`；importing 墓碑
+  被 sweep/purge 跳过；sweep 500 上限与 `capped`；ISO 前缀校验；Config `trashRetentionDays` 默认 0
+  与 0/3650 夹取（含 1.6 → 2 的四舍五入）。
