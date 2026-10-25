@@ -53,19 +53,11 @@ jobs:
           mkdir -p "$DSH_HOME"
           echo "DSH_HOME=$DSH_HOME" >> "$GITHUB_ENV"
           dsh web --port 55970 --no-open > "$RUNNER_TEMP/dsh-first.log" 2>&1 &
-          TOKEN=""
-          for i in $(seq 1 180); do
-            TOKEN="$(grep -o 'token=[A-Za-z0-9_-]*' "$RUNNER_TEMP/dsh-first.log" | head -1 | cut -d= -f2 || true)"
-            if [ -n "$TOKEN" ] && curl -sf --max-time 2 "http://127.0.0.1:55970/?token=$TOKEN" >/dev/null; then break; fi
+          for i in $(seq 1 240); do
             if curl -sf --max-time 2 http://127.0.0.1:55970/ >/dev/null; then break; fi
+            if grep -q 'token=' "$RUNNER_TEMP/dsh-first.log"; then break; fi
             sleep 1
           done
-          if [ -n "$TOKEN" ]; then
-            curl -sf --max-time 3 "http://127.0.0.1:55970/?token=$TOKEN" >/dev/null || { cat "$RUNNER_TEMP/dsh-first.log"; exit 1; }
-            echo "DSH_E2E_TOKEN=$TOKEN" >> "$GITHUB_ENV"
-          else
-            curl -sf --max-time 3 http://127.0.0.1:55970/ >/dev/null || { cat "$RUNNER_TEMP/dsh-first.log"; exit 1; }
-          fi
           pkill -f "dsh web --port 55970" || true
           sleep 2
 
@@ -82,12 +74,33 @@ jobs:
           set -euo pipefail
           npx playwright install webkit || PLAYWRIGHT_DOWNLOAD_HOST=https://cdn.playwright.dev npx playwright install webkit
 
-      # 4) Self-hosting E2E: the runner copies the temp web profile into an
-      #    e2e-<hex> profile with a temp kbRoot, so the real profile is untouched.
-      #    Capsule test self-skips on a fresh profile without an existing session
-      #    or model credentials; the rest must pass.
-      - name: Run E2E
-        run: npm run test:e2e
+      # 4) Run the suite against a real host started here (instead of letting the
+      #    harness spawn one), because a fresh DSH_HOME prints a one-time auth
+      #    token that must be passed to both the browser and the API calls.
+      - name: Run E2E against temp host
+        run: |
+          set -euo pipefail
+          export DSH_HOME="$RUNNER_TEMP/dsh-home"
+          HOST_LOG="$RUNNER_TEMP/dsh-e2e.log"
+          dsh web --port 55970 --no-open > "$HOST_LOG" 2>&1 &
+          HOST_PID=$!
+          trap 'kill "$HOST_PID" 2>/dev/null || true; pkill -f "dsh web --port 55970" || true' EXIT
+          TOKEN=""
+          for i in $(seq 1 240); do
+            TOKEN="$(grep -o 'token=[A-Za-z0-9_-]*' "$HOST_LOG" | head -1 | cut -d= -f2 || true)"
+            if [ -n "$TOKEN" ]; then
+              if curl -sf --max-time 2 "http://127.0.0.1:55970/kb/api/status?token=$TOKEN" >/dev/null; then break; fi
+            elif curl -sf --max-time 2 http://127.0.0.1:55970/kb/api/status >/dev/null; then break; fi
+            sleep 1
+          done
+          if [ -z "$TOKEN" ] && ! curl -sf --max-time 3 http://127.0.0.1:55970/kb/api/status >/dev/null; then
+            cat "$HOST_LOG"
+            exit 1
+          fi
+          export DSH_E2E_URL="http://127.0.0.1:55970"
+          if [ -n "$TOKEN" ]; then export DSH_E2E_TOKEN="$TOKEN"; fi
+          export DSH_E2E_ALLOW_MUTATE=1
+          npm run test:e2e
 
       - name: Upload E2E artifacts
         if: failure()
