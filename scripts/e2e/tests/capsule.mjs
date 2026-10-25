@@ -116,17 +116,19 @@ export async function run(ctx) {
     message: "全选应用后胶囊应为全部",
   });
 
-  // 再打开一次，确认选中态已持久化（两个库都勾选）。
+  // 再打开一次，确认选中态已持久化（全部活跃库都勾选；数量由接口给出，
+  // 避免每次新增 E2E 夹具库都要改这条断言）。
+  const liveKbs = (await ctx.api.kbs()).kbs.length;
   panel = await openPanel(ctx, page);
   const checked = panel.locator(".dsh-kb-scope-row input[type='checkbox']");
   await poll(async () => {
     const count = await checked.count();
-    if (count !== 2) return false;
+    if (count !== liveKbs) return false;
     for (let i = 0; i < count; i += 1) {
       if (!(await checked.nth(i).isChecked())) return false;
     }
     return true;
-  }, { message: "全选应用后重开面板应保持两个库勾选" });
+  }, { message: `全选应用后重开面板应保持 ${liveKbs} 个库勾选` });
   await page.mouse.click(640, 60);
   await panel.waitFor({ state: "detached" });
 }

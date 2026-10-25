@@ -16,7 +16,7 @@ import JSZip from "jszip";
 import { readManifest, rebuildMerged, writeManifestAtomic } from "../../lib/store.js";
 
 export const FIXTURES = Object.freeze({
-  kbs: { primary: "甲库", target: "乙库", archived: "丙库" },
+  kbs: { primary: "甲库", target: "乙库", archived: "丙库", search: "检索库" },
   docs: {
     a1: { id: "111111111111", title: "恢复资料一", kb: "甲库" },
     a2: { id: "222222222222", title: "删除资料二", kb: "甲库" },
@@ -29,6 +29,9 @@ export const FIXTURES = Object.freeze({
     b1: { id: "bbbbbbbbbbbb", title: "乙库删除资料", kb: "乙库" },
     c1: { id: "cccccccccccc", title: "归档资料一", kb: "丙库" },
     c2: { id: "dddddddddddd", title: "归档资料二", kb: "丙库" },
+    searchA: { id: "eeeeeeeeeeee", title: "GB/T 1234-2020 风电场电能质量技术规定", kb: "检索库" },
+    searchB: { id: "ffffffffffff", title: "GB 1234-2020 风电场并网技术规定", kb: "检索库" },
+    searchC: { id: "999999999999", title: "光伏发电站无功补偿技术规范", kb: "检索库" },
   },
   errorText: "模拟解析失败：原件文字层损坏，请重试",
   noteBody: "这是验收笔记的正文，用于验证笔记预览文本。",
@@ -159,6 +162,7 @@ function manifestDoc(spec, now) {
     title: spec.title,
     type: spec.type,
     status: spec.status,
+    standardNo: spec.standardNo ?? "",
     sourceFile: spec.sourceFile ?? "",
     pages: spec.pages ?? 1,
     chars: spec.chars ?? 0,
@@ -303,12 +307,76 @@ function docsByKb() {
       sourceFile: "归档资料二.txt",
       markdown: "归档资料二的整理正文。",
     },
+    // 检索夹具：条款/页码/标准号/标签/可信度齐备，供 0.27 检索工作台验收。
+    {
+      ...FIXTURES.docs.searchA,
+      type: "pdf-text",
+      status: "ready",
+      source: makeTinyPdf("GB/T 1234-2020 search fixture"),
+      sourceExt: ".pdf",
+      sourceFile: "GB_T 1234-2020 风电场电能质量技术规定.pdf",
+      standardNo: "GB/T 1234-2020",
+      tags: ["检索", "新能源"],
+      trust: "high",
+      pages: 3,
+      markdown: [
+        "### 第 1 页",
+        "4.1 电压偏差",
+        "风电场公共连接点的电压偏差应不超过标称电压的 7%，持续时间超过 1min 时按 10min 平均值考核。",
+        "### 第 2 页",
+        "4.2 谐波电流",
+        "风电场注入公共连接点的谐波电流限值见表 2。",
+        "### 第 3 页",
+        "4.3 电压暂降",
+        "风电场应记录 10kV 母线电压暂降事件并统计持续时间。",
+      ].join("\n\n"),
+    },
+    {
+      ...FIXTURES.docs.searchB,
+      type: "pdf-text",
+      status: "ready",
+      source: "GB 1234-2020 风电场并网技术规定的原始文本。\n",
+      sourceExt: ".txt",
+      sourceFile: "GB 1234-2020 风电场并网技术规定.txt",
+      standardNo: "GB 1234-2020",
+      tags: ["检索"],
+      trust: "medium",
+      pages: 2,
+      markdown: [
+        "### 第 1 页",
+        "5.1 电压偏差",
+        "并网点的电压偏差应符合本文件的一般要求。",
+        "### 第 2 页",
+        "5.2 并网容量",
+        "单点并网容量超过 6MW 时应单独评估。",
+      ].join("\n\n"),
+    },
+    {
+      ...FIXTURES.docs.searchC,
+      type: "docx",
+      status: "ready",
+      source: "光伏发电站无功补偿技术规范的原始文本。\n",
+      sourceExt: ".txt",
+      sourceFile: "光伏发电站无功补偿技术规范.txt",
+      standardNo: "GB/T 29321-2012",
+      tags: ["新能源"],
+      trust: "low",
+      pages: 2,
+      markdown: [
+        "### 第 1 页",
+        "6.1 无功容量",
+        "光伏发电站应充分利用并网逆变器的无功容量及其调节能力。",
+        "### 第 2 页",
+        "6.2 功率因数",
+        "并网点功率因数应在 0.95 以上。",
+      ].join("\n\n"),
+    },
   ];
 }
 
 /** 写入全部固定数据；返回 docx 是否可用等元信息。 */
 export async function seedFixtures({ api, kbRoot, artifactsDir, log = () => {} }) {
-  const names = [FIXTURES.kbs.primary, FIXTURES.kbs.target, FIXTURES.kbs.archived];
+  const names = [FIXTURES.kbs.primary, FIXTURES.kbs.target, FIXTURES.kbs.archived, FIXTURES.kbs.search];
   for (const name of names) {
     try {
       await api.createKb(name, { description: `${name}（E2E 临时库）` });
@@ -373,6 +441,17 @@ export async function seedFixtures({ api, kbRoot, artifactsDir, log = () => {} }
   if (!failed || failed.status !== "failed") throw new Error("失败资料夹具未写入甲库");
   const pdfDoc = primaryDocs.docs.find((doc) => doc.id === FIXTURES.docs.pdf.id);
   if (!pdfDoc || pdfDoc.type !== "pdf") throw new Error("PDF 夹具未写入甲库");
+
+  const searchDocs = await api.docs(FIXTURES.kbs.search, { limit: 50 });
+  for (const fixture of [FIXTURES.docs.searchA, FIXTURES.docs.searchB, FIXTURES.docs.searchC]) {
+    if (!searchDocs.docs.some((doc) => doc.id === fixture.id)) {
+      throw new Error(`检索夹具未写入${FIXTURES.kbs.search}：${fixture.title}`);
+    }
+  }
+  const searchApi = await api.request("GET", `/search?q=${encodeURIComponent("电压偏差")}`);
+  if (!searchApi.results.some((item) => item.docId === FIXTURES.docs.searchA.id)) {
+    throw new Error(`检索接口未命中检索夹具：${JSON.stringify(searchApi.results.map((item) => item.docId))}`);
+  }
 
   return {
     office,

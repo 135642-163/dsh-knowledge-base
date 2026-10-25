@@ -31,13 +31,14 @@ import * as metadata from "./tests/metadata.mjs";
 import * as deepLink from "./tests/deep-link.mjs";
 import * as upload from "./tests/upload.mjs";
 import * as sources from "./tests/sources.mjs";
+import * as search from "./tests/search.mjs";
 import { attachSessionToWorkspace, detachSessionFromWorkspace, writeSourcesSession } from "./session-fixture.mjs";
 
 const root = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const runStartedAt = new Date();
 const stamp = runStartedAt.toISOString().replace(/[:.]/g, "-").slice(0, 19);
 const artifactsDir = join(root, "test", "e2e", ".artifacts", stamp);
-const allTests = [trashSearchSort, trash, move, retry, preview, previewOffice, metadata, upload, deepLink, sources, capsule];
+const allTests = [trashSearchSort, trash, move, retry, preview, previewOffice, metadata, upload, deepLink, search, sources, capsule];
 const only = String(process.env.DSH_E2E_ONLY ?? "").trim();
 const tests = only ? allTests.filter((test) => String(test.name ?? "").includes(only)) : allTests;
 
