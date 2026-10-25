@@ -210,7 +210,7 @@ async function killTree(child) {
   ]);
 }
 
-async function makeTempProfile({ sourceProfile, home, kbRoot, log }) {
+async function makeTempProfile({ sourceProfile, home, kbRoot, log, artifactsDir = "" }) {
   const sourceDir = join(home, "profiles", sourceProfile);
   if (!existsSync(sourceDir)) throw new HostError(`真实 profile 不存在：${sourceDir}`);
   const profileName = `e2e-${randomBytes(3).toString("hex")}`;
@@ -247,6 +247,7 @@ async function makeTempProfile({ sourceProfile, home, kbRoot, log }) {
     const sourcePatch = await readFile(join(sourceDir, "cordis.patch.yml"), "utf8").catch(() => "");
     const { text, dropped } = rewritePatch(sourcePatch, kbRoot);
     await writeFile(join(profileDir, "cordis.patch.yml"), text, "utf8");
+    if (artifactsDir) await writeFile(join(artifactsDir, "temp-patch.yml"), text, "utf8").catch(() => {});
     if (dropped.length > 0) log(`temp profile: dropped patch blocks ${JSON.stringify(dropped)}`);
     return { profileName, profileDir, sourceDir };
   } catch (error) {
@@ -308,7 +309,7 @@ export async function startHost({
   const sourceProfile = String(env?.DSH_E2E_SOURCE_PROFILE ?? "web").trim() || "web";
   const logs = createLogCapture();
   const kbRoot = await mkdtemp(join(tmpdir(), "kb-e2e-"));
-  const temp = await makeTempProfile({ sourceProfile, home, kbRoot, log });
+  const temp = await makeTempProfile({ sourceProfile, home, kbRoot, log, artifactsDir });
   const port = await findFreePort();
   const baseUrl = `http://127.0.0.1:${port}`;
   const bin = String(env?.DSH_E2E_DSH_BIN ?? "dsh");
