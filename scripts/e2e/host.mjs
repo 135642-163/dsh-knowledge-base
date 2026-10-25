@@ -116,7 +116,7 @@ export function rewritePatch(sourceText, kbRoot) {
     const block = lines.slice(starts[i], i + 1 < starts.length ? starts[i + 1] : lines.length);
     const text = block.join("\n");
     const drop = /dsh-knowledge-(wiki|base)|id:\s*knowledge-(base|wiki)|^\s*kbRoot:\s/m.test(text)
-      || /^\s*id:\s*hmr\s*$/m.test(text)
+      || /^\s*-\s*id:\s*hmr\s*$/m.test(text)
       || /kb-e2e-|e2e-[0-9a-f]{6}|\/tmp\/kb-|kb-[0-9a-z]+-accept|acceptance/i.test(text);
     if (drop) dropped.push(text.trim().split(/\r?\n/)[0]);
     else kept.push(block);
