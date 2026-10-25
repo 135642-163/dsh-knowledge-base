@@ -31,14 +31,30 @@ function trashDocMoved(doc) {
     && typeof doc.movedTo.kb === "string" && doc.movedTo.kb !== "");
 }
 
+/**
+ * 移动源行的目标副本状态：服务端给出 deleted/missing 时可直接恢复；
+ * 其它（含旧服务端没有 movedToState）一律按 live 处理——只能撤销移动，安全默认。
+ */
+export function trashMovedState(doc) {
+  if (!trashDocMoved(doc)) return "";
+  return doc.movedToState === "deleted" || doc.movedToState === "missing"
+    ? doc.movedToState
+    : "live";
+}
+
 function selectionEntry(doc) {
   const entry = {
     kb: String(doc?.kb ?? ""),
     id: String(doc?.id ?? ""),
     title: String(doc?.title ?? ""),
   };
-  // 选择项带上移动标记：批量恢复要排除它们，批量彻底删除仍可包含。
-  if (trashDocMoved(doc)) entry.movedTo = { kb: doc.movedTo.kb };
+  // 选择项带上移动标记与目标状态：批量恢复要排除目标仍可用的移动行，
+  // 目标已删除/缺失的移动行则可以像普通软删除资料一样恢复。
+  if (trashDocMoved(doc)) {
+    entry.movedTo = { kb: doc.movedTo.kb };
+    const state = trashMovedState(doc);
+    if (state !== "live") entry.movedToState = state;
+  }
   return entry;
 }
 
@@ -126,16 +142,24 @@ export function trashPurgeTarget(selected) {
 }
 
 /**
- * 批量恢复的目标：排除带 `movedTo.kb` 的源库墓碑（普通恢复会造出第二份可用副本）。
- * 选择本身仍保留这些行，以便一起彻底删除；`excluded` 供工具条提示。
+ * 批量恢复的目标：排除目标副本仍可用（live）的移动行——普通恢复会造出第二份
+ * 可用副本；目标副本已删除/缺失的移动行可以恢复。选择本身仍保留这些行，以便
+ * 一起彻底删除；`excluded` 供工具条提示。
  */
 export function trashRestoreTargets(selected, docs = []) {
   const entries = selectionList(selected);
-  const moved = new Set(
-    (Array.isArray(docs) ? docs : []).filter(trashDocMoved).map(trashDocKey)
+  const byKey = new Map(
+    (Array.isArray(docs) ? docs : []).map((doc) => [trashDocKey(doc), doc])
   );
-  const restorable = entries.filter((entry) => !trashDocMoved(entry) && !moved.has(trashDocKey(entry)));
-  return { entries: restorable, excluded: entries.length - restorable.length };
+  const restorable = [];
+  let excluded = 0;
+  for (const entry of entries) {
+    // 以当前列表为准：旧选择项可能没带移动标记，或状态已经变化。
+    const state = trashMovedState(byKey.get(trashDocKey(entry)) ?? entry);
+    if (state === "live") excluded += 1;
+    else restorable.push(entry);
+  }
+  return { entries: restorable, excluded };
 }
 
 /**
@@ -283,8 +307,10 @@ export function renderTrashDocs({
         <tbody>
           ${items.map((doc) => {
             const checked = trashSelectionHas(selected, doc.kb, doc.id);
-            // 移动留下的源库墓碑只能撤销移动；普通恢复会与目标库副本并存。
-            const action = trashDocMoved(doc)
+            // 目标副本仍可用：只能撤销移动（普通恢复会与目标副本并存）；
+            // 目标副本已删除/缺失：源库墓碑可以恢复，由服务端清掉 movedTo。
+            const movedState = trashMovedState(doc);
+            const action = movedState === "live"
               ? `<button type="button" class="btn mini" data-action="trash-doc-undo-move" data-kb="${escapeAttr(doc.kb)}" data-id="${escapeAttr(doc.id)}" data-target="${escapeAttr(doc.movedTo.kb)}"${busy ? " disabled" : ""}>撤销移动</button>`
               : `<button type="button" class="btn mini" data-action="trash-doc-restore" data-kb="${escapeAttr(doc.kb)}" data-id="${escapeAttr(doc.id)}"${busy ? " disabled" : ""}>恢复</button>`;
             return `<tr class="trash-doc-row">

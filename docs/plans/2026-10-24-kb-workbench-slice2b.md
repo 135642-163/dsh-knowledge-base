@@ -3675,10 +3675,10 @@ Expected: `--ff-only` 成功；HEAD 为 `chore: release 0.21.0 …`，其后还�
 | 2 | 回收站页签与资料操作 UI：`#/trash` / `#/trash?tab=docs` 两个分区、已删除资料表（库徽标/行内恢复/撤销移动/彻底删除）、跨库「恢复所选」（DOM 接线，见下）、同库「彻底删除所选」、库名确认弹窗、清空本库、500 篇提示、移动资料撤销警告、`loadTrash` 旧响应作废（DOM 接线，见下） | `b1420f3` | `ui/views/trash.js`、`ui/app.js`、`ui/api.js`、`ui/views/detail.js`、`ui/style.css`、`test/ui-trash.test.mjs`、`test/ui-api.test.mjs`、`test/ui-docs-actions.test.mjs`、`test/ui-router.test.mjs` |
 
 - **自动化边界**：`npm test` 覆盖回收站可导出的纯函数与 API（页签/选择键、批量恢复目标过滤、
-  purge 目标与确认正文、移动资料警告、字段投影与 409 分支）；`loadTrash` 旧响应作废（token）、
-  刷新后清空选择、跨库恢复循环与清空本库按钮接线属于 DOM 交互，**不在自动化用例内**，只由下面的
-  一次性 WKWebView 验收覆盖。此前本节把「跨库恢复…旧响应作废」与测试文件并列，容易被读成已自动化，
-  特此拆分口径。
+  purge 目标与确认正文、移动资料警告、字段投影、`movedToState` 矩阵与 409/200 恢复分支）；
+  `loadTrash` 旧响应作废（token）、刷新后清空选择、跨库恢复循环与清空本库按钮接线属于 DOM 交互，
+  **不在自动化用例内**，只由下面的一次性 WKWebView 验收覆盖。此前本节把「跨库恢复…旧响应作废」
+  与测试文件并列，容易被读成已自动化，特此拆分口径。
 
 - **真实宿主验收（2026-10-25，临时 `dsh --profile web --port 55943` + 临时 `kbRoot` + WKWebView 脚本）**：
   造数：活跃库甲/乙 + 归档库丙；甲库软删除 A1/A2/A4，乙库软删除 B1，丙库归档前软删除 C1（另有在用资料 C2）。
@@ -3688,14 +3688,14 @@ Expected: `--ff-only` 成功；HEAD 为 `chore: release 0.21.0 …`，其后还�
   最终 `GET /trash/docs` 的 `total` 为 0，丙库仍归档、C1/C2 完好。
   截图见 `/Users/littlesun/workspace/deepseek/project/知识库/.acceptance/screenshot-24-trash-docs.png`、
   `-trash-after.png`、`-library-trash-cleared.png`。
-- **测试**：`npm test` **772/772**（0.23.0 基线 733，净增 39：新增文件 34——`web-trash-docs.test.mjs` 10、
-  `ui-trash.test.mjs` 24；现有文件 +5——`ui-api.test.mjs` 11 → 12、`ui-docs-actions.test.mjs` 29 → 30、
-  `ui-router.test.mjs` 6 → 7、`soft-delete.test.mjs` 3 → 4、`web-docs-lifecycle.test.mjs` 11 → 12）；
-  其中复审修复新增 4 例。`npm run typecheck`、`npm run check:client`、
+- **测试**：`npm test` **777/777**（0.23.0 基线 733，净增 44：新增文件 36——`web-trash-docs.test.mjs` 11、
+  `ui-trash.test.mjs` 25；现有文件 +8——`ui-api.test.mjs` 11 → 12、`ui-docs-actions.test.mjs` 29 → 30、
+  `ui-router.test.mjs` 6 → 7、`soft-delete.test.mjs` 3 → 5、`web-docs-lifecycle.test.mjs` 11 → 14）；
+  其中复审修复新增 4 例、移动源生命周期补洞新增 5 例。`npm run typecheck`、`npm run check:client`、
   `node scripts/check-ui.mjs` 全绿。逐文件明细见 spec §15.5，本轮说明见 spec §23。
 - **发布**：版本 0.24.0（`package.json`、`package-lock.json` 根与 `packages[""]`、`lib/version.js`），
-  README 新增 `## 0.24.0 回收站治理` 并更新测试段（发布时 768，复审修复后 772）；spec 追加 §23 与 §15.5；
-  本文件追加本节。发布提交：`chore: release 0.24.0 with trash governance`。
+  README 新增 `## 0.24.0 回收站治理` 并更新测试段（发布时 768，复审修复后 772，补洞后 777）；
+  spec 追加 §23 与 §15.5；本文件追加本节。发布提交：`chore: release 0.24.0 with trash governance`。
 - **复审修复（同一 0.24.0，未升版本）**：移动留下的源库墓碑（`movedTo.kb`）禁止走普通恢复——
   `store.restoreDoc` 与 `restoreDocVersion`（`kb_restore(version=N)`）都抛
   「文档已跨库移动，请使用撤销移动」，`POST .../restore` 回 `409 DOC_MOVED`
@@ -3706,6 +3706,23 @@ Expected: `--ff-only` 成功；HEAD 为 `chore: release 0.21.0 …`，其后还�
   `ui-trash.test.mjs` 22 → 24。提交 `fix(trash): undo moved copies instead of restoring duplicates`。
   `trash-doc-undo-move` 的点击接线仍属 DOM 行为，不在自动化内；token/刷新清空选择只由一次性
   WKWebView 验收覆盖，本轮未新增真实宿主截图。
+- **生命周期补洞（同一 0.24.0，未升版本）**：目标副本 B 被软删除/彻底删除，或目标库归档/不存在时，
+  源库墓碑 A 不再永久不可恢复。`GET /trash/docs` 的移动行增加 `movedToState`
+  （`live`/`deleted`/`missing`）与 `canRestoreSource`；`POST .../restore` 在 `live` 时仍是
+  `409 DOC_MOVED`，在 `deleted`/`missing` 时调用 `restoreDoc(dir, id, { clearMovedTo: true })` 恢复
+  A、删除 `movedTo`（保留 `movedFrom`）并返回 `{doc, restoredMovedSource: true}`；B 保持已删除/缺失。
+  UI 行内操作按状态渲染「撤销移动」/「恢复」，批量恢复只排除 live 移动行。矩阵：
+
+  | B 状态 | `movedToState` | 行内操作 | restore |
+  |---|---|---|---|
+  | 目标库可用、B ready | `live` | 撤销移动 | `409 DOC_MOVED` |
+  | 目标库可用、B 已软删 | `deleted` | 恢复 | `200`，清 `movedTo`，B 保持 deleted |
+  | B purge / 目标库归档 / 目标库不存在 | `missing` | 恢复 | `200`，清 `movedTo`，B 缺失 |
+
+  覆盖用例 +5：`soft-delete.test.mjs` 4 → 5、`web-docs-lifecycle.test.mjs` 12 → 14、
+  `web-trash-docs.test.mjs` 10 → 11、`ui-trash.test.mjs` 24 → 25。变异检查：把所有 moved 状态当作
+  live 时 5 例失败；移除 `clearMovedTo` 的 `delete movedTo` 时 3 例失败。
+  提交 `fix(trash): restore moved source when target copy is gone`。
 - **已知跟进**：
   - 跨库批量彻底删除未提供（一次 purge 只能一个库，跨库需逐库确认）；
   - 回收站没有搜索/排序，已删除资料上限 500 篇；

@@ -180,6 +180,40 @@ test("移动来源的行渲染撤销移动而不是恢复，勾选与彻底删�
   assert.match(html, /data-action="trash-doc-purge" data-kb="标准" data-id="m1">彻底删除/);
 });
 
+test("目标副本已删除/缺失的移动行渲染恢复，批量只排除目标仍可用者", () => {
+  const movedTo = { kb: "目标库", docId: "t1", transferId: "abc123", at: "2026-10-02T00:00:00.000Z" };
+  const live = deletedDoc("标准", "m1", { title: "目标仍可用", movedTo, movedToState: "live" });
+  const deleted = deletedDoc("标准", "m2", { title: "目标已删除", movedTo, movedToState: "deleted" });
+  const missing = deletedDoc("标准", "m3", { title: "目标已缺失", movedTo, movedToState: "missing" });
+  // 旧服务端没有 movedToState：安全默认仍是撤销移动。
+  const legacy = deletedDoc("标准", "m4", { title: "旧服务端", movedTo });
+  const normal = deletedDoc("标准", "d1", { title: "普通删除" });
+
+  const html = render(makeState({ docs: [live, deleted, missing, legacy, normal] }), "docs");
+  assert.match(html, /data-action="trash-doc-undo-move" data-kb="标准" data-id="m1" data-target="目标库">撤销移动/);
+  assert.match(html, /data-action="trash-doc-undo-move" data-kb="标准" data-id="m4" data-target="目标库">撤销移动/);
+  assert.match(html, /data-action="trash-doc-restore" data-kb="标准" data-id="m2">恢复/);
+  assert.match(html, /data-action="trash-doc-restore" data-kb="标准" data-id="m3">恢复/);
+  assert.doesNotMatch(html, /data-action="trash-doc-restore" data-kb="标准" data-id="m1"/);
+  assert.match(html, /data-action="trash-doc-purge" data-kb="标准" data-id="m2">彻底删除/);
+
+  // 旧选择项没带状态时以当前列表为准：live/legacy 排除，deleted/missing 与普通删除纳入恢复。
+  const selected = [live, deleted, missing, legacy, normal].map((doc) => ({
+    kb: doc.kb,
+    id: doc.id,
+    title: doc.title,
+    ...(doc.movedTo ? { movedTo: { kb: doc.movedTo.kb } } : {}),
+  }));
+  const targets = trashRestoreTargets(selected, [live, deleted, missing, legacy, normal]);
+  assert.deepEqual(targets.entries.map((entry) => entry.id), ["m2", "m3", "d1"]);
+  assert.equal(targets.excluded, 2);
+
+  const bar = renderTrashBulk({ selected, docs: [live, deleted, missing, legacy, normal], fmtNumber });
+  assert.match(bar, /已选 5 篇/);
+  assert.match(bar, /已排除 2 篇已移动资料，请在对应库中撤销移动/);
+  assert.match(bar, /data-action="trash-docs-restore-selected">恢复所选/);
+});
+
 test("批量恢复排除已移动资料并提示，彻底删除仍可处理它们", () => {
   const moved = deletedDoc("标准", "m1", {
     title: "资料 m1",

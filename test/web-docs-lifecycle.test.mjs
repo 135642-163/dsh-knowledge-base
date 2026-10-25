@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { handleApi } from "../lib/web/api.js";
 import { createJobRegistry } from "../lib/web/jobs.js";
-import { createKb } from "../lib/kbmeta.js";
+import { createKb, archiveKb } from "../lib/kbmeta.js";
 import { readManifest, writeManifestAtomic } from "../lib/store.js";
 
 const KB = "标准";
@@ -143,6 +143,51 @@ async function docOf(dir, id) {
   return (manifest.docs ?? []).find((doc) => doc.id === id) ?? null;
 }
 
+/** 目标库 + 目标副本；list/restore 的 movedTargetState 会读它。 */
+async function createTargetKb(kbRoot, name, docs = []) {
+  const { dir } = await createKb(kbRoot, { name });
+  if (docs.length > 0) {
+    const manifest = await readManifest(dir);
+    manifest.docs.push(...docs);
+    await writeManifestAtomic(dir, manifest);
+  }
+  return dir;
+}
+
+function targetDoc(id, status = "ready") {
+  return {
+    id,
+    title: `目标副本 ${id}`,
+    type: "pdf-text",
+    status,
+    chars: 1,
+    parts: 1,
+    version: 1,
+    ...(status === "deleted"
+      ? { deletedAt: "2026-10-02T00:00:00.000Z", deletedFromStatus: "ready" }
+      : {}),
+  };
+}
+
+/** 源库里的移动墓碑；连同 markdown 正文一起铺好，便于验证恢复成功。 */
+async function addMovedSource(dir, id, movedTo, patch = {}) {
+  await mkdir(join(dir, "markdown", id), { recursive: true });
+  await writeFile(join(dir, "markdown", id, `${id}.md`), `# ${id}\n\n正文。\n`, "utf8");
+  const manifest = await readManifest(dir);
+  manifest.docs.push({
+    id,
+    title: `已移走 ${id}`,
+    type: "pdf-text",
+    status: "deleted",
+    deletedAt: "2026-10-02T00:00:00.000Z",
+    deletedFromStatus: "ready",
+    version: 1,
+    movedTo,
+    ...patch,
+  });
+  await writeManifestAtomic(dir, manifest);
+}
+
 async function waitSettled(jobs, id) {
   for (let i = 0; i < 200; i += 1) {
     const job = await jobs.get(id);
@@ -208,18 +253,8 @@ test("deleted docs keep movedTo in list/read projections for undo UI", async () 
 test("restore of a moved source doc returns 409 DOC_MOVED and keeps it deleted", async () => {
   const { kbRoot, dir } = await setup();
   const movedTo = { kb: "目标库", docId: "t1", transferId: "abc123", at: "2026-10-02T00:00:00.000Z" };
-  const manifest = await readManifest(dir);
-  manifest.docs.push({
-    id: "doc5",
-    title: "已移走",
-    type: "pdf-text",
-    status: "deleted",
-    deletedAt: "2026-10-02T00:00:00.000Z",
-    deletedFromStatus: "ready",
-    movedTo,
-    version: 1,
-  });
-  await writeManifestAtomic(dir, manifest);
+  const targetDir = await createTargetKb(kbRoot, "目标库", [targetDoc("t1")]);
+  await addMovedSource(dir, "doc5", movedTo);
 
   const res = await call({ kbRoot }, makeReq({ method: "POST", url: docUrl("doc5", "restore") }));
   assert.equal(res.res.status, 409);
@@ -227,12 +262,13 @@ test("restore of a moved source doc returns 409 DOC_MOVED and keeps it deleted",
   assert.equal(res.json.error.message, "文档已跨库移动，请使用撤销移动");
   assert.deepEqual(res.json.error.details, { targetKb: "目标库" });
 
-  // 拒绝后清单保持墓碑：仍是 deleted，movedTo/deletedAt 原样保留。
+  // 拒绝后清单保持墓碑：仍是 deleted，movedTo/deletedAt 原样保留；目标副本也未被软删除。
   const after = await docOf(dir, "doc5");
   assert.equal(after.status, "deleted");
   assert.equal(after.deletedAt, "2026-10-02T00:00:00.000Z");
   assert.deepEqual(after.movedTo, movedTo);
   assert.equal(after.deletedFromStatus, "ready");
+  assert.equal((await docOf(targetDir, "t1")).status, "ready");
 
   // 未知文档仍是 404；非移动的已删除文档不受影响（用 doc1 验证正常恢复路径）。
   const missing = await call({ kbRoot }, makeReq({ method: "POST", url: docUrl("nope", "restore") }));
@@ -243,6 +279,58 @@ test("restore of a moved source doc returns 409 DOC_MOVED and keeps it deleted",
   assert.equal(normal.res.status, 200);
   assert.equal(normal.json.doc.status, "ready");
   assert.equal(normal.json.doc.movedTo, null);
+});
+
+test("restore of a moved source succeeds when the target copy is soft-deleted and clears movedTo", async () => {
+  const { kbRoot, dir } = await setup();
+  const movedTo = { kb: "目标库", docId: "t1", transferId: "abc123", at: "2026-10-02T00:00:00.000Z" };
+  const targetDir = await createTargetKb(kbRoot, "目标库", [targetDoc("t1", "deleted")]);
+  // 墓碑自身也带 movedFrom（它曾是别的库的副本），恢复时只解除 movedTo。
+  await addMovedSource(dir, "doc5", movedTo, {
+    movedFrom: { kb: "上游库", docId: "u1", at: "2026-10-01T00:00:00.000Z", version: 1 },
+  });
+
+  const res = await call({ kbRoot }, makeReq({ method: "POST", url: docUrl("doc5", "restore") }));
+  assert.equal(res.res.status, 200);
+  assert.equal(res.json.restoredMovedSource, true);
+  assert.equal(res.json.doc.status, "ready");
+  assert.equal(res.json.doc.deleted, false);
+  assert.equal(res.json.doc.movedTo, null);
+
+  const after = await docOf(dir, "doc5");
+  assert.equal(after.status, "ready");
+  assert.equal(after.movedTo, undefined);
+  assert.equal(after.deletedAt, undefined);
+  assert.equal(after.deletedFromStatus, undefined);
+  assert.deepEqual(after.movedFrom, { kb: "上游库", docId: "u1", at: "2026-10-01T00:00:00.000Z", version: 1 });
+  // 目标副本保持软删除：不会出现第二份可用副本。
+  assert.equal((await docOf(targetDir, "t1")).status, "deleted");
+});
+
+test("restore of a moved source succeeds when the target copy, target kb or target archive is gone", async () => {
+  const { kbRoot, dir } = await setup();
+  // 目标库还在，但副本已被彻底删除。
+  await createTargetKb(kbRoot, "目标库");
+  // 目标库整体归档：目录已移到 .trash/ 下。
+  const archivedTargetDir = await createTargetKb(kbRoot, "归档目标", [targetDoc("a1")]);
+  const trashedTo = await archiveKb(kbRoot, "归档目标");
+  await addMovedSource(dir, "doc5", { kb: "目标库", docId: "t-gone", transferId: "abc123" });
+  await addMovedSource(dir, "doc7", { kb: "归档目标", docId: "a1", transferId: "abc123" });
+  await addMovedSource(dir, "doc8", { kb: "从未存在的库", docId: "x1", transferId: "abc123" });
+
+  for (const id of ["doc5", "doc7", "doc8"]) {
+    const res = await call({ kbRoot }, makeReq({ method: "POST", url: docUrl(id, "restore") }));
+    assert.equal(res.res.status, 200, id);
+    assert.equal(res.json.restoredMovedSource, true, id);
+    assert.equal(res.json.doc.status, "ready", id);
+    assert.equal(res.json.doc.movedTo, null, id);
+    const after = await docOf(dir, id);
+    assert.equal(after.status, "ready", id);
+    assert.equal(after.movedTo, undefined, id);
+    assert.equal(after.deletedAt, undefined, id);
+  }
+  assert.equal(existsSync(join(archivedTargetDir, "kb.json")), false);
+  assert.equal(existsSync(join(trashedTo, "kb.json")), true);
 });
 
 test("soft delete accepts ready and failed docs, restore returns the original status", async () => {

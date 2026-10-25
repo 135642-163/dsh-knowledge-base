@@ -149,11 +149,15 @@ test("GET /trash/docs lists deleted docs from live non-merged kbs only", async (
   assert.equal(json.truncated, false);
   // deletedAt 倒序；缺失/非法日期排最后。
   assert.deepEqual(json.items.map((item) => item.id), ["d-new", "b1", "d-old", "d-bad"]);
+  const baseKeys = ["deleted", "deletedAt", "deletedFromStatus", "error", "id", "kb", "movedTo", "sourceFile", "title", "type"];
   for (const item of json.items) {
     assert.equal(item.deleted, true);
+    // 移动行额外带目标副本状态；普通已删除资料保持原投影。
     assert.deepEqual(
       Object.keys(item).sort(),
-      ["deleted", "deletedAt", "deletedFromStatus", "error", "id", "kb", "movedTo", "sourceFile", "title", "type"]
+      item.movedTo
+        ? [...baseKeys, "movedToState", "canRestoreSource"].sort()
+        : baseKeys
     );
   }
   const newest = json.items[0];
@@ -163,12 +167,16 @@ test("GET /trash/docs lists deleted docs from live non-merged kbs only", async (
   assert.equal(newest.deletedAt, "2026-10-03T00:00:00.000Z");
   assert.equal(newest.deletedFromStatus, "failed");
   assert.deepEqual(newest.movedTo, movedTo);
+  assert.equal(newest.movedToState, "missing");
+  assert.equal(newest.canRestoreSource, true);
   assert.equal(newest.sourceFile, "");
   assert.equal(newest.error, "解析失败：文件损坏");
 
   const oldItem = json.items.find((item) => item.id === "d-old");
   assert.equal(oldItem.sourceFile, "d-old.pdf");
   assert.equal(oldItem.movedTo, null);
+  assert.equal(oldItem.movedToState, undefined);
+  assert.equal(oldItem.canRestoreSource, undefined);
   assert.equal(oldItem.deletedFromStatus, "ready");
   assert.equal(oldItem.error, "");
   const badItem = json.items.find((item) => item.id === "d-bad");
@@ -185,6 +193,58 @@ test("GET /trash/docs lists deleted docs from live non-merged kbs only", async (
   const archivedManifest = JSON.parse(await readFile(join(trashedTo, "kb.json"), "utf8"));
   assert.equal(archivedManifest.docs.some((item) => item.id === "a1"), true);
   assert.equal(existsSync(join(archivedDir, "kb.json")), false);
+  assert.equal(JSON.stringify(json).includes(kbRoot), false);
+});
+
+test("GET /trash/docs reports target state for live, deleted, missing, archived and merged targets", async () => {
+  const kbRoot = await tempRoot();
+  const { dir: targetDir } = await createKb(kbRoot, { name: "目标库" });
+  const targetManifest = await readManifest(targetDir);
+  targetManifest.docs.push(
+    doc("t-live", "目标在用"),
+    deletedDoc("t-deleted", "目标已删除", "2026-10-03T00:00:00.000Z")
+  );
+  await writeManifestAtomic(targetDir, targetManifest);
+
+  const archivedTargetDir = await setupKb(kbRoot, "归档目标", [doc("a1", "归档目标资料")]);
+  await archiveKb(kbRoot, "归档目标");
+  const mergedTargetDir = await setupKb(kbRoot, "合并目标", [doc("m1", "合并目标资料")]);
+  const merged = await readManifest(mergedTargetDir);
+  merged.mergedInto = "目标库";
+  merged.mergedAt = "2026-10-05T00:00:00.000Z";
+  await writeManifestAtomic(mergedTargetDir, merged);
+
+  const movedTo = (kb, docId) => ({ kb, docId, transferId: "abc123", at: "2026-10-02T00:00:00.000Z" });
+  await setupKb(kbRoot, "alpha", [
+    deletedDoc("mv-live", "目标在用", "2026-10-06T00:00:00.000Z", { movedTo: movedTo("目标库", "t-live") }),
+    deletedDoc("mv-deleted", "目标已删除", "2026-10-05T00:00:00.000Z", { movedTo: movedTo("目标库", "t-deleted") }),
+    deletedDoc("mv-missing", "目标副本不存在", "2026-10-04T00:00:00.000Z", { movedTo: movedTo("目标库", "t-gone") }),
+    deletedDoc("mv-archived", "目标库已归档", "2026-10-03T00:00:00.000Z", { movedTo: movedTo("归档目标", "a1") }),
+    deletedDoc("mv-merged", "目标库已合并", "2026-10-02T00:00:00.000Z", { movedTo: movedTo("合并目标", "m1") }),
+    deletedDoc("plain", "普通删除", "2026-10-01T00:00:00.000Z")
+  ]);
+
+  const { res, json } = await call({ kbRoot }, makeReq({ url: "/kb/api/trash/docs" }));
+  assert.equal(res.status, 200);
+  const byId = new Map(json.items.map((item) => [item.id, item]));
+
+  assert.equal(byId.get("mv-live").movedToState, "live");
+  assert.equal(byId.get("mv-live").canRestoreSource, false);
+  for (const [id, state] of [
+    ["mv-deleted", "deleted"],
+    ["mv-missing", "missing"],
+    ["mv-archived", "missing"],
+    ["mv-merged", "missing"],
+  ]) {
+    assert.equal(byId.get(id).movedToState, state, id);
+    assert.equal(byId.get(id).canRestoreSource, true, id);
+  }
+  assert.equal(byId.get("plain").movedTo, null);
+  assert.equal(byId.get("plain").movedToState, undefined);
+  assert.equal(byId.get("plain").canRestoreSource, undefined);
+  // 只读列举不会搬回归档库/改写目标清单。
+  assert.equal(existsSync(join(archivedTargetDir, "kb.json")), false);
+  assert.equal(existsSync(join(kbRoot, ".trash")), true);
   assert.equal(JSON.stringify(json).includes(kbRoot), false);
 });
 

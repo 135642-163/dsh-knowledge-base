@@ -189,3 +189,61 @@ test("restoreDoc refuses a source doc moved to another kb and keeps its tombston
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("restoreDoc/restoreDocVersion with clearMovedTo recover the source tombstone", async () => {
+  const { root, tools, exec } = await setup();
+  try {
+    const add = await tools.get("kb_add_note").execute(
+      { kb: "软删除测试", title: "目标副本已消失", content: "目标副本删除后，源文档仍可恢复。" },
+      exec
+    );
+    const dir = join(root, "kb", "软删除测试");
+    await tools.get("kb_remove").execute({ kb: "软删除测试", doc: add.docId }, exec);
+    const movedTo = {
+      kb: "目标库",
+      docId: "target-doc",
+      transferId: "abcdef12",
+      at: "2026-10-02T00:00:00.000Z",
+    };
+    const movedFrom = {
+      kb: "上游库",
+      docId: "upstream-doc",
+      at: "2026-10-01T00:00:00.000Z",
+      version: 1,
+    };
+    let manifest = await readManifest(dir);
+    let doc = manifest.docs.find((item) => item.id === add.docId);
+    doc.movedTo = movedTo;
+    doc.movedFrom = movedFrom;
+    await writeManifestAtomic(dir, manifest);
+    const snapshot = await snapshotDocVersion(dir, { ...doc, version: 1 }, "test");
+    assert.ok(snapshot);
+
+    // 调用方确认目标副本已删除/缺失后，普通恢复可以显式清除 movedTo；
+    // movedFrom 是更早一次移动的来源记录，必须保留。
+    const restored = await restoreDoc(dir, add.docId, { clearMovedTo: true });
+    assert.equal(restored.status, "ready");
+    assert.equal(restored.movedTo, undefined);
+    assert.deepEqual(restored.movedFrom, movedFrom);
+    assert.equal(restored.deletedAt, undefined);
+    assert.equal(restored.deletedFromStatus, undefined);
+
+    // 历史版本恢复走同一开关：再次造一个带 movedTo 的墓碑，v1 快照仍在。
+    await tools.get("kb_remove").execute({ kb: "软删除测试", doc: add.docId }, exec);
+    manifest = await readManifest(dir);
+    doc = manifest.docs.find((item) => item.id === add.docId);
+    doc.movedTo = movedTo;
+    await writeManifestAtomic(dir, manifest);
+    await assert.rejects(
+      () => restoreDocVersion(dir, add.docId, 1),
+      /文档已跨库移动，请使用撤销移动/
+    );
+    const versionRestored = await restoreDocVersion(dir, add.docId, 1, { clearMovedTo: true });
+    assert.equal(versionRestored.status, "ready");
+    assert.equal(versionRestored.movedTo, undefined);
+    assert.deepEqual(versionRestored.movedFrom, movedFrom);
+    assert.equal(versionRestored.restoredFrom, 1);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
