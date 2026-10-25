@@ -1,10 +1,13 @@
 import { api, ApiError } from "./api.js";
 import { icons } from "./icons.js";
-import { hrefForKb, hrefForOverview, hrefForTrash, parseHash } from "./router.js";
+import { hrefForKb, hrefForOverview, hrefForSearch, hrefForTrash, parseHash } from "./router.js";
 import { renderOverview } from "./views/overview.js";
 import { docsPageSize, docsStatus, renderDetail, selectionToggle, selectionToggleOne } from "./views/detail.js";
 import { attachDocsControls, createRequestGate } from "./docs-controls.js";
 import { parsePreviewDeepLink } from "./deep-link.js";
+import { applyHighlights, mergeResults, searchParamsOf, searchStateFromQuery } from "./search-core.js";
+import { attachSearchControls } from "./search-controls.js";
+import { renderSearch } from "./views/search.js";
 import {
   purgeDocsConfirmBody, renderTrash, renderTrashPurgeBody, trashDocKey, trashPurgePhrase,
   trashPurgeTarget, trashRestoreTargets, trashSelectionToggleAll, trashSelectionToggleOne,
@@ -48,14 +51,24 @@ const state = {
     kb: "", loading: false, error: "", warning: "", starting: false, cancelling: false,
     status: null, job: null, timer: null, pollRetry: 0, inFlight: null,
   },
+  search: {
+    q: "", appliedQ: "", kb: "", tag: "", type: "", trust: "",
+    results: [], total: 0, offset: 0, limit: 20, terms: [], engine: "none",
+    indexBuilding: false, note: "", tookMs: 0, estimated: false,
+    facets: { tags: [], types: [], trust: [] },
+    loading: false, loadingMore: false, error: "",
+  },
 };
 
 // 切库/离开标准 tab 时自增：所有在途状态请求与轮询回调凭 token 自行作废。
 let stdToken = 0;
 // 详情页请求（含资料搜索）的代号：路由/切库或更新的搜索让旧响应自行作废。
 const detailGate = createRequestGate();
-// 每次 render 重新挂载的资料工具栏控件；bind() 负责先 detach 上一份。
+// 全文检索请求的代号：条件变化后旧响应自行作废，避免覆盖新结果。
+const searchGate = createRequestGate();
+// 每次 render 重新挂载的工具栏控件；bind() 负责先 detach 上一份。
 let docsControls = null;
+let searchControls = null;
 
 function fmtNumber(value) {
   return new Intl.NumberFormat("zh-CN").format(Number(value) || 0);
@@ -199,6 +212,165 @@ function loadCurrentDocs(request = {}) {
   // 搜索词变化时先清空勾选；翻页/改每页条数（query 未变）保留跨页选择。
   if (String(request?.query ?? "") !== String(state.docs.appliedQuery ?? "")) state.docs.selected = [];
   return loadDetail(current.name, "docs");
+}
+
+// ---------------------------------------------------------------------------
+// 全文检索页（#/search）
+// ---------------------------------------------------------------------------
+
+/** 检索条件 -> hash。用 replaceState：不触发 hashchange，避免二次请求。 */
+function syncSearchHash() {
+  const current = route();
+  if (current.page !== "search") return;
+  const query = searchParamsOf(state.search);
+  const next = `#/search${query === "" ? "" : `?${query}`}`;
+  if (window.location.hash === next) return;
+  window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}${next}`);
+}
+
+/** 进入检索页/浏览器后退：把 hash 条件写回 state，并清掉上一轮结果。 */
+function applySearchQuery(query) {
+  state.search = {
+    ...state.search,
+    ...searchStateFromQuery(query),
+    appliedQ: "",
+    results: [],
+    total: 0,
+    offset: 0,
+    terms: [],
+    engine: "none",
+    indexBuilding: false,
+    note: "",
+    tookMs: 0,
+    estimated: false,
+    loading: false,
+    loadingMore: false,
+    error: "",
+  };
+}
+
+/** 无检索词时回到空态，不发请求（服务端会 400 SEARCH_EMPTY）。 */
+function clearSearchResults() {
+  state.search = {
+    ...state.search,
+    appliedQ: "",
+    results: [],
+    total: 0,
+    offset: 0,
+    terms: [],
+    engine: "none",
+    indexBuilding: false,
+    note: "",
+    tookMs: 0,
+    estimated: false,
+    loading: false,
+    loadingMore: false,
+    error: "",
+  };
+}
+
+/** 执行全文检索：reset=true 替换结果（新条件），false 追加（加载更多）。 */
+async function loadSearch({ reset = true } = {}) {
+  const current = route();
+  if (current.page !== "search") return { stale: true };
+  const q = String(state.search.q ?? "").trim();
+  if (q === "") {
+    clearSearchResults();
+    render();
+    return { stale: false, empty: true };
+  }
+  const token = searchGate.begin();
+  const snapshot = {
+    q,
+    kb: String(state.search.kb ?? ""),
+    tag: String(state.search.tag ?? ""),
+    type: String(state.search.type ?? ""),
+    trust: String(state.search.trust ?? ""),
+    limit: Math.max(1, Math.round(Number(state.search.limit) || 20)),
+    offset: reset ? 0 : Math.max(0, Math.round(Number(state.search.offset) || 0)),
+  };
+  state.search.offset = snapshot.offset;
+  if (reset) {
+    state.search.loading = true;
+    state.search.loadingMore = false;
+  } else {
+    state.search.loadingMore = true;
+  }
+  state.search.error = "";
+  render();
+  try {
+    const payload = await api.search(snapshot);
+    if (!searchGate.isCurrent(token)) return { stale: true };
+    const results = reset ? payload.results ?? [] : mergeResults(state.search.results, payload.results ?? []);
+    state.search = {
+      ...state.search,
+      ...payload,
+      q: snapshot.q,
+      appliedQ: snapshot.q,
+      offset: snapshot.offset,
+      limit: snapshot.limit,
+      results,
+      loading: false,
+      loadingMore: false,
+      error: "",
+    };
+    return { stale: false };
+  } catch (error) {
+    if (!searchGate.isCurrent(token)) return { stale: true };
+    state.search = {
+      ...state.search,
+      loading: false,
+      loadingMore: false,
+      error: errorText(error),
+    };
+    return { stale: false, error: true };
+  } finally {
+    if (searchGate.isCurrent(token)) render();
+  }
+}
+
+/** 重绘后用文本节点把摘要里的检索词高亮（不拼 HTML）。 */
+function paintSearchHighlights() {
+  const current = route();
+  if (current.page !== "search") return;
+  const results = Array.isArray(state.search.results) ? state.search.results : [];
+  const terms = Array.isArray(state.search.terms) ? state.search.terms : [];
+  for (const node of app.querySelectorAll("[data-hl]")) {
+    const index = Number(node.dataset.hl);
+    const result = Number.isInteger(index) ? results[index] : null;
+    if (!result) continue;
+    const resultTerms = Array.isArray(result.terms) && result.terms.length > 0 ? result.terms : terms;
+    applyHighlights(document, node, String(result.snippet ?? ""), resultTerms);
+  }
+}
+
+/** 检索框整页重绘后聚焦并把光标放回末尾（输入法组合结束也走这里）。 */
+function focusSearchInput() {
+  const next = app.querySelector("[data-search-query]");
+  if (!next) return;
+  next.focus();
+  next.setSelectionRange(next.value.length, next.value.length);
+}
+
+/** 点结果卡片：复用工作台预览弹窗（不新增全屏工作台）。 */
+async function openSearchResult(kb, id, page) {
+  if (!kb || !id) return;
+  try {
+    const doc = await api.doc(kb, id);
+    if (!doc || doc.deleted) throw new Error("资料不存在或已删除");
+    openPreviewModal({ name: kb, doc, icons, initialPage: page });
+  } catch {
+    showToast("资料不存在或已删除", "error");
+  }
+}
+
+/** 从结果卡片事件里取参数（标题链接与「打开原件」共用一套 data-*）。 */
+function searchResultTarget(target) {
+  return {
+    kb: String(target.dataset.kb ?? ""),
+    id: String(target.dataset.id ?? ""),
+    page: Math.max(0, Math.round(Number(target.dataset.page) || 0)) || null,
+  };
 }
 
 function errorText(error) {
@@ -871,6 +1043,7 @@ function render() {
         </nav>
         <div class="side-foot">
           <button class="side-action" data-action="create-kb">${icons.plus}<span>新建知识库</span></button>
+          <a class="side-action ${current.page === "search" ? "active" : ""}" href="${hrefForSearch({})}">${icons.search}<span>全文搜索</span></a>
           <a class="side-action" href="${hrefForTrash()}">${icons.archive}<span>回收站</span></a>
           <a class="side-action subtle" href="/kb/" target="_blank" rel="noreferrer">${icons.external}<span>在新标签打开</span></a>
         </div>
@@ -880,16 +1053,20 @@ function render() {
         ${state.error ? `<div class="state error">${escapeHtml(state.error)}<button class="btn" data-action="reload">重试</button></div>` : ""}
         ${!state.loading && !state.error && current.page === "overview" ? renderOverview(state, { icons, fmtNumber }) : ""}
         ${!state.loading && !state.error && current.page === "detail" ? renderDetail(state, current, { icons, fmtNumber }) : ""}
+        ${!state.loading && !state.error && current.page === "search" ? renderSearch(state, { icons, fmtNumber }) : ""}
         ${!state.loading && !state.error && current.page === "trash" ? renderTrash(state, current, { icons, fmtNumber }) : ""}
       </main>
     </div>
   `;
   bind();
+  paintSearchHighlights();
 }
 
 function bind() {
   // 上一轮渲染的监听/定时器先摘掉，避免旧 DOM 上的过期闭包再触发一次请求。
   docsControls?.detach();
+  searchControls?.detach();
+  searchControls = null;
   // 全局点击委托
   app.onclick = async (event) => {
     const target = event.target.closest("[data-action]");
@@ -1180,6 +1357,21 @@ function bind() {
           showToast(error instanceof ApiError ? error.message : String(error?.message ?? error), "error");
         }
       }
+    } else if (action === "search-open") {
+      event.preventDefault();
+      const picked = searchResultTarget(target);
+      await openSearchResult(picked.kb, picked.id, picked.page);
+    } else if (action === "search-submit") {
+      const current = route();
+      if (current.page !== "search") return;
+      const input = app.querySelector("[data-search-query]");
+      await searchControls?.applyQuery?.(String(input?.value ?? state.search.q ?? ""));
+    } else if (action === "search-example") {
+      const current = route();
+      if (current.page !== "search") return;
+      searchControls?.applyQuery?.(target.dataset.example ?? "");
+    } else if (action === "search-retry") {
+      await loadSearch({ reset: true });
     } else if (action === "toast-close") {
       hideToast();
     }
@@ -1214,6 +1406,18 @@ function bind() {
   }
   // 资料 tab：搜索（防抖 + 输入法安全）、每页条数、跳页、清除搜索、焦点恢复
   docsControls = attachDocsControls({ app, state, load: loadCurrentDocs });
+  // 检索页：搜索防抖/输入法/Enter、四个过滤、清除、加载更多；hash 用 replaceState 同步
+  searchControls = attachSearchControls({
+    app,
+    state,
+    load: async ({ reset }) => {
+      const current = route();
+      if (current.page !== "search") return { stale: true };
+      return loadSearch({ reset });
+    },
+    after: syncSearchHash,
+    focus: focusSearchInput,
+  });
   app.querySelectorAll("[data-filter='status']").forEach((button) => {
     button.onclick = () => { state.filter = button.dataset.value; render(); };
   });
@@ -1341,15 +1545,19 @@ async function openDeepLinkPreview() {
 function boot() {
   clearStdTimer();
   window.addEventListener("hashchange", () => {
-    // 路由/切库/切 tab：让所有在途详情与资料请求作废，且不重新渲染旧页面。
+    // 路由/切库/切 tab：让所有在途详情/资料/检索请求作废，且不重新渲染旧页面。
     detailGate.invalidate();
+    searchGate.invalidate();
     // 离开资料 tab / 换库：跨页勾选只在当前资料 tab 内保留。
     state.docs.selected = [];
     stopStd();
     const current = route();
     // 进入回收站时保留上次搜索/排序，但旧勾选不带入新页面。
     if (current.page === "trash") loadTrash({ resetSelection: true });
-    else if (current.page === "detail") loadDetail(current.name, current.tab);
+    else if (current.page === "search") {
+      applySearchQuery(current.query);
+      void loadSearch({ reset: true });
+    } else if (current.page === "detail") loadDetail(current.name, current.tab);
     else render();
   });
   document.addEventListener("visibilitychange", () => {
@@ -1363,7 +1571,10 @@ function boot() {
   const current = route();
   loadKbs().then(async () => {
     if (current.page === "trash") await loadTrash();
-    else if (current.page === "detail") await loadDetail(current.name, current.tab);
+    else if (current.page === "search") {
+      applySearchQuery(current.query);
+      await loadSearch({ reset: true });
+    } else if (current.page === "detail") await loadDetail(current.name, current.tab);
     await openDeepLinkPreview();
   });
 }

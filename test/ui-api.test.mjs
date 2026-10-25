@@ -327,3 +327,31 @@ test("错误响应映射成 ApiError", async () => {
     return true;
   });
 });
+
+test("search 把条件编码进查询串，空值不传", async () => {
+  // 上一个用例把 fetch 替换成了失败桩，这里恢复成记录调用的成功桩。
+  globalThis.fetch = async (url, options = {}) => {
+    calls.push({ url, options });
+    return { ok: true, status: 200, json: async () => ({ ok: true }) };
+  };
+  calls.length = 0;
+  await api.search({ q: "电压偏差", kb: "标准", tag: "并网", type: "pdf-text", trust: "high", limit: 20, offset: 40 });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].options.method, "GET");
+  assert.match(calls[0].url, /^\/kb\/api\/search\?/);
+  const url = new URL(calls[0].url, "http://dsh.internal");
+  assert.equal(url.searchParams.get("q"), "电压偏差");
+  assert.equal(url.searchParams.get("kb"), "标准");
+  assert.equal(url.searchParams.get("tag"), "并网");
+  assert.equal(url.searchParams.get("type"), "pdf-text");
+  assert.equal(url.searchParams.get("trust"), "high");
+  assert.equal(url.searchParams.get("limit"), "20");
+  assert.equal(url.searchParams.get("offset"), "40");
+
+  calls.length = 0;
+  await api.search({ q: "电压", kb: "", tag: "", type: "", trust: "" });
+  const empty = new URL(calls[0].url, "http://dsh.internal");
+  for (const key of ["kb", "tag", "type", "trust"]) {
+    assert.equal(empty.searchParams.has(key), false, key);
+  }
+});

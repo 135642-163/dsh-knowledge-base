@@ -80,6 +80,15 @@ export const api = {
     return request("GET", `/kbs/${encodeURIComponent(name)}/docs?${query.toString()}`);
   },
   doc: (name, id) => request("GET", `/kbs/${encodeURIComponent(name)}/docs/${encodeURIComponent(id)}`),
+  /** 全文检索（跨库）：q 必须有值；其余条件是 manifest 过滤。 */
+  search: (params = {}) => {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== null && value !== "") query.set(key, String(value));
+    }
+    const search = query.toString();
+    return request("GET", `/search${search ? `?${search}` : ""}`);
+  },
   /** 人工编目：摘要/标签；summarySource 由服务端置为 manual。 */
   patchDocMetadata: (name, id, body) => request(
     "PATCH",

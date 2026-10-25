@@ -423,3 +423,42 @@ body.embed .side-foot a[target="_blank"] { display: none; }
   .docs-table th:nth-child(6), .docs-table td:nth-child(6) { display: none; }
   .docs-bulk { align-items: stretch; }
 }
+
+/* 全文检索页（0.27） */
+.search-toolbar { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
+.search-form { display: flex; gap: 8px; align-items: center; }
+.search-form input[type="search"] {
+  flex: 1; min-width: 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 8px; padding: 9px 12px; color: inherit; font: inherit;
+}
+.search-form input[type="search"]:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+.search-filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.search-filters select {
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px;
+  padding: 6px 8px; color: inherit; font: inherit; max-width: 200px;
+}
+.search-status { margin: 0; font-size: 12px; }
+.search-results { display: flex; flex-direction: column; gap: 10px; }
+.search-card { border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; background: var(--panel); }
+.search-card-head { display: flex; align-items: flex-start; gap: 10px; }
+.search-card-title {
+  color: var(--accent); text-decoration: none; font-weight: 600; line-height: 1.4;
+  word-break: break-word; flex: 1; min-width: 0;
+}
+.search-card-title:hover { text-decoration: underline; }
+.search-card-badges { display: inline-flex; gap: 6px; flex: none; }
+.search-card-meta { margin: 6px 0 0; font-size: 12px; }
+.search-card-snippet { margin: 8px 0 0; line-height: 1.6; word-break: break-word; }
+.search-card-snippet mark { background: var(--accent-soft); color: inherit; border-radius: 3px; padding: 0 1px; }
+.search-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; font-size: 12px; }
+.search-more { display: flex; justify-content: center; margin-top: 14px; }
+.search-empty .search-examples { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 10px 0; }
+.search-examples .chip {
+  border: 1px solid var(--line); background: var(--panel-2); color: inherit;
+  border-radius: 999px; padding: 4px 12px; cursor: pointer; font: inherit;
+}
+.search-examples .chip:hover { border-color: var(--accent); color: var(--accent); }
+.badge.trust-high { color: #1a7f37; border-color: color-mix(in srgb, #1a7f37 35%, transparent); }
+.badge.trust-medium { color: #9a6700; border-color: color-mix(in srgb, #9a6700 35%, transparent); }
+.badge.trust-low { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
+.side-action.active { color: var(--accent); }
