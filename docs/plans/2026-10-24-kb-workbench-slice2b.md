@@ -3729,3 +3729,34 @@ Expected: `--ff-only` 成功；HEAD 为 `chore: release 0.21.0 …`，其后还�
   - 没有自动过期清理（后续可加保留天数配置）；
   - 归档库内的资料只能随库恢复，缺少单篇恢复粒度；
   - 真实浏览器自动化（Playwright）仍未接入，UI 验收靠一次性 WKWebView 脚本。
+
+## 0.25.0 实施记录
+
+0.24.0 → 0.25.0 的回收站增强与 CI 轮（跨库批量彻底删除 + 搜索/排序 + 自动过期清理 + GitHub Actions）。
+任务按实际提交顺序记录：
+
+| # | 任务 | 提交 | 主要文件 |
+|---|---|---|---|
+| 1 | 回收站 API：跨库批量彻底删除（`POST /trash/docs/purge`，全量预检、`彻底删除 N 篇` 确认、`kb+id` 去重、部分失败、逐库日志/索引、500 上限）；`GET /trash/docs` 的 `query`/`sort`（四字段搜索、六种排序、过滤后截断）；`trashRetentionDays` 自动清理（`sweepTrash` / `sweepTrashIfDue`、启动与访问触发、每小时节流、`movedTo` 墓碑保护） | `ba7ae84` | `lib/web/api.js`、`lib/web/server.js`、`lib/index.js`、`test/web-trash-docs.test.mjs`、`test/test-trash-sweep.test.mjs` |
+| 2 | 回收站 UI：搜索框（300ms 防抖/Enter/输入法安全）、六项排序、搜索空态与清除、跨库多选彻底删除（`彻底删除 N 篇` 确认正文）、行内仍输入库名、500 截断提示 | `5534db9` | `ui/views/trash.js`、`ui/app.js`、`ui/api.js`、`ui/style.css`、`test/ui-trash.test.mjs`、`test/ui-api.test.mjs` |
+| 3 | CI：`.github/workflows/ci.yml` 的 unit/e2e 两 job；macOS 临时 `DSH_HOME` profile、注册插件、Playwright WebKit、失败上传产物；install 脚本空 patch/引号/脚本路径参数修正；E2E host 共享 `node_modules` 与缺 `pnpm-lock` 回退；fresh-profile 胶囊 skip | `e95c4a5` | `.github/workflows/ci.yml`、`install-to-machine.sh`、`scripts/e2e/host.mjs`、`scripts/e2e/tests/capsule.mjs`、`README.md` |
+| 4 | E2E：回收站搜索/排序/筛选空态与跨库选择覆盖 | `7ddce00` | `scripts/e2e/tests/trash-search-sort.mjs`、`scripts/e2e/run.mjs` |
+
+- **自动化**：`npm test` **801/801**（0.24.0 基线 777，净增 24：新增 `test-trash-sweep.test.mjs` 9 例；
+  `web-trash-docs.test.mjs` 11 → 22、`ui-trash.test.mjs` 25 → 28、`ui-api.test.mjs` 12 → 13）；
+  `npm run typecheck`、`npm run check:client`、`node scripts/check-ui.mjs` 全绿。逐文件明细见 spec §15.6，
+  本轮说明见 spec §24。
+- **E2E**：本地真实 profile + 凭据 **7/7 passed**（搜索排序、回收站、跨库移动、失败重试、PDF/笔记预览、
+  Office 预览、会话胶囊）；隔离 `DSH_HOME` 的全新 profile **5 passed / 1 skipped**（胶囊；该轮为
+  search/sort E2E 用例加入前的 6 项套件）。CI 设计为核心 5 项通过 + 胶囊 skip（Office 可选预览
+  无转换引擎时也 skip）。
+- **发布**：版本 0.25.0（`package.json`、`package-lock.json` 根与 `packages[""]`、`lib/version.js`）；
+  README 新增 `## 0.25.0 回收站增强与 CI`、配置表新增 `trashRetentionDays`、测试段更新为 801；
+  spec 追加 §24 与 §15.6、§15.1 总数改为 801；本文件追加本节。
+  发布提交：`chore: release 0.25.0 with trash governance and CI`。
+- **已知跟进**：
+  - 自动过期清理默认关闭（`trashRetentionDays=0`），且没有 UI 开关，只能改配置后重启；
+  - 跨库批量彻底删除的日志粒度是逐篇（每库 index 只刷一次），后续可考虑批次汇总日志；
+  - Chromium 下载在部分网络/CDN 不可用，CI 只装 WebKit；
+  - fresh-profile 胶囊 skip 依赖 CI 没有凭据；后续可准备可用测试凭据或 mock 会话；
+  - GitHub Actions 首次真实运行的耗时（macOS 装 DSH/WebKit）尚未观测，预计 10–20 分钟。
