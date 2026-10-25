@@ -917,17 +917,15 @@ npm run test:e2e      # 自托管临时 DSH web 宿主并跑完整流程
   后重试 `npm run e2e:install`。Chromium 下载失败（CDN/镜像缺对应版本）不影响套件，
   可只装 WebKit：`npx playwright install webkit`（套件本来就优先 WebKit）。
 - **CI（GitHub Actions，`.github/workflows/ci.yml`）**：
-  - `unit` job（ubuntu）：`npm ci` → `typecheck` → `npm test`。
-  - `e2e` job（macos-14）：安装 `@deepseek-ai/dsh@0.2.1-rc.2` → 首次 `dsh web` 生成临时
-    `DSH_HOME` profile → 用 `install-to-machine.sh` 注册本仓库 → 安装 Playwright WebKit →
-    跑 `npm run test:e2e`；失败时上传 `test/e2e/.artifacts`。
-  - 全新 CI profile 没有历史会话/模型凭据，胶囊用例会自动 **skip** 并说明原因；
-    工作台/回收站/搜索排序/移动/重试/预览用例照常执行，其余失败仍会让 job 红。
-  - 可选 `e2e-capsule` job（手动 `workflow_dispatch` + `run_capsule=true`）：在自托管
-    `[self-hosted, macOS, dsh-profile]` runner 上跑同一套 E2E；该 runner 的 DSH profile
-    已有工作区/会话，胶囊不会 skip，用于覆盖完整 7 项。
-  - 本地有凭据 profile 7 项全通过（7/7）；CI 核心 5 项通过 + 胶囊 skip（Office 可选预览
-    在无转换引擎时也会 skip）。E2E 中的回收站用例会真实执行一次**跨库批量彻底删除**。
+  - `unit` job（ubuntu）：`npm ci` → `typecheck` → `npm test`，每次 push/PR 自动跑。
+  - `e2e` job：**手动 `workflow_dispatch` + `run_e2e=true`**，在自托管
+    `[self-hosted, macOS, dsh-profile]` runner 上跑完整 7 项（runner 需有 `dsh`、
+    已登录的 web profile/工作区会话，胶囊不会 skip）；失败上传 `test/e2e/.artifacts`。
+  - 为什么不在 GitHub 托管 runner 上自动跑：全新 `DSH_HOME` 首次启动会要求一次性
+    token，浏览器/同源 API 的认证链路在托管 runner 上不稳定，且没有历史会话/模型凭据
+    （胶囊无法挂载）。自托管 runner 复用已配置 profile，结果与本地一致（7/7）。
+  - 本地有凭据 profile 7 项全通过（7/7）；E2E 中的回收站用例会真实执行一次
+    **跨库批量彻底删除**。
 
 ## 使用示例（对 harness 直接说）
 

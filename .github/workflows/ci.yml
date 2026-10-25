@@ -6,8 +6,8 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
-      run_capsule:
-        description: "Run capsule E2E on the self-hosted macOS runner (needs a configured DSH profile/session)"
+      run_e2e:
+        description: "Run the full Playwright suite on the self-hosted macOS runner (needs DSH + a configured profile)"
         type: boolean
         default: false
 
@@ -29,79 +29,19 @@ jobs:
       - run: npm run typecheck
       - run: npm test
 
+  # The full suite needs a real DSH host with a workspace/session (for the
+  # composer capsule) and a pre-authenticated profile. GitHub-hosted runners
+  # start from an empty DSH_HOME and require a one-time token that cannot be
+  # passed to the browser reliably, so this job runs on a self-hosted runner:
+  # labels [self-hosted, macOS, dsh-profile], with `dsh` on PATH and a working
+  # web profile. Trigger it via "Run workflow" with run_e2e=true.
   e2e:
-    name: Playwright E2E (WebKit, temp DSH profile)
-    runs-on: macos-14
-    timeout-minutes: 35
-    needs: unit
-    env:
-      DSH_VERSION: 0.2.1-rc.2
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-
-      # 1) Provision a throw-away DSH profile (first boot installs profile deps).
-      - name: Provision temporary DSH profile
-        run: |
-          set -euo pipefail
-          npm i -g "@deepseek-ai/dsh@${DSH_VERSION}"
-          export DSH_HOME="$RUNNER_TEMP/dsh-home"
-          mkdir -p "$DSH_HOME"
-          echo "DSH_HOME=$DSH_HOME" >> "$GITHUB_ENV"
-          dsh web --port 55970 --no-open > "$RUNNER_TEMP/dsh-first.log" 2>&1 &
-          for i in $(seq 1 240); do
-            if curl -sf --max-time 2 http://127.0.0.1:55970/ >/dev/null; then break; fi
-            if grep -q 'token=' "$RUNNER_TEMP/dsh-first.log"; then break; fi
-            sleep 1
-          done
-          pkill -f "dsh web --port 55970" || true
-          sleep 2
-
-      # 2) Register this checkout as the knowledge-wiki plugin in the temp profile.
-      - name: Register plugin into temp profile
-        run: |
-          set -euo pipefail
-          bash install-to-machine.sh "$PWD/install-to-machine.sh" "$RUNNER_TEMP/kb-e2e"
-
-      # 3) Browser: WebKit matches the DSH desktop engine. Retry via CDN if the
-      #    default Playwright host is unavailable.
-      - name: Install Playwright WebKit
-        run: |
-          set -euo pipefail
-          npx playwright install webkit || PLAYWRIGHT_DOWNLOAD_HOST=https://cdn.playwright.dev npx playwright install webkit
-
-      # 4) Self-hosting E2E: a temp e2e profile is copied from the provisioned
-      #    web profile (temp kbRoot via patch rewrite), and the harness discovers
-      #    the one-time auth token from the host log.
-      - name: Run E2E
-        timeout-minutes: 12
-        run: npm run test:e2e
-
-      - name: Upload E2E artifacts
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: e2e-artifacts
-          path: test/e2e/.artifacts
-          if-no-files-found: ignore
-          # 目录名以 . 开头：upload-artifact 默认不收集隐藏文件，必须显式开启。
-          include-hidden-files: true
-
-  # Fresh GitHub-hosted profiles have no session/credentials, so the capsule
-  # test self-skips there. This optional job runs the same suite on a
-  # self-hosted macOS runner whose DSH profile already has a workspace/session
-  # (and therefore mounts the composer capsule). Trigger it manually with
-  # "Run workflow" and run_capsule=true. The runner must have the labels
-  # [self-hosted, macOS, dsh-profile] and a working `dsh` + Playwright WebKit.
-  e2e-capsule:
-    name: Capsule E2E (self-hosted configured profile)
-    if: github.event_name == 'workflow_dispatch' && inputs.run_capsule
+    name: Playwright E2E (self-hosted, configured DSH profile)
+    if: github.event_name == 'workflow_dispatch' && inputs.run_e2e
     runs-on: [self-hosted, macOS, dsh-profile]
-    timeout-minutes: 20
+    timeout-minutes: 30
+    env:
+      DSH_E2E_BROWSER: webkit
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -111,13 +51,14 @@ jobs:
       - run: npm ci
       - name: Install Playwright WebKit
         run: npx playwright install webkit
-      - name: Run E2E (capsule included)
+      - name: Run the full E2E suite (capsule included)
         run: npm run test:e2e
       - name: Upload E2E artifacts
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-capsule-artifacts
+          name: e2e-artifacts
           path: test/e2e/.artifacts
           if-no-files-found: ignore
+          # 目录名以 . 开头：upload-artifact 默认不收集隐藏文件，必须显式开启。
           include-hidden-files: true
