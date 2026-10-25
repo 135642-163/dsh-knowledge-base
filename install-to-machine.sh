@@ -43,6 +43,12 @@ fi
 if grep -q "id: knowledge-wiki" "$PATCH_FILE"; then
   echo "cordis.patch.yml 已包含 knowledge-wiki 注册行，跳过写入（如路径变化请手动修改）"
 else
+  # 全新 profile 的 cordis.patch.yml 通常是注释 + 一个空的 []；直接追加列表项会
+  # 变成 “[] 后跟 - insert” 的非法 YAML。写入前先去掉这个空数组标记。
+  if grep -q '^[[:space:]]*\[\][[:space:]]*$' "$PATCH_FILE"; then
+    awk '!/^[[:space:]]*\[\][[:space:]]*$/' "$PATCH_FILE" > "$PATCH_FILE.tmp"
+    mv "$PATCH_FILE.tmp" "$PATCH_FILE"
+  fi
   {
     echo ""
     echo "# dsh-knowledge-wiki 知识库插件（由 install-to-machine.sh 添加，路径: ${PLUGIN_DIR}）"
