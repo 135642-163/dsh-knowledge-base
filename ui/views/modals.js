@@ -1011,6 +1011,54 @@ function conflictSection(groups) {
 }
 
 /**
+ * 跨库移动表单（纯渲染，便于单测）：目标库选择 + 预检摘要 + 冲突分组。
+ * 只有预检发现重复时才出现「遇到重复」单选；没有冲突时直接说明将直接移动。
+ */
+export function renderMoveForm({
+  sourceIds = [],
+  targets = [],
+  target = "",
+  ack = false,
+  loading = false,
+  busy = false,
+  preflight = null,
+  error = "",
+  onConflict = "skip",
+} = {}) {
+  const confirm = moveConfirmState({ target, ack, loading, busy, preflight, error });
+  const groups = conflictGroups(preflight);
+  return `
+    <form class="modal-form">
+      <h2>移动 ${sourceIds.length} 篇资料</h2>
+      <label class="field"><span>目标知识库</span>
+        <select name="target" ${busy ? "disabled" : ""}>
+          ${targets.length === 0
+            ? `<option value="">没有可移动到的目标库</option>`
+            : targets.map((candidate) => `<option value="${escapeAttr(candidate)}"${candidate === target ? " selected" : ""}>${escapeHtml(candidate)}</option>`).join("")}
+        </select>
+      </label>
+      <p class="muted">同一篇资料不能移到自己所在的库；已合并的库不能作为移动目标。</p>
+      <div class="move-preflight">${renderMoveSummary({ target, ids: sourceIds, loading, error, preflight })}</div>
+      ${groups.length > 0 ? conflictSection(groups) : ""}
+      ${groups.length > 0
+        ? `<div class="move-conflict-mode">
+          <span class="muted">遇到重复：</span>
+          <label class="check"><input type="radio" name="on-conflict" value="skip"${onConflict === "skip" ? " checked" : ""}${busy ? " disabled" : ""} /> 跳过</label>
+          <label class="check"><input type="radio" name="on-conflict" value="rename"${onConflict === "rename" ? " checked" : ""}${busy ? " disabled" : ""} /> 重命名为副本</label>
+        </div>`
+        : `<p class="muted move-no-conflict">没有重复冲突，将直接移动。</p>`}
+      ${groups.some((group) => group.kind === "hash") ? `<p class="muted">同内容重复始终跳过（重命名只会制造真正的重复）。</p>` : ""}
+      <label class="check move-ack"><input type="checkbox" name="ack"${ack ? " checked" : ""}${busy ? " disabled" : ""} /> 我已了解：移动=复制到目标库并软删除源库文档，可在源库回收站撤销</label>
+      ${confirm.disabled ? `<p class="muted move-hint">${escapeHtml(confirm.reason)}</p>` : ""}
+      <div class="modal-actions">
+        <button type="button" class="btn" data-close>取消</button>
+        <button type="submit" class="btn primary"${confirm.disabled ? " disabled" : ""}>开始移动</button>
+      </div>
+    </form>
+  `;
+}
+
+/**
  * 跨库移动弹窗：选目标库 → 预检（摘要 + 冲突分组）→ 确认移动 → 结果页（可撤销全部）。
  * onDone 在移动/撤销完成后调用，用于刷新资料列表与侧栏计数。
  */
@@ -1036,42 +1084,7 @@ export function openMoveModal({ name, ids = [], kbs = [], notify = () => {}, onD
   let requestSeq = 0;
 
   function formView() {
-    const confirm = moveConfirmState({
-      target: state.target,
-      ack: state.ack,
-      loading: state.loading,
-      busy: state.busy,
-      preflight: state.preflight,
-      error: state.error,
-    });
-    const groups = conflictGroups(state.preflight);
-    return `
-      <form class="modal-form">
-        <h2>移动 ${sourceIds.length} 篇资料</h2>
-        <label class="field"><span>目标知识库</span>
-          <select name="target" ${state.busy ? "disabled" : ""}>
-            ${targets.length === 0
-              ? `<option value="">没有可移动到的目标库</option>`
-              : targets.map((target) => `<option value="${escapeAttr(target)}"${target === state.target ? " selected" : ""}>${escapeHtml(target)}</option>`).join("")}
-          </select>
-        </label>
-        <p class="muted">同一篇资料不能移到自己所在的库；已合并的库不能作为移动目标。</p>
-        <div class="move-preflight">${renderMoveSummary({ target: state.target, ids: sourceIds, loading: state.loading, error: state.error, preflight: state.preflight })}</div>
-        ${groups.length > 0 ? conflictSection(groups) : ""}
-        <div class="move-conflict-mode">
-          <span class="muted">遇到重复：</span>
-          <label class="check"><input type="radio" name="on-conflict" value="skip"${state.onConflict === "skip" ? " checked" : ""} ${groups.length === 0 || state.busy ? "disabled" : ""} /> 跳过</label>
-          <label class="check"><input type="radio" name="on-conflict" value="rename"${state.onConflict === "rename" ? " checked" : ""} ${groups.length === 0 || state.busy ? "disabled" : ""} /> 重命名为副本</label>
-        </div>
-        ${groups.some((group) => group.kind === "hash") ? `<p class="muted">同内容重复始终跳过（重命名只会制造真正的重复）。</p>` : ""}
-        <label class="check move-ack"><input type="checkbox" name="ack"${state.ack ? " checked" : ""} ${state.busy ? "disabled" : ""} /> 我已了解：移动=复制到目标库并软删除源库文档，可在源库回收站撤销</label>
-        ${confirm.disabled ? `<p class="muted move-hint">${escapeHtml(confirm.reason)}</p>` : ""}
-        <div class="modal-actions">
-          <button type="button" class="btn" data-close>取消</button>
-          <button type="submit" class="btn primary"${confirm.disabled ? " disabled" : ""}>开始移动</button>
-        </div>
-      </form>
-    `;
+    return renderMoveForm({ ...state, sourceIds, targets });
   }
 
   function resultView() {

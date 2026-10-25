@@ -137,8 +137,8 @@ button { font: inherit; color: inherit; }
 .stats { display: flex; gap: 12px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
 .stats strong { color: var(--text); font-weight: 650; }
 .composition { display: flex; flex-direction: column; gap: 6px; }
-.bar { display: flex; gap: 2px; width: 100%; height: 8px; background: transparent; }
-.bar i { display: block; height: 100%; border-radius: 999px; flex: 0 1 auto; }
+.bar { display: flex; gap: 0; width: 100%; height: 8px; background: var(--panel-2); border-radius: 999px; overflow: hidden; }
+.bar i { display: block; height: 100%; border-radius: 0; flex: 0 1 auto; }
 .bar.empty i { width: 100%; background: var(--line); }
 .trust-dots { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; row-gap: 2px; font-size: 11px; color: var(--muted); }
 .trust-label { font-size: 10px; letter-spacing: 0.02em; }
@@ -342,6 +342,7 @@ body.embed .side-foot a[target="_blank"] { display: none; }
 .move-conflict-mode { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .move-ack { align-items: flex-start; line-height: 1.5; }
 .move-hint { margin: 0; font-size: 12px; }
+.move-no-conflict { margin: 0; font-size: 12px; }
 .conflict-groups { border-top: 1px dashed var(--line); padding-top: 10px; display: grid; gap: 8px; }
 .conflict-title { margin: 0; font-weight: 600; }
 .conflict-group { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }

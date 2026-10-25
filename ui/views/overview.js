@@ -83,13 +83,14 @@ function card(kb, { icons, fmtNumber }) {
 }
 
 /**
- * 类型构成条与图例共用的低饱和同族配色（浅色/深色主题下都保持可读）。
+ * 类型构成条与图例共用的配色：同族蓝为主，办公/表格/笔记补充暖色便于区分。
  * 未识别的类型回落到 unknown 的灰色。
  */
 const TYPE_COLORS = {
-  "pdf-scanned": "#5f7fb8", "pdf-text": "#7f96c9", "pdf-mixed": "#a3b6d9",
-  docx: "#7aa2d0", pptx: "#c9a36a", markdown: "#7fae9a", note: "#a48bc4",
-  epub: "#6fb3aa", mobi: "#6fb3aa", text: "#93a3b8", pdf: "#8a9bb5", unknown: "#b8c0cc",
+  "pdf-scanned": "#4f7fc0", "pdf-text": "#6fa0d8", "pdf-mixed": "#93b3dd",
+  docx: "#4f86c6", pptx: "#e0a33e", xlsx: "#d07a3f", markdown: "#4f9d69",
+  note: "#a26bc4", epub: "#3fa39a", mobi: "#3fa39a", text: "#93a3b8",
+  pdf: "#6b7f9e", doc: "#c26a6a", unknown: "#b8c0cc",
 };
 
 const TRUST_COLORS = { high: "#4f9d69", medium: "#c9a36a", low: "#b96a6a", unknown: "#93a3b8" };

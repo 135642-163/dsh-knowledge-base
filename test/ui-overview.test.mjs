@@ -66,32 +66,48 @@ test("类型条只为非零类型渲染分段，宽度合计 100%", () => {
   const bars = segments(html);
   assert.equal(bars.length, 3);
   assert.ok(Math.abs(bars.reduce((sum, bar) => sum + bar.width, 0) - 100) < 1e-6);
-  assert.deepEqual(bars.map((bar) => bar.color), ["#5f7fb8", "#7aa2d0", "#7f96c9"]);
+  assert.deepEqual(bars.map((bar) => bar.color), ["#4f7fc0", "#4f86c6", "#6fa0d8"]);
+  // 分段首尾相接，标记之间没有空白或间隔元素。
+  assert.match(html, /<\/i><i style="width:/);
   // 零计数类型既不占分段，也不出现在 title 里。
   assert.doesNotMatch(html, /markdown 0/);
 });
 
-test("类型条使用低饱和同族配色，不再出现旧的饱和色", () => {
-  const html = render([makeKb()]);
-  for (const color of ["#5f7fb8", "#7f96c9", "#7aa2d0"]) assert.ok(html.includes(color), color);
-  for (const stale of ["#6b8afd", "#3f5fd6", "#8ea6ff", "#3b82f6", "#f59e0b", "#10b981", "#a855f7", "#14b8a6", "#64748b", "#cbd5e1"]) {
+test("类型条使用更丰富的配色并包含暖色", () => {
+  const html = render([makeKb({
+    types: {
+      "pdf-scanned": 1, "pdf-text": 1, "pdf-mixed": 1, docx: 1, pptx: 1, xlsx: 1,
+      markdown: 1, note: 1, epub: 1, mobi: 1, text: 1, pdf: 1, doc: 1,
+    },
+  })]);
+  const colors = [
+    "#4f7fc0", "#6fa0d8", "#93b3dd", "#4f86c6", "#e0a33e", "#d07a3f",
+    "#4f9d69", "#a26bc4", "#3fa39a", "#93a3b8", "#6b7f9e", "#c26a6a",
+  ];
+  for (const color of colors) assert.ok(html.includes(`background:${color}`), color);
+  // 至少出现一个暖色（琥珀/橙/红），避免整条色带只有冷色。
+  assert.ok(["#e0a33e", "#d07a3f", "#c26a6a"].some((color) => html.includes(`background:${color}`)));
+  for (const stale of ["#5f7fb8", "#7f96c9", "#a3b6d9", "#7aa2d0", "#7fae9a", "#a48bc4", "#6fb3aa", "#8a9bb5"]) {
     assert.ok(!html.includes(stale), `旧配色仍在渲染：${stale}`);
   }
 });
 
-test("全部类型都映射到低饱和色，未知类型回落到灰色", () => {
+test("全部类型都映射到配色，未知类型回落到灰色", () => {
   const all = render([makeKb({
     types: {
-      "pdf-scanned": 1, "pdf-text": 1, "pdf-mixed": 1, docx: 1, pptx: 1, markdown: 1,
-      note: 1, epub: 1, mobi: 1, text: 1, pdf: 1, unknown: 1,
+      "pdf-scanned": 1, "pdf-text": 1, "pdf-mixed": 1, docx: 1, pptx: 1, xlsx: 1,
+      markdown: 1, note: 1, epub: 1, mobi: 1, text: 1, pdf: 1, doc: 1, unknown: 1,
     },
   })]);
-  for (const color of ["#5f7fb8", "#7f96c9", "#a3b6d9", "#7aa2d0", "#c9a36a", "#7fae9a", "#a48bc4", "#6fb3aa", "#93a3b8", "#8a9bb5", "#b8c0cc"]) {
+  for (const color of [
+    "#4f7fc0", "#6fa0d8", "#93b3dd", "#4f86c6", "#e0a33e", "#d07a3f",
+    "#4f9d69", "#a26bc4", "#3fa39a", "#93a3b8", "#6b7f9e", "#c26a6a", "#b8c0cc",
+  ]) {
     assert.ok(all.includes(`background:${color}`), color);
   }
-  assert.equal(segments(all).length, 12);
+  assert.equal(segments(all).length, 14);
 
-  const fallback = render([makeKb({ types: { xlsx: 2 } })]);
+  const fallback = render([makeKb({ types: { video: 2 } })]);
   assert.deepEqual(segments(fallback).map((bar) => bar.color), ["#b8c0cc"]);
 });
 
@@ -164,14 +180,22 @@ test("知识库名称在标题与 data-name 中均转义", () => {
   assert.match(html, /data-name="&lt;img src=x onerror=alert\(1\)&gt;"/);
 });
 
-test("样式约定：透明条、2px 间距、胶囊分段与中性空条", () => {
+test("样式约定：连续条形（无间隙、父级圆角裁剪）与中性空条", () => {
+  const css = readFileSync(new URL("../ui/style.css", import.meta.url), "utf8");
   const bar = cssRule(".bar");
-  assert.match(bar, /gap:\s*2px/);
+  assert.match(bar, /display:\s*flex/);
+  assert.match(bar, /gap:\s*0/);
   assert.match(bar, /height:\s*8px/);
   assert.match(bar, /width:\s*100%/);
-  assert.match(bar, /background:\s*transparent/);
-  assert.match(cssRule(".bar i"), /border-radius:\s*999px/);
-  assert.match(cssRule(".bar i"), /height:\s*100%/);
+  assert.match(bar, /background:\s*var\(--panel-2\)/);
+  assert.match(bar, /border-radius:\s*999px/);
+  assert.match(bar, /overflow:\s*hidden/);
+  // 分段是连续色块：自身不圆角，由父级 overflow:hidden + 圆角裁剪两端。
+  const segment = cssRule(".bar i");
+  assert.match(segment, /height:\s*100%/);
+  assert.match(segment, /border-radius:\s*0/);
+  assert.match(cssRule(".bar.empty i"), /width:\s*100%/);
   assert.match(cssRule(".bar.empty i"), /background:\s*var\(--line\)/);
-  assert.doesNotMatch(readFileSync(new URL("../ui/style.css", import.meta.url), "utf8"), /\.bar\.thin/);
+  assert.doesNotMatch(css, /\.bar\.thin/);
+  assert.doesNotMatch(bar, /gap:\s*2px/);
 });

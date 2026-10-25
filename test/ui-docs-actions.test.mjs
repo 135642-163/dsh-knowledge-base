@@ -10,7 +10,8 @@ import {
 } from "../ui/views/detail.js";
 import {
   conflictGroups, deleteConfirmBody, deleteConfirmCheck, moveConfirmState,
-  moveTargetChange, renderDocModalBody, renderMoveResult, renderMoveSummary, retryFailedDoc, waitForJob,
+  moveTargetChange, renderDocModalBody, renderMoveForm, renderMoveResult,
+  renderMoveSummary, retryFailedDoc, waitForJob,
 } from "../ui/views/modals.js";
 
 const icons = { upload: "", archive: "", search: "", chevron: "", database: "" };
@@ -249,6 +250,87 @@ test("conflictGroups 按同 ID/同内容/同标题分组并保留目标标题", 
   assert.equal(groups[2].items[1].targetTitle, "D 旧");
   assert.deepEqual(conflictGroups({ docs: [] }), []);
   assert.deepEqual(conflictGroups([]), []);
+});
+
+test("移动表单没有冲突时不渲染冲突模式单选，提示将直接移动", () => {
+  const html = renderMoveForm({
+    sourceIds: ["a"],
+    targets: ["目标"],
+    target: "目标",
+    preflight: { docs: [{ id: "a", title: "A", conflict: null }] },
+  });
+  assert.doesNotMatch(html, /name="on-conflict"/);
+  assert.doesNotMatch(html, /遇到重复/);
+  assert.doesNotMatch(html, /class="move-conflict-mode"/);
+  assert.match(html, /<p class="muted move-no-conflict">没有重复冲突，将直接移动。<\/p>/);
+  assert.doesNotMatch(html, /同内容重复始终跳过/);
+  // 预检完成但未勾选确认时仍不可提交（ack 门禁不变）。
+  assert.match(html, /请先勾选确认移动说明/);
+  assert.match(html, /<button type="submit" class="btn primary" disabled>开始移动<\/button>/);
+});
+
+test("移动表单有冲突时两个单选均可用，默认选中跳过", () => {
+  const preflight = {
+    totalBytes: 2048,
+    docs: [
+      { id: "a", title: "A", conflict: { kind: "title", withTitle: "A 旧" } },
+      { id: "b", title: "B", conflict: { kind: "hash", withTitle: "B 旧" } },
+    ],
+  };
+  const html = renderMoveForm({
+    sourceIds: ["a", "b"],
+    targets: ["目标", "乙库"],
+    target: "目标",
+    preflight,
+  });
+  assert.match(html, /class="move-conflict-mode"/);
+  assert.match(html, /目标库已有重复（2 篇）/);
+  assert.doesNotMatch(html, /move-no-conflict/);
+  const skip = html.match(/<input type="radio" name="on-conflict" value="skip"[^>]*>/)?.[0] ?? "";
+  const rename = html.match(/<input type="radio" name="on-conflict" value="rename"[^>]*>/)?.[0] ?? "";
+  assert.match(skip, / checked/);
+  assert.doesNotMatch(skip, / disabled/);
+  assert.doesNotMatch(rename, / checked/);
+  assert.doesNotMatch(rename, / disabled/);
+  // 同内容冲突的说明只在 hash 组存在时出现。
+  assert.match(html, /同内容重复始终跳过/);
+  assert.match(html, /请先勾选确认移动说明/);
+
+  const ready = renderMoveForm({
+    sourceIds: ["a", "b"],
+    targets: ["目标"],
+    target: "目标",
+    ack: true,
+    preflight,
+  });
+  assert.doesNotMatch(ready, /move-hint/);
+  assert.doesNotMatch(ready, /class="btn primary" disabled/);
+
+  const busy = renderMoveForm({
+    sourceIds: ["a", "b"],
+    targets: ["目标"],
+    target: "目标",
+    ack: true,
+    busy: true,
+    preflight,
+  });
+  for (const radio of busy.match(/<input type="radio" name="on-conflict"[^>]*>/g) ?? []) {
+    assert.match(radio, / disabled/);
+  }
+});
+
+test("切换移动目标重置勾选后表单重新提示确认", () => {
+  const next = moveTargetChange({ target: "乙库", previousTarget: "目标", ack: true });
+  assert.equal(next.ack, false);
+  const html = renderMoveForm({
+    sourceIds: ["a"],
+    targets: ["目标", "乙库"],
+    target: next.target,
+    ack: next.ack,
+    preflight: { docs: [{ id: "a", title: "A", conflict: null }] },
+  });
+  assert.match(html, /<option value="乙库" selected>乙库<\/option>/);
+  assert.match(html, /请先勾选确认移动说明/);
 });
 
 test("moveConfirmState 在目标/预检/勾选/忙碌之间正确禁用", () => {
