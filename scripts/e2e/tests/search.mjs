@@ -94,16 +94,25 @@ export async function run(ctx) {
   await page.locator(".search-card").first().waitFor();
   assert.ok(page.url().includes("#/search?q="), page.url());
 
-  // 7) 深链：点卡片标题复用工作台预览弹窗，页码定位，且不离开检索页
+  // 7) 深链：点卡片标题复用工作台 viewer；标准号查询会把关键词带进 viewer 高亮
+  const gbtApi = await ctx.api.request("GET", searchUrl({ q: "GB/T 1234" }));
+  const gbtHit = gbtApi.results.find((item) => item.docId === docA.id);
+  assert.ok(gbtHit, "标准号查询应命中 GB/T 夹具");
+  await ctx.goto(`/kb/#/search?q=${encodeURIComponent("GB/T 1234")}`);
   await cardA().locator(".search-card-title").waitFor();
-  const title = cardA().locator(".search-card-title");
-  await title.click();
+  await cardA().locator(".search-card-title").click();
   await page.locator(".preview-modal").waitFor();
   const frame = page.locator(".preview-modal iframe.preview-frame");
   await frame.waitFor();
   const src = await frame.getAttribute("src");
-  assert.ok(src && src.includes(`/docs/${docA.id}/source?inline=1`), String(src));
-  assert.match(String(src), /page=\d+/, "预览应带页码 fragment");
+  assert.ok(src && src.includes(`/docs/${docA.id}/viewer.html`), String(src));
+  assert.match(String(src), /q=/, "viewer URL 应带检索关键词");
+  if (Number.isInteger(gbtHit.page) && gbtHit.page > 0) {
+    assert.match(String(src), new RegExp(`page=${gbtHit.page}`), "viewer URL 应带结果页码");
+  }
+  const inner = page.locator(".preview-modal").frameLocator("iframe.preview-frame");
+  await inner.locator(".hl").first().waitFor({ timeout: 20_000 });
+  assert.ok((await inner.locator(".hl").count()) > 0, "关键词应在 viewer 里高亮");
   await page.locator(".preview-modal [data-close]").click();
   await page.locator(".preview-modal").waitFor({ state: "detached" });
   assert.ok(page.url().includes("#/search"), "点卡片不应导航离开检索页");

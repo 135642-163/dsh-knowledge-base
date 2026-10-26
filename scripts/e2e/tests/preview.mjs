@@ -36,13 +36,17 @@ export async function run(ctx) {
   const page = await ctx.goto(`/kb/#/kb/${encodeURIComponent(FIXTURES.kbs.primary)}/docs`);
   await page.locator(".docs-table").waitFor();
 
-  // 1) PDF：查看原件 → iframe 可见，src 走 inline source。
+  // 1) PDF：查看原件 → 服务端逐页 viewer（0.28 起不再直连原生 PDF iframe）。
   const pdf = await openPreviewFromDocList(ctx, FIXTURES.docs.pdf.title);
   const frame = pdf.preview.locator("iframe.preview-frame");
   await frame.waitFor({ state: "visible", timeout: 20_000 });
   const src = await frame.getAttribute("src");
-  assert.ok(src && src.includes(`/docs/${FIXTURES.docs.pdf.id}/source?inline=1`),
-    `PDF iframe src 应为 inline source：${src}`);
+  assert.ok(src && src.includes(`/docs/${FIXTURES.docs.pdf.id}/viewer.html`),
+    `PDF iframe src 应为 viewer：${src}`);
+  assert.ok(!String(src).includes("source?inline=1"), `PDF 不应回退到原生 iframe：${src}`);
+  const inner = pdf.preview.frameLocator("iframe.preview-frame");
+  await inner.locator(".page").first().waitFor({ timeout: 20_000 });
+  assert.ok((await inner.locator(".page").count()) >= 1, "viewer 应渲染逐页内容");
   assert.equal(await pdf.preview.locator(".preview-text").count(), 0, "PDF 不应渲染成文本预览");
   await closePreview(page, pdf.preview, pdf.docModal);
 
