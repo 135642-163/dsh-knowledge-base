@@ -281,12 +281,16 @@ export function previewKindFor(doc) {
 export function renderPreviewBody({ kind, urls = {}, content, loadingText, page = null } = {}) {
   const download = escapeAttr(urls.download ?? "");
   const pageNo = Number.isInteger(page) && page > 0 ? page : null;
-  if (kind === "pdf" || kind === "office") {
-    const base = kind === "pdf" ? urls.inline ?? "" : urls.pdf ?? "";
-    const src = escapeAttr(withPageFragment(base, pageNo));
-    const loading = kind === "office"
-      ? `<p class="muted preview-loading">${escapeHtml(loadingText ?? "正在转换原件，首次可能需要几秒…")}</p>`
-      : "";
+  if (kind === "pdf") {
+    // 0.28：PDF 走服务端逐页 viewer（页码在 viewer 内定位，不再用 #page fragment）。
+    // 没有 viewer URL 时回退到内联原件 + fragment，兼容旧调用方。
+    const src = escapeAttr(urls.viewer ?? withPageFragment(urls.inline ?? "", pageNo));
+    const pageNote = pageNo ? `<p class="muted preview-page">已定位到第 ${pageNo} 页</p>` : "";
+    return `${pageNote}<iframe class="preview-frame" src="${src}" title="原件预览"></iframe>`;
+  }
+  if (kind === "office") {
+    const src = escapeAttr(withPageFragment(urls.pdf ?? "", pageNo));
+    const loading = `<p class="muted preview-loading">${escapeHtml(loadingText ?? "正在转换原件，首次可能需要几秒…")}</p>`;
     const pageNote = pageNo ? `<p class="muted preview-page">已定位到第 ${pageNo} 页</p>` : "";
     return `${pageNote}${loading}<iframe class="preview-frame" src="${src}" title="原件预览"></iframe>`;
   }
@@ -460,15 +464,19 @@ export async function installOfficeEngineAndWait({
  * Office 先查引擎状态，已安装才内嵌 preview.pdf，未安装则显示一键安装面板。
  * 弹窗在请求返回前被关闭时，结果直接丢弃（不再写 DOM）。
  */
-export function openPreviewModal({ name, doc, icons, initialPage = null } = {}) {
+export function openPreviewModal({ name, doc, icons, initialPage = null, terms = [] } = {}) {
   const kind = previewKindFor(doc);
   const requestedPage = Number.isInteger(initialPage) && initialPage > 0 ? initialPage : null;
   const page = requestedPage ? clampPage(requestedPage, doc?.pages) : null;
+  const keywords = Array.isArray(terms)
+    ? terms.map((term) => String(term ?? "").trim()).filter((term) => term.length >= 2).slice(0, 8)
+    : [];
   const pageNote = requestedPage && Number(doc?.pages) > 0 && page !== requestedPage
     ? `<p class="muted preview-page">页码超出范围，已定位到第 ${page} 页。</p>`
     : "";
   const urls = {
     inline: api.sourceInlineUrl(name, doc?.id ?? ""),
+    viewer: api.viewerUrl(name, doc?.id ?? "", { page, terms: keywords }),
     pdf: api.previewPdfUrl(name, doc?.id ?? ""),
     download: api.sourceUrl(name, doc?.id ?? ""),
   };

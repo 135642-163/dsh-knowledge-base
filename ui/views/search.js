@@ -75,7 +75,7 @@ function card(result, index) {
     page ? `第 ${escapeHtml(page)} 页` : "",
     type ? escapeHtml(type) : "",
   ].filter(Boolean).join(" · ");
-  const attrs = `data-action="search-open" data-kb="${escapeAttr(kb)}" data-id="${escapeAttr(docId)}"${page ? ` data-page="${escapeAttr(page)}"` : ""}${clause ? ` data-clause="${escapeAttr(clause)}"` : ""}`;
+  const attrs = `data-action="search-open" data-search-index="${index}" data-kb="${escapeAttr(kb)}" data-id="${escapeAttr(docId)}"${page ? ` data-page="${escapeAttr(page)}"` : ""}${clause ? ` data-clause="${escapeAttr(clause)}"` : ""}`;
   const href = String(result?.deepLink ?? "");
   return `
     <article class="search-card" data-search-card>

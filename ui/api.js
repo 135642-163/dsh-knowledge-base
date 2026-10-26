@@ -160,6 +160,19 @@ export const api = {
   sourceUrl: (name, id) => `${BASE}/kbs/${encodeURIComponent(name)}/docs/${encodeURIComponent(id)}/source`,
   sourceInlineUrl: (name, id) => `${BASE}/kbs/${encodeURIComponent(name)}/docs/${encodeURIComponent(id)}/source?inline=1`,
   previewPdfUrl: (name, id) => `${BASE}/kbs/${encodeURIComponent(name)}/docs/${encodeURIComponent(id)}/preview.pdf`,
+  /** 服务端逐页 viewer（PDF/Office 转换件）：page 可选（缺省=命中最多的页），terms 用 | 连接。 */
+  viewerUrl: (name, id, { page, terms, rotate } = {}) => {
+    const params = new URLSearchParams();
+    if (Number.isInteger(page) && page > 0) params.set("page", String(page));
+    const list = (Array.isArray(terms) ? terms : [])
+      .map((term) => String(term ?? "").trim())
+      .filter((term) => term.length >= 2)
+      .slice(0, 8);
+    if (list.length > 0) params.set("q", list.join("|"));
+    if (Number.isInteger(rotate) && rotate !== 0) params.set("rotate", String(rotate));
+    const query = params.toString();
+    return `${BASE}/kbs/${encodeURIComponent(name)}/docs/${encodeURIComponent(id)}/viewer.html${query ? `?${query}` : ""}`;
+  },
   docContent: (name, id) => request("GET", `/kbs/${encodeURIComponent(name)}/docs/${encodeURIComponent(id)}/content`),
   createBatch: (body) => request("POST", "/upload-batches", body),
   batch: (id) => request("GET", `/upload-batches/${encodeURIComponent(id)}`),

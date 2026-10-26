@@ -657,7 +657,9 @@ async function sourcePreviewData(source: KbSource): Promise<{
     // 连续滚动完整文档，并在加载后滚到引用页。
     const current = typeof page === "number" && page > 0 ? page : 1;
     const total = Number(detail?.pages) > 0 ? Number(detail.pages) : undefined;
-    const params = new URLSearchParams({ page: String(current) });
+    // 只有拿到页码时才显式指定；否则让 viewer 自动落到命中最多的页。
+    const params = new URLSearchParams();
+    if (typeof page === "number" && page > 0) params.set("page", String(current));
     // 只高亮检索关键词；绝不要把条款号当关键词（旧 source meta 可能只有 clause）。
     const terms = Array.isArray(source.keywords) ? source.keywords.filter((word) => word && word !== source.clause) : [];
     if (terms.length > 0) params.set("q", terms.join("|"));

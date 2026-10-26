@@ -25,6 +25,7 @@ const {
 
 const URLS = {
   inline: "/kb/api/kbs/%E6%A0%87%E5%87%86/docs/d1/source?inline=1",
+  viewer: "/kb/api/kbs/%E6%A0%87%E5%87%86/docs/d1/viewer.html?page=3&q=%E7%94%B5%E5%8E%8B",
   pdf: "/kb/api/kbs/%E6%A0%87%E5%87%86/docs/d1/preview.pdf",
   download: "/kb/api/kbs/%E6%A0%87%E5%87%86/docs/d1/source",
 };
@@ -80,14 +81,31 @@ test("previewKindFor 按类型与原件扩展名判定预览方式", () => {
   }
 });
 
-test("PDF 用内联原件 iframe，Office 用转换后的 PDF 并提示首次较慢", () => {
+test("PDF 用服务端 viewer iframe，Office 用转换后的 PDF 并提示首次较慢", () => {
   const pdf = renderPreviewBody({ kind: "pdf", urls: URLS });
-  assert.match(pdf, /<iframe class="preview-frame" src="\/kb\/api\/kbs\/%E6%A0%87%E5%87%86\/docs\/d1\/source\?inline=1"/);
+  assert.match(pdf, /<iframe class="preview-frame" src="\/kb\/api\/kbs\/%E6%A0%87%E5%87%86\/docs\/d1\/viewer\.html\?page=3&amp;q=%E7%94%B5%E5%8E%8B"/);
+  assert.doesNotMatch(pdf, /source\?inline=1/, "PDF 不再直连原生 iframe");
   assert.doesNotMatch(pdf, /正在转换原件/);
 
   const office = renderPreviewBody({ kind: "office", urls: URLS });
   assert.match(office, /<iframe class="preview-frame" src="\/kb\/api\/kbs\/%E6%A0%87%E5%87%86\/docs\/d1\/preview\.pdf"/);
   assert.match(office, /正在转换原件，首次可能需要几秒…/);
+});
+
+test("PDF 的 viewer URL 自带页码与关键词，不再追加 #page fragment", () => {
+  const html = renderPreviewBody({ kind: "pdf", urls: { viewer: "/x/viewer.html?page=3&q=%E7%94%B5" }, page: 3 });
+  assert.match(html, /src="\/x\/viewer\.html\?page=3&amp;q=%E7%94%B5"/);
+  assert.doesNotMatch(html, /#page=/);
+  assert.match(html, /已定位到第 3 页/);
+});
+
+test("没有 viewer URL 时 PDF 回退到内联 + 页码 fragment（旧调用方）", () => {
+  const html = renderPreviewBody({
+    kind: "pdf",
+    urls: { inline: "/kb/api/kbs/%E6%A0%87%E5%87%86/docs/d1/source?inline=1" },
+    page: 2,
+  });
+  assert.match(html, /src="[^"]*source\?inline=1#page=2&amp;zoom=page-fit"/);
 });
 
 test("图片用 <img>，笔记/文本用转义后的 pre", () => {

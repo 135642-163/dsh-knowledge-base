@@ -352,13 +352,13 @@ function focusSearchInput() {
   next.setSelectionRange(next.value.length, next.value.length);
 }
 
-/** 点结果卡片：复用工作台预览弹窗（不新增全屏工作台）。 */
-async function openSearchResult(kb, id, page) {
+/** 点结果卡片：复用工作台预览弹窗（不新增全屏工作台），并把检索词带进 viewer 高亮。 */
+async function openSearchResult(kb, id, page, terms = []) {
   if (!kb || !id) return;
   try {
     const doc = await api.doc(kb, id);
     if (!doc || doc.deleted) throw new Error("资料不存在或已删除");
-    openPreviewModal({ name: kb, doc, icons, initialPage: page });
+    openPreviewModal({ name: kb, doc, icons, initialPage: page, terms });
   } catch {
     showToast("资料不存在或已删除", "error");
   }
@@ -366,10 +366,16 @@ async function openSearchResult(kb, id, page) {
 
 /** 从结果卡片事件里取参数（标题链接与「打开原件」共用一套 data-*）。 */
 function searchResultTarget(target) {
+  const index = Number(target.dataset.searchIndex);
+  const results = Array.isArray(state.search.results) ? state.search.results : [];
+  const result = Number.isInteger(index) ? results[index] : null;
+  const resultTerms = Array.isArray(result?.terms) && result.terms.length > 0 ? result.terms : null;
+  const fallback = Array.isArray(state.search.terms) ? state.search.terms : [];
   return {
     kb: String(target.dataset.kb ?? ""),
     id: String(target.dataset.id ?? ""),
     page: Math.max(0, Math.round(Number(target.dataset.page) || 0)) || null,
+    terms: resultTerms ?? fallback,
   };
 }
 
@@ -1360,7 +1366,7 @@ function bind() {
     } else if (action === "search-open") {
       event.preventDefault();
       const picked = searchResultTarget(target);
-      await openSearchResult(picked.kb, picked.id, picked.page);
+      await openSearchResult(picked.kb, picked.id, picked.page, picked.terms);
     } else if (action === "search-submit") {
       const current = route();
       if (current.page !== "search") return;

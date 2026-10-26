@@ -355,3 +355,22 @@ test("search 把条件编码进查询串，空值不传", async () => {
     assert.equal(empty.searchParams.has(key), false, key);
   }
 });
+
+test("viewerUrl 拼出 page/q/rotate，空值不传", () => {
+  assert.equal(
+    api.viewerUrl("标准/库", "id 1"),
+    "/kb/api/kbs/%E6%A0%87%E5%87%86%2F%E5%BA%93/docs/id%201/viewer.html",
+  );
+  assert.equal(
+    api.viewerUrl("标准", "d1", { page: 3, terms: ["电压", "谐波"] }),
+    `/kb/api/kbs/%E6%A0%87%E5%87%86/docs/d1/viewer.html?page=3&q=${encodeURIComponent("电压|谐波")}`,
+  );
+  assert.equal(
+    api.viewerUrl("标准", "d1", { page: 0, terms: [], rotate: 0 }),
+    "/kb/api/kbs/%E6%A0%87%E5%87%86/docs/d1/viewer.html",
+  );
+  assert.match(
+    api.viewerUrl("标准", "d1", { rotate: 90 }),
+    /viewer\.html\?rotate=90$/,
+  );
+});

@@ -244,6 +244,7 @@ test("结果卡片包含标题、标准号、条款、页码、可信度、命�
   assert.match(html, /data-page="12"/);
   assert.ok(html.includes(`href="/kb/?kb=${encodeURIComponent("标准")}&amp;doc=d1&amp;page=12&amp;clause=5.2.2"`), "深链应被转义");
   assert.match(html, /data-hl="0"/, "摘要容器必须由高亮步骤填充");
+  assert.match(html, /data-search-index="0"/, "卡片要带结果下标，供预览取 terms");
   assert.ok(!html.includes("公共连接点电压偏差应不超过"), "摘要正文不能直接拼进 HTML");
   assert.match(html, /命中 1 篇 · 条款索引 · 12ms/);
 });
