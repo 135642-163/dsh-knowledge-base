@@ -1104,11 +1104,60 @@ kb_export({
 回归测试：`npm test`（隔离临时目录，不依赖本机知识库）。`node dev/dedup-test.mjs` 是早期
 依赖本机知识库内容的开发脚本，内容变化后其固定 id 断言可能过期，不作为发布门禁。
 
+## 指定知识库目录（kbRoot）
+
+知识库根目录由插件配置 `kbRoot` 决定，默认 `~/.dsh/knowledge`。**一个插件实例（一个 profile）只有一个根目录**；
+`kb_import` 的 `kb` 参数只是根目录下的子目录名，不是路径。工作台**总览页会只读显示当前根目录**，
+`GET /kb/api/status` 也返回 `kbRoot`，可用它们确认配置是否生效。
+
+### 方式一：市场 / GitHub 安装（bundle，推荐）
+
+插件安装后由包内 `cordis.patch.yml` 自动挂载（loader id `knowledge-wiki`）。用户只需在自己的 profile
+用户层**按 id 覆盖要改的键**，**不要**再写一条 `insert: id: knowledge-wiki`（重复 loader id 会启动失败）：
+
+```yaml
+# ~/.dsh/profiles/web/cordis.patch.yml
+- id: knowledge-wiki
+  config:
+    kbRoot: /Users/alice/知识库      # Windows 例：D:\知识库
+    defaultKb: 标准
+```
+
+保存后由 HMR 热应用；没生效就重启 `dsh web`。
+
+### 方式二：一键脚本参数（源码 / 本机安装）
+
+```bash
+./install-to-machine.sh [插件目录] [知识库根目录]        # macOS / Linux：第二个参数
+powershell -ExecutionPolicy Bypass -File install-to-machine.ps1 -KbRoot D:\知识库 -DefaultKb 标准
+```
+
+脚本写的是它自己的 `insert` 行（id `knowledge-base`）；从 bundle 安装迁移过来时，先删掉旧的 `insert`。
+
+### 验证
+
+```bash
+dsh --profile web --dump-config | grep -A8 knowledge-wiki   # 看最终生效的 kbRoot
+curl -s http://127.0.0.1:<dsh 端口>/kb/api/status            # 返回里有 kbRoot
+```
+
+也可以直接看工作台总览页的「知识库根目录」。启动成功后根目录下会出现 `.plugin-load.log`。
+
+### 注意
+
+- **用绝对路径**。当前只展开 `~` 和 `~/`（Windows 的 `~\` 不展开，也不支持 `$HOME` / `%USERPROFILE%` 展开）；
+  相对路径按 `dsh` 进程的工作目录解析，容易落到意外的位置。
+- **改根目录不会迁移数据**：旧目录原样保留但不再显示。要迁移就停插件 → 移动整个目录 → 改配置 → 重启；
+  会话范围（`<kbRoot>/.scopes.json`）也随根目录走，等于换了一套库和范围。
+- **不要多机/多进程同时写同一个根目录**：SQLite WAL 与清单写入是单机假设；共享盘只建议一个写入者。
+- 需要多套互不干扰的资料时，用多个 profile 各自配 `kbRoot`（例如 `dsh --profile work`）。
+- 自定义了 `DSH_HOME` 时，插件默认值仍是 `~/.dsh/knowledge`，需要显式配 `kbRoot`。
+
 ## 配置（cordis.patch.yml 中该插件的 config）
 
 | 键 | 默认 | 说明 |
 | --- | --- | --- |
-| `kbRoot` | `~/.dsh/knowledge` | 知识库根目录 |
+| `kbRoot` | `~/.dsh/knowledge` | 知识库根目录（怎么改见「指定知识库目录（kbRoot）」） |
 | `defaultKb` | `default` | 未指定 kb 时的默认知识库 |
 | `ocrLang` | `chi_sim+eng` | OCR 语言（竖排古籍可试 `chi_sim_vert`） |
 | `ocrWorkers` | `0`（自动） | OCR 并行 worker 数；0 = 按本机 CPU/内存自适应：`min(核数一半, 内存/1.5GB)`，下限 2、上限 16（24 线程/32GB 机器 ≈ 12） |
@@ -1315,7 +1364,7 @@ npm run test:e2e      # 自托管临时 DSH web 宿主并跑完整流程
 ### 从 GitHub / 市场安装（推荐）
 
 插件已声明 `dsh.bundle.patch`，安装后由包内 `cordis.patch.yml` 自动挂载，
-**不需要**手工编辑 profile 的 `cordis.patch.yml`：
+**不需要**手工编辑 profile 的 `cordis.patch.yml`（要改知识库根目录见「指定知识库目录（kbRoot）」）：
 
 ```bash
 dsh plugin --profile web add github:135642-163/dsh-knowledge-base

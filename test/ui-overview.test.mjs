@@ -30,8 +30,8 @@ function makeKb(patch = {}) {
   };
 }
 
-function render(kbs) {
-  return renderOverview({ kbs, filter: "all", query: "" }, { icons, fmtNumber });
+function render(kbs, extra = {}) {
+  return renderOverview({ kbs, filter: "all", query: "", ...extra }, { icons, fmtNumber });
 }
 
 function segments(html) {
@@ -198,4 +198,30 @@ test("样式约定：连续条形（无间隙、父级圆角裁剪）与中性�
   assert.match(cssRule(".bar.empty i"), /background:\s*var\(--line\)/);
   assert.doesNotMatch(css, /\.bar\.thin/);
   assert.doesNotMatch(bar, /gap:\s*2px/);
+});
+
+test("总览页只读展示知识库根目录", () => {
+  const html = render([makeKb()], { server: { kbRoot: "/srv/知识库" } });
+  assert.match(html, /class="muted root-line"/);
+  assert.match(html, /知识库根目录/);
+  assert.match(html, /<code class="root-path" title="[^"]*kbRoot[^"]*">\/srv\/知识库<\/code>/);
+  // 空库时也保留根目录行：用户正是靠它确认配置生效。
+  assert.match(render([], { server: { kbRoot: "/srv/知识库" } }), /class="root-path"/);
+});
+
+test("没有服务信息或根目录为空时不渲染根目录行", () => {
+  assert.doesNotMatch(render([makeKb()]), /root-line/);
+  assert.doesNotMatch(render([makeKb()], { server: { kbRoot: "  " } }), /root-line/);
+});
+
+test("根目录路径做 HTML 转义", () => {
+  const html = render([], { server: { kbRoot: `/tmp/<x>&"` } });
+  assert.match(html, /\/tmp\/&lt;x&gt;&amp;&quot;/);
+  assert.doesNotMatch(html, /\/tmp\/<x>/);
+});
+
+test("根目录行样式：等宽、可换行、不溢出面板", () => {
+  assert.match(cssRule(".root-line"), /flex-wrap:\s*wrap/);
+  assert.match(cssRule(".root-path"), /font-family:\s*ui-monospace/);
+  assert.match(cssRule(".root-path"), /word-break:\s*break-all/);
 });

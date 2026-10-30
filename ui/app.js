@@ -26,6 +26,7 @@ const state = {
   kbs: [],
   loading: true,
   error: "",
+  server: { kbRoot: "", version: "" },
   filter: "all",
   query: "",
   appliedQuery: "",
@@ -99,6 +100,22 @@ async function loadKbs() {
   } finally {
     state.loading = false;
     render();
+  }
+}
+
+/**
+ * 读取服务信息（只读）：知识库根目录与版本。/status 不可用时保持为空，
+ * 不影响库列表/检索主流程（总览页只是不显示根目录行）。
+ */
+async function loadServerInfo() {
+  try {
+    const status = await api.status();
+    state.server = {
+      kbRoot: String(status?.kbRoot ?? ""),
+      version: String(status?.version ?? ""),
+    };
+  } catch {
+    /* ignore：见函数注释 */
   }
 }
 
@@ -1575,7 +1592,11 @@ function boot() {
   });
   window.addEventListener("pagehide", () => { clearStdTimer(); });
   const current = route();
+  // 根目录是只读展示信息：与库列表并行取，晚到只在总览页补一次 render。
+  const serverReady = loadServerInfo();
   loadKbs().then(async () => {
+    await serverReady;
+    if (current.page === "overview") render();
     if (current.page === "trash") await loadTrash();
     else if (current.page === "search") {
       applySearchQuery(current.query);

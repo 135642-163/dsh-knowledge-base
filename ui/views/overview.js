@@ -13,6 +13,7 @@ export function renderOverview(state, { icons, fmtNumber }) {
         <div>
           <h1>知识库</h1>
           <p class="muted">${fmtNumber(state.kbs.length)} 个库 · ${fmtNumber(totalDocs)} 篇有效文档 · ${fmtNumber(totalNotes)} 篇笔记 · ${compact(totalPages)} 页 · ${compact(totalChars)} 字</p>
+          ${rootLine(state)}
         </div>
         <div class="head-actions">
           <button class="btn" data-action="std-open">标准更新</button>
@@ -37,6 +38,16 @@ export function renderOverview(state, { icons, fmtNumber }) {
         </div>`}
     </section>
   `;
+}
+
+/**
+ * 只读展示当前知识库根目录：让用户确认 kbRoot 配置生效，路径长也照实显示。
+ * 服务信息还没取到（或 /status 失败）时不占位。
+ */
+function rootLine(state) {
+  const root = String(state.server?.kbRoot ?? "").trim();
+  if (root === "") return "";
+  return `<p class="muted root-line">知识库根目录 <code class="root-path" title="由插件配置 kbRoot 决定；修改方法见 README「指定知识库目录」">${escapeHtml(root)}</code></p>`;
 }
 
 function matches(kb, state) {
