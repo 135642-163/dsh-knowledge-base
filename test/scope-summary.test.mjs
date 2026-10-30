@@ -41,6 +41,18 @@ test("跳过页眉、页码、标准号和标题重复行", () => {
   assert.doesNotMatch(summary, /GB\/Z|第 3 页|3\/4/);
 });
 
+test("OCR 用竖线画版面边框时也能取到范围正文", () => {
+  const text = [
+    "|          1 范围",
+    "|              本部分规定了链式静止同步补偿器及其辅助设备在现场安装中和安装后的试验和验收。",
+    "|              本部分适用于链式 STATCOM 的现场试验。",
+    "|          2 规范性引用文件",
+  ].join("\n");
+  const summary = summarizeStandardScope(text, 160, { title: "现场试验" });
+  assert.match(summary, /^本部分规定了链式静止同步补偿器/);
+  assert.doesNotMatch(summary, /\|/);
+});
+
 test("目次里的「1 范围 1」不会被当成正文", () => {
   const text = [
     "目 次",
