@@ -41,6 +41,14 @@ test("跳过页眉、页码、标准号和标题重复行", () => {
   assert.doesNotMatch(summary, /GB\/Z|第 3 页|3\/4/);
 });
 
+test("范围摘要上限 500 字，长范围不被截成 160 字", () => {
+  const long = Array.from({ length: 8 }, (_, index) => `第${index + 1}句：本标准规定了电能质量参数的测量方法和结果处理要求。`).join("");
+  const summary = summarizeStandardScope(`1 范围\n${long}\n2 规范性引用文件`, 500);
+  assert.ok(summary.length > 160);
+  assert.ok(summary.length <= 500);
+  assert.doesNotMatch(summary, /…$/);
+});
+
 test("OCR 用竖线画版面边框时也能取到范围正文", () => {
   const text = [
     "|          1 范围",
