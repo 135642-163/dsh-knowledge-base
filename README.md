@@ -263,11 +263,45 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
 - `docs/specs/2026-10-25-retrieval-eval.md` 是机制回归（查询取条款原文开头 28 字），不是人工语义评测。
 
 
-## 0.31.0 可选语义层（运行时收口；默认关闭）
+## 0.31.0 可选语义层（默认关闭）
 
-> 当前进度：本轮先落地**运行时、分发与复验**（可选依赖 + 模型 + 向量一致性）；检索接入、索引与
-> 80 题回归在后续提交完成。接入前后插件行为一致：`kb_query` / `/kb/api/search` 走 0.30 的 B 路径，
-> 不加载任何模型、不读写向量索引。
+**做了什么**：把 0.30 评测里胜出的「文档级语义 RRF」做成可选层，接入 `kb_query` 与工作台
+`/kb/api/search`：
+
+- 排序 = B 的 boost 文档序 + 文档向量余弦序做 RRF（k=20）；**词面强命中**（标题命中 + 条款命中
+  ≥2 个不同查询词 + `trust != low`）时把 B 的 top-1 锁回第一位——只影响排序，不改变召回集合；
+- **两阶段页码**：dense 独有文档在文档内按查询词命中条款定位 `page/clause`；确实找不到时
+  `page=null` 并在 `note` 里标注「N 篇语义命中未定位到页码」，不伪造页码；
+- 索引 `<kb>/.index/doc-vectors.f32` + `doc-vectors.meta.json`（911 篇约 1.9MB），按 manifest 增量刷新；
+  >100 篇首次启用走**后台进程**建索引（当次检索回退 B 并在 note 里说明）；
+- `/kb/api/status` 暴露 `semantic: {enabled,indexReady,model,dim,docs,reason}`；工作台状态行在
+  `engine=hybrid` 时显示「语义」；
+- **默认 `semanticSearch=off`**：关闭时行为与 0.30 完全一致（golden 对比测试逐字段校验），
+  不加载模型、不读写向量索引。
+
+**如何开启（三步）**
+
+1. 在插件目录装可选依赖（见下「打包策略」）；模型放 `~/.dsh/tools/models/bge-small-zh-v1.5/`；
+2. 在 profile 的 `cordis.patch.yml` 里给 `id: knowledge-wiki` 加 `semanticSearch: on`
+   （可选用 `semanticModelDir` 覆盖模型目录）；
+3. 重启/hot-apply 后第一次检索会建索引：小库同步（秒级），>100 篇后台建，建好后重试即生效。
+
+**80 题验收**（60 主集 + 20 条独立同义题；K = 生产等价，预计算向量复现）
+
+| 变体 | Doc Recall@10 | Page Recall@10 | MRR@10 | 条款定位 MRR | 20 条独立题 Doc | p95 |
+|---|---|---|---|---|---|---|
+| B FTS + boost（0.27 生产） | 78.8% | 72.5% | 0.535 | 0.875 | 65.0% | 63.5ms |
+| H 文档级 RRF（0.30） | 84.4% | 74.4% | 0.603 | 0.772 | 80.0% | 63.8ms |
+| **0.31 生产等价** | **84.4%** | **77.5%** | **0.613** | **0.883** | **80.0%** | **69.0ms** |
+
+数值组 Page Recall 86.7% → **93.3%**；跨文档 56.7% → 60.0%。完整数据、坏例、口径与复现命令见
+`docs/specs/2026-10-31-semantic-regression.md`。
+
+**运行时（D1a 瘦身版，已定）**：`onnxruntime-node`（预编译 N-API 原生二进制）+ 
+`@huggingface/tokenizers`（纯 JS WordPiece）；模型 `Xenova/bge-small-zh-v1.5` 的 `onnx/model.onnx`
+（fp32，94.8MB，512 维）。查询侧加中文检索指令「为这个句子生成表示以用于检索相关文章：」，
+文档侧不加；池化取 CLS（首个 token），L2 归一化。决策与 spike 证据见
+`docs/specs/2026-10-31-semantic-runtime-adr.md`。
 
 **运行时（D1a 瘦身版，已定）**：`onnxruntime-node`（预编译 N-API 原生二进制）+ 
 `@huggingface/tokenizers`（纯 JS WordPiece）；模型 `Xenova/bge-small-zh-v1.5` 的 `onnx/model.onnx`
@@ -305,7 +339,7 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
 | 模型体积 | 95MB（model.onnx 94.8MB + tokenizer.json 0.4MB） |
 | session 加载 | **64ms** |
 | 查询嵌入 | **p50 2.63ms / p95 2.92ms**（batch=1，含 tokenize + 推理 + CLS 池化 + L2） |
-| 文档嵌入 | 12.6ms/篇（batch=8，平均 244 token）→ 911 篇约 **11.5s**（索引构建计划放后台进程） |
+| 文档嵌入 | 12.6ms/篇（batch=8，平均 244 token）→ 911 篇约 **11.5s**（>100 篇自动走后台进程） |
 | 常驻内存 | 加载后 RSS **239MB**；仅查询稳态约 260MB；批量嵌入 911 篇峰值约 476MB（不在服务进程常驻） |
 | 与 0.30 向量一致性 | 80 条查询余弦**最小 0.999999**；40 篇文档余弦**最小 0.999998**（门槛 >0.99） |
 
@@ -322,6 +356,16 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
 - 唯一的原生依赖是 `onnxruntime-node` 的预编译 N-API 二进制（napi-v6，ABI 稳定），不需要本机编译
   工具链；Node ≥20 可用（实测 Node 26.7.0）。三平台二进制都打进包，安装体积固定约 293MB，
   安装脚本也不会裁剪它。
+
+**其它已知限制（0.31.0）**
+
+- 开启后进程常驻 RSS 约 **+240MB**（模型 + ORT），不建议在低内存机器长期开启。
+- 插件升级或 `npm install` 可能清掉 `--no-save` 装的依赖，需要重跑 `npm run semantic:install`
+  （`/status` 会显示 `semantic.reason=runner_missing`）。
+- 旧 FTS 索引首次被打开时会惰性创建 `clauses(doc_id)` 索引（149k 条款约 1.1s，一次性）；
+  语义索引首次构建 911 篇约 11.5s（>100 篇在后台进程）。
+- 强词面锁定让同义改写组 MRR 从 H 的 0.480 降到 0.456（总 MRR 仍 0.613，高于门槛 0.603）。
+- 语义层没有跨机器索引共享：每台机器的 `<kb>/.index/` 独立构建。
 
 ## 0.30.0 文档级语义融合评测与高亮提示修复
 
@@ -1163,6 +1207,8 @@ curl -s http://127.0.0.1:<dsh 端口>/kb/api/status            # 返回里有 kb
 | --- | --- | --- |
 | `kbRoot` | `~/.dsh/knowledge` | 知识库根目录（怎么改见「指定知识库目录（kbRoot）」） |
 | `defaultKb` | `default` | 未指定 kb 时的默认知识库 |
+| `semanticSearch` | `off` | 可选语义层开关：`off`（默认）/ `on`；开启前需装可选依赖与模型（见 0.31 段） |
+| `semanticModelDir` | `""` | 语义模型目录；留空用 `~/.dsh/tools/models/bge-small-zh-v1.5` |
 | `ocrLang` | `chi_sim+eng` | OCR 语言（竖排古籍可试 `chi_sim_vert`） |
 | `ocrWorkers` | `0`（自动） | OCR 并行 worker 数；0 = 按本机 CPU/内存自适应：`min(核数一半, 内存/1.5GB)`，下限 2、上限 16（24 线程/32GB 机器 ≈ 12） |
 | `ocrDpi` | `0`（自动） | 扫描页渲染分辨率；0 = 300 DPI（tesseract best 模型的设计分辨率；低清扫描源可显式调低，上限 400） |
@@ -1222,7 +1268,7 @@ done
 ## 测试
 
 ```bash
-npm test          # node:test（1022 个用例）；覆盖查重精度、同名文件保护、后台失败统计、检索截断/单文档上限、
+npm test          # node:test（1076 个用例）；覆盖查重精度、同名文件保护、后台失败统计、检索截断/单文档上限、
                   # 相似导入提示、OCR 模型检查、流式 zip、心跳与锁回收、
                   # 清单 v1→v2→v3 迁移与备份、内容哈希跳过、kb_reparse、分块索引/页码锚点、
                   # kb_list 分页/过滤/kind、检索排序、跨库检索、文字层质量启发式、
@@ -1236,6 +1282,8 @@ npm test          # node:test（1022 个用例）；覆盖查重精度、同名�
                   # Vault 导出结构/双链、批量事务编辑的回滚与 dryRun、库级快照创建/列表、
                   # 存量摘要回填（模型摘要保护/limit/remaining/表格兜底）、
                   # 可信度标注/过滤/排序/低可信提醒、
+                  # 可选语义层（向量归一化/余弦 topK/RRF/强词面/两阶段页码、索引首建增量删除损坏回退、
+                  #   运行时降级与告警一次、/search 与 kb_query 的 hybrid/回退、关闭时 golden 对比）、
                   # 会话范围存储/继承/工具矩阵/提示段/API/归档重命名同步、
                   # 范围「未启用」模式（21 工具 KB_DISABLED、空选择归一为 none、PUT/胶囊/继承/清理）、
                   # 胶囊客户端（注册、面板、应用/失败回滚、可访问性、外部点击延迟还焦点）VM 测试、

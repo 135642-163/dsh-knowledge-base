@@ -181,3 +181,33 @@ searchAll / kb_query
 - 交付物：`lib/semantic*.js`、接入改动、单测、80 题回归报告（追加到
   `docs/specs/2026-10-30-doc-level-hybrid-benchmark.md` 或新报告）、README/版本；
 - **不自动 push**，完成后报告 diff 与测试，等用户确认。
+
+## 11. 实施记录（0.31.0，2026-10-30）
+
+> 状态：已实施。验收数据见 `docs/specs/2026-10-31-semantic-regression.md`。
+
+**新增模块**：`lib/semantic.js`（纯函数）、`lib/semantic-index.js`（`<kb>/.index/doc-vectors.*`）、
+`lib/semantic-runtime.js`（D1a 运行时）、`lib/semantic-service.js`（通道/状态装配）、
+`lib/semantic-worker.mjs`（>100 篇后台建索引）。
+
+**接入点**：`lib/search.js` 的 `searchAll`/`applySemanticToResults`、`/kb/api/search`、`kb_query`、
+`/kb/api/status` 的 `semantic` 字段；配置 `semanticSearch`（默认 off）与 `semanticModelDir`。
+
+**与设计稿的实现偏差（都是为了达标/可维护，已记录理由）**：
+
+1. **两阶段页码不用「文档内 FTS 查询」而用「文档内按词命中扫描条款」**：FTS 的 docId 过滤实测
+   17.6ms/篇，top-10 会把 p95 推到 160ms+；改为 `clauses(doc_id)` 索引（首次打开旧索引时惰性创建，
+   149k 条款约 1.1s）后 p95 69ms（预计算向量口径，含生产融合逻辑）。语义等价：仍是在该文档内找
+   查询词命中的条款页码/条款号。
+2. **强词面命中的标题条件**增加「查询与标题共享任一 CJK 二字片段」：`keywordsOfQuery` 会切出
+   「光伏并网逆变器功」这类长片段，纯子串会漏掉标题只含「光伏」的文档（Q12 条款定位 MRR 从
+   第 9 名回到第 1 名）。其余两条条件与阈值不变；在 60 主集与 20 独立题上同时验证。
+3. **索引稳定性**：除设计稿要求的字段外，meta 增加 `dataHash`（sha256），半写（f32 已换、meta
+   未换）会被判损坏并全量重建，不会被当作有效索引。
+4. **关闭路径**：`semanticSearch=off` 时 `searchAll` 的返回对象只是多一个
+   `semantic:{applied:false,reason:""}` 内部字段（不进 HTTP 响应），结果/排序/字段与 0.30 逐字段一致
+   （`test/search-semantic.test.mjs` 的 golden 对比）。
+
+**验收结论**：80 题 Doc 84.4% / Page 77.5% / MRR 0.613 / 条款定位 MRR 0.883 / 20 独立题 Doc 80.0% /
+p95 69.0ms（预计算向量），六条门槛全部达标；`npm test` 1076/1076、typecheck、check:client、E2E
+11 passed / 1 skipped。
