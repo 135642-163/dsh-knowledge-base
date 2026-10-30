@@ -13,12 +13,13 @@
  *   node scripts/eval-benchmark.mjs --dir <库目录> --questions <jsonl> --out <md>
  */
 import { spawn as spawnChild } from "node:child_process";
-import { readFile, stat, writeFile } from "node:fs/promises";
+import { copyFile, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { DatabaseSync } from "node:sqlite";
 import { annotateMatches, buildRgArgs, expandStdQuery, parseRgOutput, rankMatches } from "../lib/query.js";
 import { tokenizeForFts } from "../lib/fts-index.js";
-import { groupHitsByDoc, rankResults } from "../lib/search.js";
+import { applySemanticToResults, groupHitsByDoc, rankResults } from "../lib/search.js";
 import { keywordsOfQuery } from "../lib/sources.js";
 import { rrfFuse, rowsToDocOrder } from "./eval/fusion.mjs";
 
@@ -36,7 +37,7 @@ const GROUP_LABEL = {
 };
 
 function parseArgs(argv) {
-  const options = { dir: DEFAULT_DIR, questions: DEFAULT_QUESTIONS, out: "", vectors: "", docVectors: "", validate: false };
+  const options = { dir: DEFAULT_DIR, questions: DEFAULT_QUESTIONS, out: "", vectors: "", docVectors: "", semanticSim: false, docMatrix: "", queryVectors: "", dumpJson: "", validate: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--validate") options.validate = true;
@@ -45,6 +46,10 @@ function parseArgs(argv) {
     else if (arg === "--out") options.out = argv[++i];
     else if (arg === "--vectors") options.vectors = argv[++i];
     else if (arg === "--doc-vectors") options.docVectors = argv[++i];
+    else if (arg === "--semantic-sim") options.semanticSim = true;
+    else if (arg === "--doc-matrix") options.docMatrix = argv[++i];
+    else if (arg === "--query-vectors") options.queryVectors = argv[++i];
+    else if (arg === "--dump-json") options.dumpJson = argv[++i];
     else if (arg === "--help" || arg === "-h") options.help = true;
   }
   return options;
@@ -65,6 +70,24 @@ async function loadQuestions(paths) {
 /** 只读打开真实索引；查询语句与 lib/fts-index.js searchFtsIndex 保持一致。 */
 function openIndex(dir) {
   return new DatabaseSync(join(dir, ".index", "fts.sqlite"), { readOnly: true });
+}
+
+/** 两阶段页码用：单文档条款 FTS（与 lib/fts-index.js searchFtsIndex 的 docId 过滤同口径）。 */
+function ftsRowsForDoc(db, query, docId, limit = 20) {
+  const tokens = tokenizeForFts(query);
+  if (!tokens) return [];
+  const ftsQuery = tokens.split(/\s+/).filter(Boolean).map((word) => `"${word.replace(/"/g, '""')}"`).join(" OR ");
+  try {
+    return db.prepare(`
+      SELECT c.clause, c.heading, c.text, c.page_start AS pageStart, c.page_end AS pageEnd
+      FROM clauses_fts
+      JOIN clauses c ON c.id = clauses_fts.rowid
+      WHERE clauses_fts MATCH ? AND c.doc_id = ?
+      ORDER BY bm25(clauses_fts, 1.0, 2.0, 2.5) LIMIT ?
+    `).all(ftsQuery, docId, Math.max(1, limit));
+  } catch {
+    return [];
+  }
 }
 
 function ftsRows(db, query, limit = 60) {
@@ -323,6 +346,37 @@ async function loadDocDense(dir, questions) {
   return { meta: { ...meta, ...payload.meta }, results: ordered, mapping };
 }
 
+/**
+ * --semantic-sim：直接读 0.30 的文档向量矩阵与查询向量（不跑模型），
+ * 用生产 `lib/semantic.js` 的融合/强词面/两阶段页码产出 K（生产等价）。
+ */
+async function loadSemanticSim({ docVectorsDir, docMatrix, queryVectors, questions }) {
+  if (!docVectorsDir || !docMatrix || !queryVectors) return null;
+  try {
+    const meta = JSON.parse(await readFile(join(docVectorsDir, "meta.json"), "utf8"));
+    const dim = Number(meta.dim) || 0;
+    const rows = (await readFile(join(docVectorsDir, "docs.jsonl"), "utf8"))
+      .split("\n").filter((line) => line.trim() !== "").map((line) => JSON.parse(line));
+    const matrixBuffer = await readFile(docMatrix);
+    const queryBuffer = await readFile(queryVectors);
+    if (dim <= 0 || rows.length === 0) return null;
+    if (matrixBuffer.byteLength < rows.length * dim * 4) return null;
+    if (queryBuffer.byteLength < questions.length * dim * 4) return null;
+    const data = new Float32Array(matrixBuffer.buffer, matrixBuffer.byteOffset, rows.length * dim);
+    const queries = new Float32Array(queryBuffer.buffer, queryBuffer.byteOffset, questions.length * dim);
+    const ids = rows.map((row) => row.docId);
+    return {
+      dim,
+      ids,
+      vectors: ids.map((_id, index) => data.subarray(index * dim, (index + 1) * dim)),
+      queries,
+      meta: { ...meta, docs: ids.length },
+    };
+  } catch {
+    return null;
+  }
+}
+
 function buildReport({ dir, questions, manifest, variants, orderedKeys, denseMeta, docMeta, indexSizeMb, generatedAt }) {
   const hybrid = Boolean(denseMeta);
   const lines = [];
@@ -462,7 +516,7 @@ function buildReport({ dir, questions, manifest, variants, orderedKeys, denseMet
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   if (options.help) {
-    process.stdout.write("node scripts/eval-benchmark.mjs [--validate] [--dir <kb>] [--questions <jsonl>] [--vectors <dir>] [--doc-vectors <dir>] [--out <md>]\n");
+    process.stdout.write("node scripts/eval-benchmark.mjs [--validate] [--dir <kb>] [--questions <jsonl>] [--vectors <dir>] [--doc-vectors <dir>] [--semantic-sim --doc-matrix <f32> --query-vectors <f32>] [--out <md>]\n");
     return;
   }
   const vectorsDir = options.vectors;
@@ -470,7 +524,20 @@ async function main() {
   const manifest = JSON.parse(await readFile(join(options.dir, "kb.json"), "utf8"));
   const docs = new Map((manifest.docs ?? []).map((doc) => [doc.id, doc]));
   const questions = await loadQuestions(options.questions);
-  const db = openIndex(options.dir);
+  // --semantic-sim 需要按 doc_id 定位条款（两阶段页码）。真实库只读，
+  // 复制一份索引到临时文件后建 doc_id 索引，评测结束删除。
+  let evalDbPath = "";
+  let db;
+  if (options.semanticSim) {
+    evalDbPath = join(tmpdir(), `kb-eval-fts-${process.pid}-${Date.now()}.sqlite`);
+    await copyFile(join(options.dir, ".index", "fts.sqlite"), evalDbPath);
+    const writable = new DatabaseSync(evalDbPath);
+    writable.exec("CREATE INDEX IF NOT EXISTS clauses_doc_id_idx ON clauses(doc_id)");
+    writable.close();
+    db = new DatabaseSync(evalDbPath, { readOnly: true });
+  } else {
+    db = openIndex(options.dir);
+  }
   try {
     const validation = await validateQuestions({ dir: options.dir, manifest, docs, questions, db });
     if (options.validate) {
@@ -494,6 +561,19 @@ async function main() {
 
     const dense = await loadDense(vectorsDir, questions);
     const docDense = await loadDocDense(options.docVectors, questions);
+    const semanticSim = options.semanticSim
+      ? await loadSemanticSim({
+          docVectorsDir: options.docVectors,
+          docMatrix: options.docMatrix,
+          queryVectors: options.queryVectors,
+          questions,
+        })
+      : null;
+    if (options.semanticSim && !semanticSim) {
+      process.stderr.write("--semantic-sim 需要 --doc-vectors <dir> --doc-matrix <f32> --query-vectors <f32>（见 0.30 评测复现命令）\n");
+      process.exitCode = 1;
+      return;
+    }
     let clauseInfo = new Map();
     if (dense) {
       const ids = new Set();
@@ -511,6 +591,7 @@ async function main() {
       results.G = [];
       results.H = [];
     }
+    if (semanticSim) results.K = [];
     for (let index = 0; index < questions.length; index += 1) {
       const question = questions[index];
       // A：FTS 原始顺序
@@ -527,7 +608,7 @@ async function main() {
         pageEnd: row.pageEnd,
         clause: row.clause,
         lineNumber: row.lineStart,
-        line: `${row.clause ? `[${row.clause}] ` : ""}${String(row.text ?? "").replace(/\s+/g, " ")}`,
+        line: `${row.clause ? `[${row.clause}] ` : ""}${row.heading ? `${row.heading} — ` : ""}${String(row.text ?? "").replace(/\s+/g, " ")}`,
         trust: row.trust,
       }));
       const groups = groupHitsByDoc(hits, { docs: fbManifest.docs, kb: "标准" });
@@ -651,6 +732,71 @@ async function main() {
           elapsedMs: aElapsed + queryEmbedMs + docRow.tookMs + hFusionMs,
         }));
       }
+      if (semanticSim) {
+        // K：0.31 生产等价——B 文档序 + 文档向量 RRF + 强词面优先 + 两阶段页码。
+        // 复用生产 lib/search.js 的 applySemanticToResults，只是向量/查询向量来自 0.30 评测产物。
+        const kStarted = performance.now();
+        const queryVector = semanticSim.queries.subarray(index * semanticSim.dim, (index + 1) * semanticSim.dim);
+        // 两阶段页码（生产等价）：在文档内按查询词命中数找条款，不做全库 BM25。
+        const docTerms = keywordsOfQuery(question.q).filter((term) => term.length >= 2).map((term) => term.toLowerCase());
+        const clauseCache = new Map();
+        const clausesOf = (docId) => {
+          if (!clauseCache.has(docId)) {
+            clauseCache.set(docId, db.prepare(`
+              SELECT clause, heading, text, page_start AS pageStart, page_end AS pageEnd
+              FROM clauses WHERE doc_id = ? ORDER BY id
+            `).all(docId).map((row) => {
+              const haystack = `${row.clause} ${row.heading} ${row.text}`.toLowerCase();
+              let hits = 0;
+              for (const term of docTerms) if (haystack.includes(term)) hits += 1;
+              return { ...row, hits };
+            }).filter((row) => row.hits > 0).sort((left, right) => right.hits - left.hits || left.pageStart - right.pageStart));
+          }
+          return clauseCache.get(docId);
+        };
+        const channel = {
+          enabled: true,
+          note: "",
+          async loadIndex() {
+            return { ok: true, fresh: true, dim: semanticSim.dim, ids: semanticSim.ids, vectors: semanticSim.vectors };
+          },
+          async embedQuery() {
+            return { ok: true, vector: queryVector, dim: semanticSim.dim };
+          },
+          async locateInDoc(_target, docId) {
+            return clausesOf(docId).slice(0, 20);
+          },
+          async locateMany(_target, docIds) {
+            return new Map(docIds.map((docId) => [docId, clausesOf(docId).slice(0, 20)]));
+          },
+        };
+        const targets = [{ kb: "标准", dir: options.dir, docs: fbManifest.docs }];
+        const outcome = await applySemanticToResults({
+          results: ranked,
+          targets,
+          query: question.q,
+          terms: keywordsOfQuery(question.q),
+          semantic: channel,
+        });
+        // Page Recall 沿用 0.30 口径（文档任一命中条款页覆盖期望页）：
+        // B 文档用全部条款命中页；dense 独有文档用单文档 FTS 的条款页。
+        const kPages = new Map();
+        for (const [docId, entries] of pagesByDoc(hits)) kPages.set(docId, [...entries]);
+        for (const result of outcome.results.slice(0, TOP_K)) {
+          if (kPages.has(result.docId)) continue;
+          const located = clausesOf(result.docId).slice(0, 5);
+          if (located.length === 0) continue;
+          kPages.set(result.docId, located.map((row) => ({
+            pageStart: row.pageStart,
+            pageEnd: row.pageEnd ?? row.pageStart,
+          })));
+        }
+        results.K.push(scoreQuestion(question, {
+          docOrder: outcome.results.slice(0, TOP_K).map((result) => result.docId),
+          pages: kPages,
+          elapsedMs: bElapsed + (performance.now() - kStarted),
+        }));
+      }
     }
 
     if (docDense) {
@@ -663,6 +809,7 @@ async function main() {
     const orderedKeys = ["A", "B", "C", "C1"];
     if (dense) orderedKeys.push("D", "E", "F");
     if (docDense) orderedKeys.push("G", "H", "J");
+    if (semanticSim) orderedKeys.push("K");
     const variants = {
       A: { label: "当前 FTS", results: results.A, summary: summarize(results.A) },
       B: { label: "FTS + boost", results: results.B, summary: summarize(results.B) },
@@ -679,6 +826,19 @@ async function main() {
       variants.H = { label: "文档级 RRF(B 文档序, 文档 dense 序; k=20)", results: results.H, summary: summarize(results.H) };
       variants.J = { label: "Oracle 路由（同义改写→H，其余→B）", results: results.J, summary: summarize(results.J) };
     }
+    if (semanticSim) {
+      variants.K = { label: "0.31 生产等价（文档 RRF + 强词面优先 + 两阶段页码）", results: results.K, summary: summarize(results.K) };
+    }
+    if (options.dumpJson) {
+      const dump = {
+        questions: questions.map((item) => ({ id: item.id, group: item.group, q: item.q, expected: item.expected })),
+        variants: Object.fromEntries(Object.entries(results).map(([key, list]) => [key, list.map((item) => ({
+          id: item.id, docRank: item.docRank, pageRank: item.pageRank, top: item.top,
+          docHits: item.docHits, pageHits: item.pageHits,
+        }))])),
+      };
+      await writeFile(options.dumpJson, JSON.stringify(dump), "utf8");
+    }
     const indexStat = await stat(join(options.dir, ".index", "fts.sqlite"));
     const report = buildReport({
       dir: options.dir,
@@ -692,17 +852,28 @@ async function main() {
       generatedAt: new Date().toISOString(),
     });
     await writeFile(options.out, report, "utf8");
+    const pickSummary = (summary) => ({
+      docRecall: Number(summary.docRecall.toFixed(4)),
+      pageRecall: Number(summary.pageRecall.toFixed(4)),
+      mrr: Number(summary.mrr.toFixed(4)),
+      pageMrr: Number(summary.pageMrr.toFixed(4)),
+      p95: Number(summary.p95.toFixed(1)),
+      meanMs: Number(summary.mean.toFixed(1)),
+    });
+    const groupsOf = ["clause", "multi-doc", "numeric", "paraphrase"];
     const summary = Object.fromEntries(Object.entries(variants).map(([key, value]) => [key, {
-      docRecall: Number(value.summary.docRecall.toFixed(4)),
-      pageRecall: Number(value.summary.pageRecall.toFixed(4)),
-      mrr: Number(value.summary.mrr.toFixed(4)),
-      pageMrr: Number(value.summary.pageMrr.toFixed(4)),
-      p95: Number(value.summary.p95.toFixed(1)),
-      meanMs: Number(value.summary.mean.toFixed(1)),
+      ...pickSummary(value.summary),
+      groups: Object.fromEntries(groupsOf.map((group) => [
+        group,
+        pickSummary(summarize(value.results.filter((item) => item.group === group))),
+      ])),
+      main60: pickSummary(summarize(value.results.filter((item) => !String(item.id).startsWith("N")))),
+      independent20: pickSummary(summarize(value.results.filter((item) => String(item.id).startsWith("N")))),
     }]));
     process.stdout.write(`${JSON.stringify({ questions: questions.length, out: options.out, summary }, null, 2)}\n`);
   } finally {
     db.close();
+    if (evalDbPath) await unlink(evalDbPath).catch(() => {});
   }
 }
 
