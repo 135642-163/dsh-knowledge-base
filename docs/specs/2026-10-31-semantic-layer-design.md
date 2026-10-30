@@ -122,17 +122,23 @@ searchAll / kb_query
 - `/kb/api/status`：`semantic: { enabled, indexReady, model, dim, docs, reason? }`；
   工作台检索状态行在启用时显示 `· 语义`，构建中显示提示。
 
-## 5. 运行时选型（需在 T0 拍板）
+## 5. 运行时选型（已定：D1a 瘦身版）
 
-| 选项 | 依赖 | 优点 | 缺点 |
-|---|---|---|---|
-| **D1a 推荐**：`@huggingface/transformers`（optionalDependency，Node 用 onnxruntime-node 预编译二进制） | 原生但**预编译**、可选安装 | 与评测同一模型/同 tokenizer；CPU 快；社区成熟 | 多平台二进制体积；违反「零原生依赖」的字面口径（但 rg/mupdf 已是预编译二进制） |
-| D1b：`onnxruntime-web`（WASM）+ JS tokenizer | 纯 JS/WASM | 零原生文件 | Node 下 WASM 支持有限、速度约 2–4× 慢、tokenizer 需自己拼 |
-| D1c：离线索引（外部脚本用 Python 生成 `doc-vectors.f32`，插件只读） | 零新依赖 | 完全不碰运行时 | 用户需自己跑脚本，不满足「开箱即用」；但可作为 `on` 模式的一种补充 |
+> 2026-10-30 已拍板 **D1a 瘦身版**，详见 `docs/specs/2026-10-31-semantic-runtime-adr.md`：
+> `onnxruntime-node`（预编译原生，298MB）+ `@huggingface/tokenizers`（纯 JS，0.6MB），
+> 不用 `@huggingface/transformers`（它会再拉 onnxruntime-web 150MB 与 sharp）。
+> Spike 已验证：与 0.30 Python/fastembed 的向量 **cos=0.999999**，查询嵌入 p50 **2.68ms**，
+> session 加载 55ms，常驻 RSS 293MB。
 
-**推荐 D1a**，理由：结果可复现（与 0.30 评测同模型）；`@vscode/ripgrep`/`mupdf` 已经说明
-「预编译二进制」在本插件是可接受的；以 optionalDependency + 显式启用/下载把风险隔离。
-如果 T0 判定不可接受，降级 D1c（先落排序/页码逻辑与索引格式，运行时留空）。
+| 选项 | 结论 |
+|---|---|
+| **D1a 瘦身版（选定）** | `onnxruntime-node` + tokenizer.js；可选 peer 安装、默认不装；语义关闭时不加载 |
+| D1a 完整版（transformers.js） | 不采用：多 150MB WASM + sharp 原生，收益为零 |
+| D1b（纯 WASM） | 不采用：解包 150MB、Node 下需自行接 onnxruntime-web、速度 2–4× 慢 |
+| D1c（外部 Python worker） | 不采用：可研但不可发布（用户需装 Python + fastembed），查询嵌入仍要外部进程 |
+
+**备选回退**：若后续发现 298MB 不可接受，退化到 D1c-c2（常驻 Python worker）或 D1c-c4
+（只保留离线评测），Task 1/2/4/5 不受影响。
 
 ## 6. 安全与资源
 

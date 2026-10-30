@@ -1,7 +1,8 @@
 # 知识库 0.31 可选语义层实施计划
 
 > 先读 `docs/specs/2026-10-31-semantic-layer-design.md`（尤其 §4.3 排序、§4.4 两阶段页码、§5 运行时决策）。
-> 基线：0.30.0（本地 `3823c7b`；远端 0.29 已推），`npm test` 1022/1022、E2E 11 passed / 1 skipped。
+> 基线：0.30.0（本地 `3823c7b` + 文档 `6e5deaf`；远端 0.29 已推），`npm test` 1022/1022、E2E 11 passed / 1 skipped。
+> 运行时已决策：**D1a 瘦身版**（ADR 已写，spike 通过：与评测向量 cos 0.999999、查询 2.68ms）。
 > 执行方式：逐任务 TDD；每任务先写失败测试→实现→跑该范围→全量；**不 push**，完成后报告。
 > 真实库只读：索引只写 `<kb>/.index/`，测试全部用临时 `kbRoot`。
 
@@ -14,18 +15,28 @@
 
 ---
 
-## Task 0: 运行时决策与 spike（半天内）
+## Task 0: 运行时决策与 spike（已完成，执行时复验）
 
-**目的**：在写业务代码前确认 D1a（`@huggingface/transformers` + onnxruntime-node 预编译）
-是否可接受；不可接受则切 D1c（离线向量脚本）。
+**决策**：D1a 瘦身版（`onnxruntime-node` + `@huggingface/tokenizers`），见
+`docs/specs/2026-10-31-semantic-runtime-adr.md`。
 
-- [ ] 写 `docs/specs/2026-10-31-semantic-runtime-adr.md`：对比 D1a/D1b/D1c，记录体积、
-  平台矩阵、启动成本、失败模式。
-- [ ] spike：在插件仓库 `npm i -D @huggingface/transformers`（devDependency 先验证），
-  用 `Xenova/bge-small-zh-v1.5` 或 `onnx-community/bge-small-zh-v1.5` 加载一次，
-  对 5 条文本做嵌入，核对：维度 512、与 0.30 的 Python 向量余弦 >0.99（同模型同文本）。
-- [ ] 记录：首次加载耗时、常驻内存、模型文件大小与来源；失败则记录错误并给出 D1c 兜底。
-- [ ] 决策写入 ADR，**等用户确认后再进入 Task 3 的真实运行时**（Task 1/2 不受影响）。
+**已完成 spike 的结论（作为验收基线）**：
+
+- 模型 `Xenova/bge-small-zh-v1.5` → `onnx/model.onnx` 94.8MB、`tokenizer.json`、
+  `tokenizer_config.json`；hidden 512、BertModel；
+- 与 0.30 Python/fastembed 的向量余弦 **0.999999**（6 条查询 + 4 篇文档）；
+- 查询嵌入 p50 **2.68ms** / p95 3.13ms；session 加载 55ms；RSS 293MB；
+- 磁盘：`onnxruntime-node` 298MB（三平台二进制）、tokenizer 0.6MB。
+
+执行时（新对话）需做的复验与收口：
+
+- [ ] 在**仓库内**复验 spike：`npm i -D onnxruntime-node @huggingface/tokenizers`，
+      模型放 `~/.dsh/tools/models/bge-small-zh-v1.5`（命令见 ADR §5），跑通一次嵌入并核对
+      512 维 / 余弦 >0.99（可直接用 0.30 的 `.f32` 对比）；若环境不允许装依赖，改为注入假
+      embedder 完成 Task 1/2 的单测，真实 runner 用例 skip 并记录。
+- [ ] 定**打包策略**：按 ADR「可选 peer / 伴生包」二选一，写进 `package.json` 与 README；
+      运行时用 `import("onnxruntime-node")` 探测，缺失时 `enabled=false`。
+- [ ] 记录 install script 提示（npm allowScripts / pnpm approve-builds）到 README 已知限制。
 
 ## Task 1: `lib/semantic.js` 纯函数
 
@@ -61,10 +72,14 @@
 
 **Files:** `lib/semantic-runtime.js`（新）、`test/semantic-runtime.test.mjs`（新）
 
-- [ ] 按 Task 0 决策实现：
-  - D1a：`@huggingface/transformers` 懒加载（optionalDependency），
-    `embed(texts)` + `embedQuery(q)`（查询加指令）；模型目录可配置；
-  - D1c：读外部脚本生成的向量，`embed` 不可用时 `enabled=false`。
+- [ ] 按 ADR 实现 D1a 瘦身版（代码骨架见 ADR §3）：
+  - 懒加载 `onnxruntime-node` + `@huggingface/tokenizers`；`Tokenizer(tokenizerJson, tokenizerConfig)`；
+  - `InferenceSession.create(model.onnx)`；输入 `input_ids/attention_mask/token_type_ids`
+    （int64，补 0），输出 `last_hidden_state`；
+  - **CLS 池化（第 0 个 token）+ L2 归一化**；文档不加指令、查询加
+    「为这个句子生成表示以用于检索相关文章：」；batch=8、max 512 token；
+  - `embed(texts)` / `embedQuery(q)`；模型目录可配置（默认 `~/.dsh/tools/models/bge-small-zh-v1.5`）；
+  - 依赖缺失/模型缺失 → `{ available:false, reason:"runner_missing"|"model_missing" }`，回退 B。
 - [ ] 测试：注入假模型；模型缺失 → 降级对象（`available:false, reason`）；下载未同意 →
   不联网、降级；同一进程只告警一次。
 - [ ] `node --test test/semantic-runtime.test.mjs`
