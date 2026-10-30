@@ -139,6 +139,22 @@ test("isStrongLexicalHit：标题不命中 / 条款只命中 1 个词 / trust=lo
   assert.equal(isStrongLexicalHit({ terms: strongTerms }), false, "缺 topDoc/topClause");
 });
 
+test("isStrongLexicalHit：长片段切词漏网时，标题共享 CJK 二字片段也算命中", () => {
+  // keywordsOfQuery 对「光伏并网逆变器功率因数…」会切出长片段，标题里只出现「光伏」。
+  assert.equal(isStrongLexicalHit({
+    terms: ["功率", "因数", "范围", "连续", "光伏并网逆变器功"],
+    query: "光伏并网逆变器功率因数应能在什么范围内连续可调",
+    topDoc: { title: "光伏发电站无功补偿技术规范", trust: "high" },
+    topClause: { line: "光伏并网逆变器功率因数应能在超前 0.95—滞后 0.95 范围内连续可调" },
+  }), true);
+  assert.equal(isStrongLexicalHit({
+    terms: ["频率", "偏差", "限值"],
+    query: "频率偏差限值",
+    topDoc: { title: "电能质量 电压暂降", trust: "high" },
+    topClause: { line: "频率偏差限值" },
+  }), false, "标题与查询没有共享二字片段时不锁定");
+});
+
 test("isStrongLexicalHit：单字词不参与标题命中，大小写不敏感", () => {
   assert.equal(isStrongLexicalHit({
     terms: ["电", "风电场"],

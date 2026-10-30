@@ -204,3 +204,33 @@ test("语义通道抛异常：检索仍返回 B 结果", async () => {
   assert.equal(response.semantic.applied, false);
   assert.match(response.semantic.reason, /boom/);
 });
+
+test("B 的 top-50 之外结果按原序追加：语义层只改排序，不缩小召回集合", async () => {
+  const manyDocs = Array.from({ length: 55 }, (_value, index) => ({
+    id: `d${index}`,
+    title: `文档 ${index}`,
+    standardNo: "",
+    type: "text",
+    tags: [],
+    trust: "unknown",
+    updatedAt: "2026-10-01T00:00:00.000Z",
+  }));
+  const manyHits = manyDocs.map((doc) => ({
+    docId: doc.id,
+    title: doc.title,
+    trust: doc.trust,
+    pageStart: 1,
+    pageEnd: 1,
+    clause: "1",
+    line: `文档 ${doc.id} 的第 1 条`,
+  }));
+  const semantic = fakeSemantic({ ids: ["d0", "d1", "d2"], vectors: [vector([1, 0]), vector([0.6, 0.8]), vector([0, 1])] });
+  const response = await run({ semantic, targetDocs: manyDocs, hits: manyHits, limit: 100 });
+  assert.equal(response.engine, "hybrid");
+  assert.equal(response.results.length, 55);
+  assert.deepEqual(
+    response.results.slice(-5).map((result) => result.docId),
+    ["d50", "d51", "d52", "d53", "d54"],
+    "top-50 之外保持 B 的原序",
+  );
+});
