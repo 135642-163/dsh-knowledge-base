@@ -281,12 +281,16 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
   `onnxruntime-node ^1.31.1` 与 `@huggingface/tokenizers ^0.2.0`。`npm ci` / `npm install`
   **不会**装这两个包（实测 `npm ci` 后 `node_modules` 里没有它们），所以 293MB 原生依赖只影响
   主动启用语义层的机器。
-- 启用语义时在插件目录安装（`--no-save`：不写插件 `package.json`，升级插件不会被覆盖或冲突）：
+- 启用语义时在插件目录安装（不写插件 `package.json`，升级插件不会被覆盖或冲突）：
 
   ```bash
   cd ~/.dsh/plugins/dsh-knowledge-base
-  npm i --no-save onnxruntime-node@^1.31.1 @huggingface/tokenizers@^0.2.0
+  npm run semantic:install     # = npm i --no-save --save-peer onnxruntime-node@^1.31.1 @huggingface/tokenizers@^0.2.0
   ```
+
+  **`--save-peer` 不能省**：这两个包已声明为可选 peer，npm 在已有 `node_modules` 的目录里会把
+  裸 `--no-save` 的显式安装请求当成 peer 边而 no-op（实测 `npm i --no-save ...` 报 `up to date`
+  且不落盘）；加 `--save-peer` 才会真正装进 `node_modules`，同时 `--no-save` 保证不改清单。
 
   运行时用 `import("onnxruntime-node")` / `import("@huggingface/tokenizers")` 探测；任一缺失、
   模型缺失或索引不可用 → 语义层关闭并**完全回退 0.30 的 B 路径**（默认 `semanticSearch=off`）。

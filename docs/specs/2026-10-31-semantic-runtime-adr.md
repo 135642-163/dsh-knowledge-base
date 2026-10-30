@@ -106,8 +106,10 @@ export async function embed(texts, { modelDir, batch = 8, isQuery = false }) { .
 - 本机验证命令（新对话可直接复用）：
 
 ```bash
-# 可选依赖（只在本机装，不默认进发布依赖）
-npm i -D onnxruntime-node @huggingface/tokenizers
+# 可选依赖（只在本机装，不默认进发布依赖；--save-peer 必须保留，
+# 否则 npm 会把显式请求当成可选 peer 边而 no-op）
+npm run semantic:install
+# 等价：npm i --no-save --save-peer onnxruntime-node@^1.31.1 @huggingface/tokenizers@^0.2.0
 # 模型（94.8MB，代理按需）
 mkdir -p ~/.dsh/tools/models/bge-small-zh-v1.5
 curl -L -o ~/.dsh/tools/models/bge-small-zh-v1.5/model.onnx \
