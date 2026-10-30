@@ -32,6 +32,25 @@
 **结论**：与 0.30 评测**同源同结果**（差异 < 1e-6），查询延迟比 fastembed（1.6ms/条）多约 1ms
 （tokenize 与单条推理开销），相对 60ms 的 FTS 可忽略。D1a 瘦身版可行。
 
+### 2.1 仓库内复核（2026-10-30，Node 26.7.0 / macOS arm64）
+
+按 §5 安装 `onnxruntime-node@1.31.1` + `@huggingface/tokenizers@0.2.0`，模型放
+`~/.dsh/tools/models/bge-small-zh-v1.5`，用与本文相同的 tokenize/CLS/L2 口径复跑：
+
+| 项 | 复核值 |
+|---|---|
+| 维度 | 512（inputs `input_ids/attention_mask/token_type_ids` → 输出 `last_hidden_state`） |
+| 与 0.30 fastembed 一致性 | 80 条查询余弦最小 **0.999999**；40 篇文档余弦最小 **0.999998**（门槛 >0.99） |
+| session 加载 | **64ms** |
+| 查询嵌入 | p50 **2.63ms** / p95 **2.92ms**（batch=1）；batch=8 时 1.59ms/条 |
+| 文档嵌入 | **12.6ms/篇**（batch=8，平均 244 token）→ 911 篇约 **11.5s** |
+| RSS | 加载后 **239MB**；仅查询稳态 260MB；批量嵌入文档峰值 476MB（索引构建放后台进程） |
+| 体积 | onnxruntime-node **293MB**（三平台）+ tokenizers 0.6MB + 模型 **95MB** |
+| install script | npm allowScripts 未执行 `postinstall`，CPU 推理正常（darwin 清单为空） |
+
+打包收口：**可选 peer**（`peerDependencies` + `peerDependenciesMeta.optional`），`npm ci` 不安装；
+启用命令、体积与 install script 限制见 README「0.31.0」段。
+
 ## 3. 运行时接口（Task 3 直接照此实现）
 
 ```js

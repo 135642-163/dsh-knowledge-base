@@ -263,6 +263,62 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
 - `docs/specs/2026-10-25-retrieval-eval.md` 是机制回归（查询取条款原文开头 28 字），不是人工语义评测。
 
 
+## 0.31.0 可选语义层（运行时收口；默认关闭）
+
+> 当前进度：本轮先落地**运行时、分发与复验**（可选依赖 + 模型 + 向量一致性）；检索接入、索引与
+> 80 题回归在后续提交完成。接入前后插件行为一致：`kb_query` / `/kb/api/search` 走 0.30 的 B 路径，
+> 不加载任何模型、不读写向量索引。
+
+**运行时（D1a 瘦身版，已定）**：`onnxruntime-node`（预编译 N-API 原生二进制）+ 
+`@huggingface/tokenizers`（纯 JS WordPiece）；模型 `Xenova/bge-small-zh-v1.5` 的 `onnx/model.onnx`
+（fp32，94.8MB，512 维）。查询侧加中文检索指令「为这个句子生成表示以用于检索相关文章：」，
+文档侧不加；池化取 CLS（首个 token），L2 归一化。决策与 spike 证据见
+`docs/specs/2026-10-31-semantic-runtime-adr.md`。
+
+**打包策略：可选 peer（不随插件默认安装）**
+
+- `package.json` 用 `peerDependencies` + `peerDependenciesMeta.*.optional = true` 声明
+  `onnxruntime-node ^1.31.1` 与 `@huggingface/tokenizers ^0.2.0`。`npm ci` / `npm install`
+  **不会**装这两个包（实测 `npm ci` 后 `node_modules` 里没有它们），所以 293MB 原生依赖只影响
+  主动启用语义层的机器。
+- 启用语义时在插件目录安装（`--no-save`：不写插件 `package.json`，升级插件不会被覆盖或冲突）：
+
+  ```bash
+  cd ~/.dsh/plugins/dsh-knowledge-base
+  npm i --no-save onnxruntime-node@^1.31.1 @huggingface/tokenizers@^0.2.0
+  ```
+
+  运行时用 `import("onnxruntime-node")` / `import("@huggingface/tokenizers")` 探测；任一缺失、
+  模型缺失或索引不可用 → 语义层关闭并**完全回退 0.30 的 B 路径**（默认 `semanticSearch=off`）。
+- 模型放 `~/.dsh/tools/models/bge-small-zh-v1.5/`：`model.onnx`、`tokenizer.json`、
+  `tokenizer_config.json`（合计约 95MB）。默认不联网下载，下载命令见 ADR §5。
+
+**本机实测（macOS arm64 / Node 26.7.0 / onnxruntime-node 1.31.1 / tokenizers 0.2.0）**
+
+| 项 | 实测 |
+|---|---|
+| 依赖体积 | onnxruntime-node **293MB**（darwin 87 / linux 70 / win32 136，三平台预编译二进制随包）；@huggingface/tokenizers 0.6MB |
+| 模型体积 | 95MB（model.onnx 94.8MB + tokenizer.json 0.4MB） |
+| session 加载 | **64ms** |
+| 查询嵌入 | **p50 2.63ms / p95 2.92ms**（batch=1，含 tokenize + 推理 + CLS 池化 + L2） |
+| 文档嵌入 | 12.6ms/篇（batch=8，平均 244 token）→ 911 篇约 **11.5s**（索引构建计划放后台进程） |
+| 常驻内存 | 加载后 RSS **239MB**；仅查询稳态约 260MB；批量嵌入 911 篇峰值约 476MB（不在服务进程常驻） |
+| 与 0.30 向量一致性 | 80 条查询余弦**最小 0.999999**；40 篇文档余弦**最小 0.999998**（门槛 >0.99） |
+
+**已知限制（install script 策略）**
+
+- npm 11 的 allowScripts 策略默认不执行 `onnxruntime-node` 的 `postinstall`。全新环境安装时会提示
+  `npm warn install-scripts ... onnxruntime-node@1.31.1 (postinstall: node ./script/install)`。
+  该脚本只下载**没有随 npm 包发布**的执行提供者二进制（linux/x64 的 CUDA/TensorRT、win32 的 GPU 包）；
+  CPU 推理所需的二进制已随包内 `bin/napi-v6/{darwin,linux,win32}` 提供，**不执行脚本不影响 CPU 推理**
+  （本轮实测都在未执行脚本的环境完成；darwin 的安装清单为空，脚本本身是 no-op）。
+- 需要让脚本执行：`npm install-scripts approve onnxruntime-node`。pnpm 10+ 默认拦截安装脚本，
+  会提示 `pnpm approve-builds`（本仓库的 esbuild 同理）。**不建议**在 linux/x64 上放行：
+  会额外从 NuGet 拉 CUDA/TensorRT 运行库（数百 MB），与纯 CPU 语义检索无关。
+- 唯一的原生依赖是 `onnxruntime-node` 的预编译 N-API 二进制（napi-v6，ABI 稳定），不需要本机编译
+  工具链；Node ≥20 可用（实测 Node 26.7.0）。三平台二进制都打进包，安装体积固定约 293MB，
+  安装脚本也不会裁剪它。
+
 ## 0.30.0 文档级语义融合评测与高亮提示修复
 
 **评测结论（新）**：0.29 的负结果是因为条款级 dense 与「从条款反推」的题集。0.30 补了

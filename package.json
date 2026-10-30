@@ -61,7 +61,17 @@
     }
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh-tools": ">=0.1.0-rc.6 <0.3.0"
+    "@deepseek-ai/dsh-tools": ">=0.1.0-rc.6 <0.3.0",
+    "@huggingface/tokenizers": "^0.2.0",
+    "onnxruntime-node": "^1.31.1"
+  },
+  "peerDependenciesMeta": {
+    "@huggingface/tokenizers": {
+      "optional": true
+    },
+    "onnxruntime-node": {
+      "optional": true
+    }
   },
   "dependencies": {
     "@deepseek-ai/schemastery": "^3.18.1",
