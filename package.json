@@ -1,6 +1,6 @@
 {
   "name": "dsh-knowledge-wiki",
-  "version": "0.31.7",
+  "version": "0.31.8",
   "description": "DeepSeek Harness 插件：把 Word/PPT/PDF（文字版与扫描版）资料整理为适合大模型阅读的知识库，支持检索、精读、修订、导出",
   "type": "module",
   "main": "lib/index.js",
