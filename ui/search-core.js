@@ -34,7 +34,7 @@ export const SEARCH_TYPE_OPTIONS = Object.freeze([
 
 const TRUST_VALUES = new Set(SEARCH_TRUST_OPTIONS.map((item) => item.value).filter(Boolean));
 
-const ENGINE_LABEL = { fts: "条款索引", rg: "全文回退", mixed: "混合引擎", none: "" };
+const ENGINE_LABEL = { fts: "条款索引", rg: "全文回退", mixed: "混合引擎", hybrid: "语义", none: "" };
 
 /** 从 hash 的 query 归一检索条件；非法 trust 直接忽略（不把脏值发给服务端）。 */
 export function searchStateFromQuery(query = {}) {

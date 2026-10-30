@@ -180,6 +180,7 @@ test("applyHighlights 对脚本片段只当文本（不会变成元素）", () =
 
 test("searchStatusLine 组合命中数、引擎、耗时与提示", () => {
   assert.equal(searchStatusLine({ total: 12, engine: "fts", tookMs: 34 }), "命中 12 篇 · 条款索引 · 34ms");
+  assert.equal(searchStatusLine({ total: 5, engine: "hybrid", tookMs: 40 }), "命中 5 篇 · 语义 · 40ms");
   assert.equal(
     searchStatusLine({ total: 3, engine: "rg", tookMs: 120, estimated: true }),
     "命中 3 篇 · 全文回退 · 120ms · 结果为预计值",
