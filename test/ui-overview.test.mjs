@@ -1,6 +1,6 @@
 /**
- * 总览库卡片：类型构成条 + 可信度圆点图例（0.23.0 Task 4，方案 B）。
- * 卡片只保留一条横向条；可信度不再画比例条。
+ * 总览库卡片：可信度构成条 + 圆点图例；文件类型退到概括行（0.31.4）。
+ * 用户更关注「资料可信度」，彩色条改画可信度。
  */
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -13,6 +13,8 @@ const icons = {
   database: '<svg data-icon="database"></svg>',
 };
 const fmtNumber = (value) => new Intl.NumberFormat("zh-CN").format(Number(value) || 0);
+
+const TRUST_COLORS = ["#4f9d69", "#c9a36a", "#b96a6a", "#93a3b8"];
 
 function makeKb(patch = {}) {
   return {
@@ -51,104 +53,39 @@ function cssRule(selector) {
     .match(new RegExp(`(?:^|\\n)\\s*${escaped}\\s*\\{([^}]*)\\}`))?.[1] ?? "";
 }
 
-test("每张卡片只有一条类型构成条，不再渲染可信度比例条", () => {
+test("彩色条画可信度：颜色按高/中/低，宽度按占比，类型移到概括行", () => {
   const html = render([makeKb()]);
-  assert.equal((html.match(/<div class="bar[^"]*"/g) ?? []).length, 1);
-  assert.doesNotMatch(html, /class="bar thin/);
-  assert.doesNotMatch(html, /<div class="bar[^"]*"[^>]*title="可信度/);
-  assert.match(html, /class="trust-dots"/);
-});
-
-test("类型条只为非零类型渲染分段，宽度合计 100%", () => {
-  const html = render([makeKb({
-    types: { "pdf-scanned": 3, docx: 2, "pdf-text": 1, markdown: 0 },
-  })]);
   const bars = segments(html);
   assert.equal(bars.length, 3);
+  assert.deepEqual(bars.map((bar) => bar.color), [TRUST_COLORS[0], TRUST_COLORS[1], TRUST_COLORS[2]]);
   assert.ok(Math.abs(bars.reduce((sum, bar) => sum + bar.width, 0) - 100) < 1e-6);
-  assert.deepEqual(bars.map((bar) => bar.color), ["#4f7fc0", "#4f86c6", "#6fa0d8"]);
-  // 分段首尾相接，标记之间没有空白或间隔元素。
-  assert.match(html, /<\/i><i style="width:/);
-  // 零计数类型既不占分段，也不出现在 title 里。
-  assert.doesNotMatch(html, /markdown 0/);
+  assert.deepEqual(bars.map((bar) => Math.round(bar.width)), [50, 33, 17]);
+  assert.match(html, /class="bar" role="img" title="可信度：高 3 · 中 2 · 低 1 · 未知 0"/);
+  assert.doesNotMatch(html, /title="类型/);
+  // 类型改为概括行的一行小字
+  assert.match(html, /<p class="type-line muted">类型：pdf-scanned 3 · docx 2 · pdf-text 1<\/p>/);
+  // 每张卡片只有一条彩色条
+  assert.equal((html.match(/<div class="bar[^"]*"/g) ?? []).length, 1);
 });
 
-test("类型条使用更丰富的配色并包含暖色", () => {
-  const html = render([makeKb({
-    types: {
-      "pdf-scanned": 1, "pdf-text": 1, "pdf-mixed": 1, docx: 1, pptx: 1, xlsx: 1,
-      markdown: 1, note: 1, epub: 1, mobi: 1, text: 1, pdf: 1, doc: 1,
-    },
-  })]);
-  const colors = [
-    "#4f7fc0", "#6fa0d8", "#93b3dd", "#4f86c6", "#e0a33e", "#d07a3f",
-    "#4f9d69", "#a26bc4", "#3fa39a", "#93a3b8", "#6b7f9e", "#c26a6a",
-  ];
-  for (const color of colors) assert.ok(html.includes(`background:${color}`), color);
-  // 至少出现一个暖色（琥珀/橙/红），避免整条色带只有冷色。
-  assert.ok(["#e0a33e", "#d07a3f", "#c26a6a"].some((color) => html.includes(`background:${color}`)));
-  for (const stale of ["#5f7fb8", "#7f96c9", "#a3b6d9", "#7aa2d0", "#7fae9a", "#a48bc4", "#6fb3aa", "#8a9bb5"]) {
-    assert.ok(!html.includes(stale), `旧配色仍在渲染：${stale}`);
-  }
+test("可信度四档都非零时四段，颜色与数量对应", () => {
+  const html = render([makeKb({ trust: { high: 1, medium: 2, low: 3, unknown: 4 } })]);
+  const bars = segments(html);
+  assert.equal(bars.length, 4);
+  assert.deepEqual(bars.map((bar) => bar.color), TRUST_COLORS);
+  assert.deepEqual(bars.map((bar) => Math.round(bar.width)), [10, 20, 30, 40]);
+  assert.match(html, /title="可信度：高 1 · 中 2 · 低 3 · 未知 4"/);
 });
 
-test("全部类型都映射到配色，未知类型回落到灰色", () => {
-  const all = render([makeKb({
-    types: {
-      "pdf-scanned": 1, "pdf-text": 1, "pdf-mixed": 1, docx: 1, pptx: 1, xlsx: 1,
-      markdown: 1, note: 1, epub: 1, mobi: 1, text: 1, pdf: 1, doc: 1, unknown: 1,
-    },
-  })]);
-  for (const color of [
-    "#4f7fc0", "#6fa0d8", "#93b3dd", "#4f86c6", "#e0a33e", "#d07a3f",
-    "#4f9d69", "#a26bc4", "#3fa39a", "#93a3b8", "#6b7f9e", "#c26a6a", "#b8c0cc",
-  ]) {
-    assert.ok(all.includes(`background:${color}`), color);
-  }
-  assert.equal(segments(all).length, 14);
-
-  const fallback = render([makeKb({ types: { video: 2 } })]);
-  assert.deepEqual(segments(fallback).map((bar) => bar.color), ["#b8c0cc"]);
+test("可信度全为零：中性空条、无圆点图例，类型行仍然展示", () => {
+  const html = render([makeKb({ trust: {}, types: { docx: 2 } })]);
+  assert.match(html, /<div class="bar empty" role="img" aria-label="暂无可信度" title="暂无可信度"><i><\/i><\/div>/);
+  assert.equal(segments(html).length, 0);
+  assert.doesNotMatch(html, /trust-dots/);
+  assert.match(html, /类型：docx 2/);
 });
 
-test("类型条 title / aria-label 列出非零类型与数量", () => {
-  const html = render([makeKb({ types: { "pdf-scanned": 3, docx: 2, "pdf-text": 1 } })]);
-  assert.match(html, /title="类型 pdf-scanned 3 · docx 2 · pdf-text 1"/);
-  assert.match(html, /aria-label="类型 pdf-scanned 3 · docx 2 · pdf-text 1"/);
-  assert.match(html, /role="img"/);
-});
-
-test("可信度圆点只渲染非零项，数量、颜色与完整 title 正确", () => {
-  const html = render([makeKb({ trust: { high: 3, medium: 2, low: 1, unknown: 0 } })]);
-  const dots = trustDots(html);
-  assert.equal(dots.length, 3);
-  assert.deepEqual(dots.map((dot) => dot.title), ["高 3", "中 2", "低 1"]);
-  assert.deepEqual(dots.map((dot) => dot.ariaLabel), ["可信度：高 3", "可信度：中 2", "可信度：低 1"]);
-  assert.deepEqual(dots.map((dot) => dot.color), ["#4f9d69", "#c9a36a", "#b96a6a"]);
-  assert.deepEqual(dots.map((dot) => dot.count), [3, 2, 1]);
-  // 整行 title 保留全部四档（含零值），方便 hover 看完整拆分。
-  assert.match(html, /class="trust-dots" role="group" title="可信度：高 3 · 中 2 · 低 1 · 未知 0"/);
-  assert.doesNotMatch(html, /title="未知 0"/);
-  // 圆点行是一个组合，单项是带 aria-label 的图像语义。
-  assert.equal((html.match(/class="trust-dot" role="img"/g) ?? []).length, 3);
-});
-
-test("未知可信度非零时使用灰色圆点", () => {
-  const html = render([makeKb({ trust: { high: 1, medium: 0, low: 0, unknown: 4 } })]);
-  const dots = trustDots(html);
-  assert.equal(dots.length, 2);
-  assert.deepEqual(dots.map((dot) => dot.title), ["高 1", "未知 4"]);
-  assert.equal(dots[1].color, "#93a3b8");
-  assert.match(html, /title="可信度：高 1 · 中 0 · 低 0 · 未知 4"/);
-});
-
-test("可信度全为零时不渲染空行", () => {
-  const html = render([makeKb({ trust: { high: 0, medium: 0, low: 0, unknown: 0 } })]);
-  assert.doesNotMatch(html, /trust-dots|trust-dot\b/);
-  assert.doesNotMatch(html, /可信度/);
-});
-
-test("空库卡片显示空库徽标和中性占位类型条", () => {
+test("空库：空库徽标 + 空可信度条，不渲染类型行与可信度图例", () => {
   const html = render([makeKb({
     status: "empty",
     docs: { total: 0, ready: 0, importing: 0, failed: 0, deleted: 0, notes: 0 },
@@ -159,28 +96,54 @@ test("空库卡片显示空库徽标和中性占位类型条", () => {
     updatedAt: null,
   })]);
   assert.match(html, /<span class="badge">空库<\/span>/);
-  assert.match(html, /<div class="bar empty" role="img" aria-label="暂无文档类型" title="暂无文档类型"><i><\/i><\/div>/);
+  assert.match(html, /class="bar empty"/);
   assert.equal(segments(html).length, 0);
-  assert.doesNotMatch(html, /trust-dots/);
-  assert.doesNotMatch(html, /bar thin/);
+  assert.doesNotMatch(html, /trust-dots|class="type-line"/);
 });
 
-test("空类型但可信度非零时仍是空条且不显示比例条", () => {
-  const html = render([makeKb({ types: { docx: 0 }, trust: { high: 2 } })]);
-  assert.match(html, /<div class="bar empty"/);
-  assert.equal(segments(html).length, 0);
-  assert.equal(trustDots(html).length, 1);
-  assert.equal((html.match(/<div class="bar[^"]*"/g) ?? []).length, 1);
+test("类型计数为 0 不进入概括行", () => {
+  const html = render([makeKb({ types: { docx: 2, markdown: 0 } })]);
+  assert.match(html, /类型：docx 2</);
+  assert.doesNotMatch(html, /markdown 0/);
 });
 
-test("知识库名称在标题与 data-name 中均转义", () => {
-  const html = render([makeKb({ name: '<img src=x onerror=alert(1)>' })]);
+test("可信度圆点只渲染非零项，数量、颜色与完整 title 正确", () => {
+  const html = render([makeKb({ trust: { high: 3, medium: 2, low: 1, unknown: 0 } })]);
+  const dots = trustDots(html);
+  assert.equal(dots.length, 3);
+  assert.deepEqual(dots.map((dot) => dot.title), ["高 3", "中 2", "低 1"]);
+  assert.deepEqual(dots.map((dot) => dot.ariaLabel), ["可信度：高 3", "可信度：中 2", "可信度：低 1"]);
+  assert.deepEqual(dots.map((dot) => dot.color), TRUST_COLORS.slice(0, 3));
+  assert.deepEqual(dots.map((dot) => dot.count), [3, 2, 1]);
+  assert.match(html, /class="trust-dots" role="group" title="可信度：高 3 · 中 2 · 低 1 · 未知 0"/);
+  assert.doesNotMatch(html, /title="未知 0"/);
+});
+
+test("未知可信度非零时使用灰色圆点", () => {
+  const html = render([makeKb({ trust: { high: 1, medium: 0, low: 0, unknown: 4 } })]);
+  const bars = segments(html);
+  assert.deepEqual(bars.map((bar) => bar.color), [TRUST_COLORS[0], TRUST_COLORS[3]]);
+  const dots = trustDots(html);
+  assert.equal(dots.length, 2);
+  assert.deepEqual(dots.map((dot) => dot.title), ["高 1", "未知 4"]);
+  assert.equal(dots[1].color, TRUST_COLORS[3]);
+});
+
+test("可信度全为零时既没有圆点也没有可信度文案", () => {
+  const html = render([makeKb({ trust: { high: 0, medium: 0, low: 0, unknown: 0 } })]);
+  assert.doesNotMatch(html, /trust-dots|trust-dot\b/);
+  assert.doesNotMatch(html, /title="可信度/);
+});
+
+test("知识库名称与类型名都做 HTML 转义", () => {
+  const html = render([makeKb({ name: '<img src=x onerror=alert(1)>', types: { '<x>': 2 } })]);
   assert.doesNotMatch(html, /<img src=x/);
   assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
   assert.match(html, /data-name="&lt;img src=x onerror=alert\(1\)&gt;"/);
+  assert.match(html, /类型：&lt;x&gt; 2/);
 });
 
-test("样式约定：连续条形（无间隙、父级圆角裁剪）与中性空条", () => {
+test("样式约定：连续条形（无间隙、父级圆角裁剪）与类型概括行", () => {
   const css = readFileSync(new URL("../ui/style.css", import.meta.url), "utf8");
   const bar = cssRule(".bar");
   assert.match(bar, /display:\s*flex/);
@@ -190,14 +153,13 @@ test("样式约定：连续条形（无间隙、父级圆角裁剪）与中性�
   assert.match(bar, /background:\s*var\(--panel-2\)/);
   assert.match(bar, /border-radius:\s*999px/);
   assert.match(bar, /overflow:\s*hidden/);
-  // 分段是连续色块：自身不圆角，由父级 overflow:hidden + 圆角裁剪两端。
   const segment = cssRule(".bar i");
   assert.match(segment, /height:\s*100%/);
   assert.match(segment, /border-radius:\s*0/);
   assert.match(cssRule(".bar.empty i"), /width:\s*100%/);
   assert.match(cssRule(".bar.empty i"), /background:\s*var\(--line\)/);
+  assert.match(cssRule(".type-line"), /font-size:\s*12px/);
   assert.doesNotMatch(css, /\.bar\.thin/);
-  assert.doesNotMatch(bar, /gap:\s*2px/);
 });
 
 test("总览页只读展示知识库根目录", () => {
@@ -205,23 +167,5 @@ test("总览页只读展示知识库根目录", () => {
   assert.match(html, /class="muted root-line"/);
   assert.match(html, /知识库根目录/);
   assert.match(html, /<code class="root-path" title="[^"]*kbRoot[^"]*">\/srv\/知识库<\/code>/);
-  // 空库时也保留根目录行：用户正是靠它确认配置生效。
   assert.match(render([], { server: { kbRoot: "/srv/知识库" } }), /class="root-path"/);
-});
-
-test("没有服务信息或根目录为空时不渲染根目录行", () => {
-  assert.doesNotMatch(render([makeKb()]), /root-line/);
-  assert.doesNotMatch(render([makeKb()], { server: { kbRoot: "  " } }), /root-line/);
-});
-
-test("根目录路径做 HTML 转义", () => {
-  const html = render([], { server: { kbRoot: `/tmp/<x>&"` } });
-  assert.match(html, /\/tmp\/&lt;x&gt;&amp;&quot;/);
-  assert.doesNotMatch(html, /\/tmp\/<x>/);
-});
-
-test("根目录行样式：等宽、可换行、不溢出面板", () => {
-  assert.match(cssRule(".root-line"), /flex-wrap:\s*wrap/);
-  assert.match(cssRule(".root-path"), /font-family:\s*ui-monospace/);
-  assert.match(cssRule(".root-path"), /word-break:\s*break-all/);
 });

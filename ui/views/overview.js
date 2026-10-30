@@ -75,6 +75,7 @@ function card(kb, { icons, fmtNumber }) {
         <span class="card-more">${icons.chevron}</span>
       </div>
       <p class="desc">${kb.description ? escapeHtml(kb.description) : `<span class="muted">未填写简介</span>`}</p>
+      ${typeLine(kb.types)}
       <div class="stats">
         <span><strong>${fmtNumber(live)}</strong> 篇</span>
         <span><strong>${compact(kb.pages)}</strong> 页</span>
@@ -82,7 +83,7 @@ function card(kb, { icons, fmtNumber }) {
         <span><strong>${fmtNumber(kb.docs.notes)}</strong> 笔记</span>
       </div>
       <div class="composition">
-        ${typeBar(kb.types)}
+        ${trustBar(kb.trust)}
         ${trustDots(kb.trust)}
       </div>
       <div class="card-foot muted">
@@ -93,32 +94,30 @@ function card(kb, { icons, fmtNumber }) {
   `;
 }
 
-/**
- * 类型构成条与图例共用的配色：同族蓝为主，办公/表格/笔记补充暖色便于区分。
- * 未识别的类型回落到 unknown 的灰色。
- */
-const TYPE_COLORS = {
-  "pdf-scanned": "#4f7fc0", "pdf-text": "#6fa0d8", "pdf-mixed": "#93b3dd",
-  docx: "#4f86c6", pptx: "#e0a33e", xlsx: "#d07a3f", markdown: "#4f9d69",
-  note: "#a26bc4", epub: "#3fa39a", mobi: "#3fa39a", text: "#93a3b8",
-  pdf: "#6b7f9e", doc: "#c26a6a", unknown: "#b8c0cc",
-};
-
 const TRUST_COLORS = { high: "#4f9d69", medium: "#c9a36a", low: "#b96a6a", unknown: "#93a3b8" };
 const TRUST_LABELS = { high: "高", medium: "中", low: "低", unknown: "未知" };
 const TRUST_LEVELS = ["high", "medium", "low", "unknown"];
 
-function typeBar(types = {}) {
+/** 文件类型数量（概括行）；用户主要关注可信度，类型退居次要位置。 */
+function typeLine(types = {}) {
   const entries = Object.entries(types)
     .map(([type, value]) => [type, Math.max(0, Number(value) || 0)])
     .filter(([, value]) => value > 0);
+  if (entries.length === 0) return "";
+  return `<p class="type-line muted">类型：${entries.map(([type, value]) => `${escapeHtml(type)} ${value}`).join(" · ")}</p>`;
+}
+
+/** 可信度构成条：绿/黄/红/灰四档，title 列出全部四项（含 0）。 */
+function trustBar(trust = {}) {
+  const entries = TRUST_LEVELS.map((level) => [level, Math.max(0, Number(trust[level]) || 0)]);
   const total = entries.reduce((sum, [, value]) => sum + value, 0);
   if (total === 0) {
-    return `<div class="bar empty" role="img" aria-label="暂无文档类型" title="暂无文档类型"><i></i></div>`;
+    return `<div class="bar empty" role="img" aria-label="暂无可信度" title="暂无可信度"><i></i></div>`;
   }
-  const title = `类型 ${entries.map(([type, value]) => `${type} ${value}`).join(" · ")}`;
+  const title = `可信度：${entries.map(([level, value]) => `${TRUST_LABELS[level]} ${value}`).join(" · ")}`;
   return `<div class="bar" role="img" title="${escapeAttr(title)}" aria-label="${escapeAttr(title)}">${entries
-    .map(([type, value]) => `<i style="width:${(value / total) * 100}%;background:${TYPE_COLORS[type] ?? TYPE_COLORS.unknown}"></i>`)
+    .filter(([, value]) => value > 0)
+    .map(([level, value]) => `<i style="width:${(value / total) * 100}%;background:${TRUST_COLORS[level]}"></i>`)
     .join("")}</div>`;
 }
 

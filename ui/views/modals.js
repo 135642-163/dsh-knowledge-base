@@ -1373,10 +1373,10 @@ export function openSemanticModal({ notify = () => {} } = {}) {
   const node = overlay(`
     <div class="modal-form semantic-settings">
       <h2>检索设置</h2>
-      <label class="check-row"><input type="checkbox" name="semantic-enabled" /> <span>启用语义检索（实验）</span></label>
-      <p class="muted">开启后，用与原文不同的说法也能找到资料；需要一次性准备约 390MB 组件与模型，之后每次查询约多 3 毫秒。关闭时不加载任何模型，行为与默认一致。</p>
+      <label class="check-row"><input type="checkbox" name="semantic-enabled" /> <span>启用语义检索</span></label>
+      <p class="muted">开启后，用不同说法（比如「灯一直闪」）也能找到写「闪变」的资料。组件和模型放在本机，只需准备一次（约 390MB）；关闭时只按关键词检索，行为和现在完全一样。</p>
       <div class="semantic-status muted">读取状态中…</div>
-      <label class="check-row" data-consent-row hidden><input type="checkbox" data-consent /> <span>同意下载约 390MB 组件与模型（只下载一次）</span></label>
+      <label class="check-row" data-consent-row hidden><input type="checkbox" data-consent /> <span>我同意安装运行组件并下载模型（约 390MB，只做一次）</span></label>
       <p class="form-error" hidden></p>
       <div class="modal-actions">
         <button type="button" class="btn" data-close>关闭</button>
@@ -1396,6 +1396,16 @@ export function openSemanticModal({ notify = () => {} } = {}) {
     error.hidden = !text;
   }
 
+  /** 把服务端的机器码翻译成用户能看懂的状态（不直接显示 disabled/missing）。 */
+  function indexLine(status) {
+    if (status?.enabled !== true) return "索引：未开启（开启后第一次检索会自动建立）";
+    if (status?.index?.indexReady === true) return `索引：已就绪（${status.index.docs} 篇）`;
+    const reason = String(status?.index?.reason ?? "");
+    if (reason === "index_stale") return "索引：资料有变化，下次检索会自动更新";
+    if (reason === "index_empty") return "索引：当前库还没有可索引的资料";
+    return "索引：尚未建立（开启后第一次检索自动建立，大库可能需要几十秒）";
+  }
+
   function lines(status) {
     statusBox.textContent = "";
     const add = (text) => {
@@ -1403,13 +1413,22 @@ export function openSemanticModal({ notify = () => {} } = {}) {
       line.textContent = text;
       statusBox.appendChild(line);
     };
-    const missing = (value) => (Array.isArray(value) && value.length > 0 ? `（缺 ${value.join("、")}）` : "");
-    add(`运行组件：${status?.dependencies?.ok ? "已安装" : `未安装${missing(status?.dependencies?.missing)}`}`);
-    add(`模型：${status?.model?.ok ? "已下载" : `未下载${missing(status?.model?.missing)}`}`);
-    if (status?.index) {
-      add(`索引：${status.index.indexReady ? `已就绪（${status.index.docs} 篇）` : `未就绪${status.index.reason ? `（${status.index.reason}）` : ""}`}`);
+    add(`运行组件：${status?.dependencies?.ok ? "已安装" : "未安装"}`);
+    add(`模型：${status?.model?.ok ? "已下载" : "未下载"}`);
+    add(indexLine(status));
+    if (status?.preparing) {
+      add("正在准备组件与模型…（进度会显示在这里）");
+    } else if (status?.ready === true) {
+      add("组件与模型已就绪，打开上面的开关即可使用。");
+    } else {
+      const missing = [];
+      if (!status?.dependencies?.ok) missing.push("运行组件");
+      if (!status?.model?.ok) missing.push("模型文件");
+      add(`还需要准备：${missing.join("、") || "组件与模型"}（点下方「一键准备」，只做一次）`);
     }
-    if (status?.preparing) add("正在准备组件/模型…");
+    if (status?.enabled === true && status?.ready !== true) {
+      add("注意：组件未就绪时，检索会自动回退到关键词模式。");
+    }
   }
 
   function paint(status) {
@@ -1417,7 +1436,8 @@ export function openSemanticModal({ notify = () => {} } = {}) {
     const ready = status?.ready === true;
     consentRow.hidden = ready;
     prepare.hidden = ready;
-    prepare.disabled = !ready && consent.checked !== true;
+    prepare.disabled = status?.preparing === true;
+    prepare.textContent = status?.preparing ? "正在准备…" : "一键准备";
     lines(status);
   }
 
@@ -1432,16 +1452,24 @@ export function openSemanticModal({ notify = () => {} } = {}) {
   enabled.onchange = async () => {
     showError("");
     try {
-      paint(await api.setSemantic(enabled.checked));
-      notify(enabled.checked ? "已开启语义检索" : "已关闭语义检索");
+      const status = await api.setSemantic(enabled.checked);
+      paint(status);
+      if (enabled.checked && status?.ready !== true) {
+        notify("已开启；组件未就绪时会先按关键词检索");
+      } else {
+        notify(enabled.checked ? "已开启语义检索" : "已关闭语义检索");
+      }
     } catch (failure) {
       enabled.checked = !enabled.checked;
       showError(errorText(failure));
     }
   };
-  consent.onchange = () => { prepare.disabled = !(consent.checked === true); };
+  consent.onchange = () => { showError(""); };
   prepare.onclick = async () => {
-    if (consent.checked !== true) return;
+    if (consent.checked !== true) {
+      showError("请先勾选上面的同意，再点「一键准备」。");
+      return;
+    }
     showError("");
     prepare.disabled = true;
     prepare.textContent = "正在准备…";
@@ -1466,12 +1494,12 @@ export function openSemanticModal({ notify = () => {} } = {}) {
       }
       prepare.textContent = "一键准备";
       if (job.status === "succeeded") {
-        notify("语义检索组件已就绪");
+        notify("组件与模型已就绪");
         await refresh();
         return;
       }
       showError(job.detail || "准备失败");
-      prepare.disabled = consent.checked !== true;
+      prepare.disabled = false;
       return;
     }
     prepare.textContent = "一键准备";
