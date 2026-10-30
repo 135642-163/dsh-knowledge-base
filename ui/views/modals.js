@@ -1474,8 +1474,14 @@ export function openSemanticModal({ notify = () => {} } = {}) {
     prepare.disabled = true;
     prepare.textContent = "正在准备…";
     try {
-      const { jobId } = await api.prepareSemantic();
-      await pollPrepare(jobId);
+      const response = await api.prepareSemantic();
+      if (response?.alreadyReady === true) {
+        notify("组件与模型已就绪，无需再准备");
+        await refresh();
+        return;
+      }
+      if (!response?.jobId) throw new Error("准备任务没有返回任务号，请重试");
+      await pollPrepare(response.jobId);
     } catch (failure) {
       showError(errorText(failure));
       prepare.textContent = "一键准备";

@@ -7,12 +7,23 @@ export function renderOverview(state, { icons, fmtNumber }) {
   const totalPages = state.kbs.reduce((sum, kb) => sum + (kb.pages ?? 0), 0);
   const totalChars = state.kbs.reduce((sum, kb) => sum + (kb.chars ?? 0), 0);
   const empty = state.kbs.filter((kb) => kb.docs.total === 0 || (kb.docs.ready + kb.docs.importing + kb.docs.failed) === 0).length;
+  const typeTotals = new Map();
+  for (const kb of state.kbs) {
+    for (const [type, value] of Object.entries(kb.types ?? {})) {
+      const count = Math.max(0, Number(value) || 0);
+      if (count > 0) typeTotals.set(type, (typeTotals.get(type) ?? 0) + count);
+    }
+  }
+  const typeEntries = [...typeTotals.entries()].sort((left, right) => right[1] - left[1]).slice(0, 6);
+  const typeSummary = typeEntries.length === 0 ? "" : `类型：${typeEntries
+    .map(([type, count]) => `${type} ${count}`).join(" · ")}${typeTotals.size > typeEntries.length ? ` · 等 ${typeTotals.size} 种` : ""}`;
   return `
     <section class="overview">
       <div class="overview-head">
         <div>
           <h1>知识库</h1>
           <p class="muted">${fmtNumber(state.kbs.length)} 个库 · ${fmtNumber(totalDocs)} 篇有效文档 · ${fmtNumber(totalNotes)} 篇笔记 · ${compact(totalPages)} 页 · ${compact(totalChars)} 字</p>
+          ${typeSummary ? `<p class="muted overview-types">${escapeHtml(typeSummary)}</p>` : ""}
           ${rootLine(state)}
         </div>
         <div class="head-actions">
@@ -75,7 +86,7 @@ function card(kb, { icons, fmtNumber }) {
         <span class="card-more">${icons.chevron}</span>
       </div>
       <p class="desc">${kb.description ? escapeHtml(kb.description) : `<span class="muted">未填写简介</span>`}</p>
-      ${typeLine(kb.types)}
+      ${tagRow(kb.tags)}
       <div class="stats">
         <span><strong>${fmtNumber(live)}</strong> 篇</span>
         <span><strong>${compact(kb.pages)}</strong> 页</span>
@@ -84,11 +95,9 @@ function card(kb, { icons, fmtNumber }) {
       </div>
       <div class="composition">
         ${trustBar(kb.trust)}
-        ${trustDots(kb.trust)}
       </div>
       <div class="card-foot muted">
         <span>${kb.updatedAt ? `更新 ${formatDate(kb.updatedAt)}` : "尚未更新"}</span>
-        ${(kb.tags ?? []).slice(0, 3).map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}
       </div>
     </article>
   `;
@@ -98,13 +107,15 @@ const TRUST_COLORS = { high: "#4f9d69", medium: "#c9a36a", low: "#b96a6a", unkno
 const TRUST_LABELS = { high: "高", medium: "中", low: "低", unknown: "未知" };
 const TRUST_LEVELS = ["high", "medium", "low", "unknown"];
 
-/** 文件类型数量（概括行）；用户主要关注可信度，类型退居次要位置。 */
-function typeLine(types = {}) {
-  const entries = Object.entries(types)
-    .map(([type, value]) => [type, Math.max(0, Number(value) || 0)])
-    .filter(([, value]) => value > 0);
-  if (entries.length === 0) return "";
-  return `<p class="type-line muted">类型：${entries.map(([type, value]) => `${escapeHtml(type)} ${value}`).join(" · ")}</p>`;
+/** 标签行：放在简介下、统计上方（比原来挤在卡片底部更显眼）。 */
+function tagRow(tags = []) {
+  const list = (Array.isArray(tags) ? tags : [])
+    .map((tag) => String(tag ?? "").trim())
+    .filter(Boolean);
+  if (list.length === 0) return "";
+  const shown = list.slice(0, 3);
+  const rest = list.length - shown.length;
+  return `<div class="tag-row">${shown.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}${rest > 0 ? `<span class="tag-more" title="${escapeAttr(list.join("、"))}">+${rest}</span>` : ""}</div>`;
 }
 
 /** 可信度构成条：绿/黄/红/灰四档，title 列出全部四项（含 0）。 */
@@ -118,23 +129,6 @@ function trustBar(trust = {}) {
   return `<div class="bar" role="img" title="${escapeAttr(title)}" aria-label="${escapeAttr(title)}">${entries
     .filter(([, value]) => value > 0)
     .map(([level, value]) => `<i style="width:${(value / total) * 100}%;background:${TRUST_COLORS[level]}"></i>`)
-    .join("")}</div>`;
-}
-
-/**
- * 可信度只保留紧凑圆点图例：非零项才渲染 `● N`。
- * 四项都为零时不占位（空库卡片只留空类型条）。
- */
-function trustDots(trust = {}) {
-  const entries = TRUST_LEVELS.map((level) => [level, Math.max(0, Number(trust[level]) || 0)]);
-  if (entries.every(([, value]) => value === 0)) return "";
-  const title = `可信度：${entries.map(([level, value]) => `${TRUST_LABELS[level]} ${value}`).join(" · ")}`;
-  return `<div class="trust-dots" role="group" title="${escapeAttr(title)}" aria-label="${escapeAttr(title)}"><span class="trust-label muted">可信度</span>${entries
-    .filter(([, value]) => value > 0)
-    .map(([level, value]) => {
-      const label = `${TRUST_LABELS[level]} ${value}`;
-      return `<span class="trust-dot" role="img" title="${escapeAttr(label)}" aria-label="${escapeAttr(`可信度：${label}`)}"><span class="trust-dot-mark" style="color:${TRUST_COLORS[level]}" aria-hidden="true">●</span>${value}</span>`;
-    })
     .join("")}</div>`;
 }
 

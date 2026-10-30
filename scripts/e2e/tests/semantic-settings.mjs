@@ -24,6 +24,15 @@ export async function run(ctx) {
     message: "勾选后开关应立即写入设置",
   });
   assert.match(await page.locator(".semantic-status").innerText(), /运行组件|模型/);
+  if (initial.ready) {
+    // 组件与模型齐全时不应再出现“同意/一键准备”，避免用户误以为还要下载。
+    assert.equal(await page.locator("[data-consent-row]").isVisible(), false);
+    assert.equal(await page.locator("[data-prepare]").isVisible(), false);
+  } else {
+    // 缺组件时，未勾选同意直接点“一键准备”必须给出提示，而不是没反应。
+    await page.locator("[data-prepare]").click();
+    await page.getByText("请先勾选上面的同意", { exact: false }).waitFor();
+  }
 
   await toggle.uncheck();
   await poll(async () => (await ctx.api.request("GET", "/semantic")).enabled === false, {

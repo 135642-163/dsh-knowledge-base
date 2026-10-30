@@ -159,6 +159,7 @@ export function renderDetail(state, current, { icons, fmtNumber }) {
             <h1>${escapeHtml(kb.name)}</h1>
             ${kb.status === "empty" ? `<span class="badge">空库</span>` : ""}
             ${statusBadges(kb, { interactiveFailed: true })}
+            ${kbTagChips(kb.tags)}
           </div>
           <p class="muted">${kb.description ? escapeHtml(kb.description) : "未填写简介"}</p>
         </div>
@@ -184,6 +185,17 @@ export function renderDetail(state, current, { icons, fmtNumber }) {
       ${tab === "settings" ? settings(kb) : ""}
     </section>
   `;
+}
+
+/** 知识库标签：显示在库名右侧（最多 5 个，其余 +N）。 */
+function kbTagChips(tags = []) {
+  const list = (Array.isArray(tags) ? tags : [])
+    .map((tag) => String(tag ?? "").trim())
+    .filter(Boolean);
+  if (list.length === 0) return "";
+  const shown = list.slice(0, 5);
+  const rest = list.length - shown.length;
+  return `<span class="kb-tags">${shown.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}${rest > 0 ? `<span class="tag-more" title="${escapeAttr(list.join("、"))}">+${rest}</span>` : ""}</span>`;
 }
 
 function tabLink(name, tab, label, active) {

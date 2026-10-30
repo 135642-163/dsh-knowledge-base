@@ -43,6 +43,7 @@ test("withStandardPrefix：补编号、去旧编号、幂等、无标准号不�
     withStandardPrefix("GB/T 20001.10-2014 标准编写规则", "GB/T 20001.10-2014"),
     "GB/T 20001.10-2014 标准编写规则",
   );
+  assert.equal(withStandardPrefix("DL 860.803-202X", "DL 860.803"), "DL 860.803-202X", "只剩年份时用连字符连接");
   assert.equal(withStandardPrefix("普通资料", ""), "普通资料");
   assert.equal(withStandardPrefix("GB/T 20001.10-2014", "GB/T 20001.10-2014"), "GB/T 20001.10-2014");
 });
@@ -53,6 +54,18 @@ test("kb_retitle + standardPrefix：批量预览与应用都补上标准号", as
     const kbRoot = join(root, "kb");
     const { dir } = await createKb(kbRoot, { name: "标准" });
     const manifest = JSON.parse(await readFile(join(dir, "kb.json"), "utf8"));
+    manifest.docs.push({
+      id: "d0",
+      title: "Power quality measurement in power supply systems - Part 1",
+      standardNo: "IEC 62586-1-2013",
+      type: "pdf-text",
+      status: "ready",
+      trust: "high",
+      pages: 10,
+      chars: 100,
+      version: 1,
+      updatedAt: "2026-10-01T00:00:00.000Z",
+    });
     manifest.docs.push({
       id: "d1",
       title: "标准编写规则 第10部分：产品标准",
@@ -73,6 +86,8 @@ test("kb_retitle + standardPrefix：批量预览与应用都补上标准号", as
       "utf8",
     );
     await writeFile(join(dir, "markdown", "d1", "parts", "0000.md"), "正文\n", "utf8");
+    await mkdir(join(dir, "markdown", "d0"), { recursive: true });
+    await writeFile(join(dir, "markdown", "d0", "d0.md"), "# Power quality measurement\n\n正文\n", "utf8");
 
     const { ctx, tools } = makeCtx();
     await apply(ctx, { kbRoot, defaultKb: "标准" });
@@ -80,7 +95,8 @@ test("kb_retitle + standardPrefix：批量预览与应用都补上标准号", as
 
     const preview = await retitle.execute({ kb: "标准", all: true, standardPrefix: true }, exec);
     assert.equal(preview.dryRun, true);
-    assert.equal(preview.changes.length, 1);
+    assert.equal(preview.changes.length, 1, "英文标题先不动");
+    assert.equal(preview.changes[0].docId, "d1");
     assert.equal(preview.changes[0].to, "GB/T 20001.10-2014 标准编写规则 第10部分：产品标准");
 
     const applied = await retitle.execute({ kb: "标准", all: true, standardPrefix: true, dryRun: false }, exec);

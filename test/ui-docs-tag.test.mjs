@@ -34,6 +34,15 @@ function render(docs) {
   return renderDetail(makeState(docs), current, { icons, fmtNumber });
 }
 
+test("知识库标签显示在库名右侧", () => {
+  const state = makeState();
+  state.detail.kb.tags = ["国家标准", "电能质量"];
+  const html = renderDetail(state, current, { icons, fmtNumber });
+  assert.match(html, /<h1>标准<\/h1>[\s\S]{0,400}class="kb-tags"/);
+  assert.match(html, /<span class="tag">国家标准<\/span>/);
+  assert.match(html, /<span class="tag">电能质量<\/span>/);
+});
+
 test("标签 select 渲染 facets 并选中当前标签", () => {
   const html = render({
     items: [makeDoc("a", ["并网"])], total: 1,
