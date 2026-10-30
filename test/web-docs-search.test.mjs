@@ -41,6 +41,19 @@ async function setup() {
       updatedAt: "2026-10-02T00:00:00.000Z",
     },
     {
+      id: "d-std",
+      title: "标准编写规则 第10部分：产品标准",
+      standardNo: "GB/T 20001.10-2014",
+      type: "pdf-text",
+      status: "ready",
+      trust: "high",
+      pages: 18,
+      chars: 15468,
+      summary: "产品标准的编写规则",
+      tags: ["国家标准"],
+      updatedAt: "2026-10-04T00:00:00.000Z",
+    },
+    {
       id: "d-gas",
       title: "SF6 断路器检修导则",
       type: "text",
@@ -78,6 +91,12 @@ test("query 命中摘要与标签，也能命中标题", async (t) => {
 
   const relay = await query(kbRoot, { query: "继电保护" });
   assert.deepEqual(relay.ids, ["d-relay"]);
+
+  // 0.31.3：资料列表搜索也命中标准号（标题里没有编号时同样可搜）
+  const byStandardNo = await query(kbRoot, { query: "GB/T 20001.10" });
+  assert.deepEqual(byStandardNo.ids, ["d-std"]);
+  const byStandardNoLoose = await query(kbRoot, { query: "gbt 20001" });
+  assert.deepEqual(byStandardNoLoose.ids, [], "资料列表是纯文本包含匹配，不做标准号归一");
 });
 
 test("query 不区分大小写", async (t) => {
@@ -119,7 +138,7 @@ test("搜索与状态/可信度/类型过滤、排序和分页共存", async (t)
   assert.deepEqual(readyAll.ids, ["d-oil"]);
 
   const page = await query(kbRoot, { offset: 1, limit: 1 });
-  assert.equal(page.total, 3);
+  assert.equal(page.total, 4);
   assert.equal(page.offset, 1);
   assert.equal(page.limit, 1);
   assert.equal(page.docs.length, 1);
@@ -127,5 +146,5 @@ test("搜索与状态/可信度/类型过滤、排序和分页共存", async (t)
   const clamped = await query(kbRoot, { offset: -5, limit: 9999 });
   assert.equal(clamped.offset, 0);
   assert.equal(clamped.limit, 200);
-  assert.equal(clamped.docs.length, 3);
+  assert.equal(clamped.docs.length, 4);
 });

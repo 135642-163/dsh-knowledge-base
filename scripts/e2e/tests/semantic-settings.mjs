@@ -16,8 +16,8 @@ export async function run(ctx) {
   assert.equal(initial.preparing, false);
 
   const page = await ctx.goto("/kb/#/");
-  await page.locator("[data-action=semantic-settings]").click();
-  await page.getByText("检索设置").waitFor();
+  await page.locator(".side-foot [data-action=semantic-settings]").click();
+  await page.locator(".semantic-settings h2").waitFor();
   const toggle = page.locator("[name=semantic-enabled]");
   await toggle.check();
   await poll(async () => (await ctx.api.request("GET", "/semantic")).enabled === true, {

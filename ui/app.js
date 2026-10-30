@@ -1068,6 +1068,7 @@ function render() {
         <div class="side-foot">
           <button class="side-action" data-action="create-kb">${icons.plus}<span>新建知识库</span></button>
           <a class="side-action ${current.page === "search" ? "active" : ""}" href="${hrefForSearch({})}">${icons.search}<span>全文搜索</span></a>
+          <button class="side-action" data-action="semantic-settings">${icons.search}<span>检索设置</span></button>
           <a class="side-action" href="${hrefForTrash()}">${icons.archive}<span>回收站</span></a>
           <a class="side-action subtle" href="/kb/" target="_blank" rel="noreferrer">${icons.external}<span>在新标签打开</span></a>
         </div>

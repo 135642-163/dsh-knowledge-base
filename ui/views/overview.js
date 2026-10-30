@@ -28,7 +28,7 @@ export function renderOverview(state, { icons, fmtNumber }) {
           </div>
           <label class="search">
             ${icons.search}
-            <input data-filter="query" value="${escapeAttr(state.query)}" placeholder="搜索名称、简介或标签" />
+            <input data-filter="query" value="${escapeAttr(state.query)}" placeholder="搜索名称、摘要、标准号或标签" />
           </label>
         </div>
       </div>
