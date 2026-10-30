@@ -223,6 +223,15 @@ function overview(kb, detail, { fmtNumber }) {
         <div class="kv"><span>文字层损坏</span><strong>${fmtNumber(detail.health.corruptedDocs)}</strong></div>
         <div class="kv"><span>schema.md</span><strong>${detail.health.hasSchema ? "有" : "无"}</strong></div>
       </div>
+      <div class="panel">
+        <h3>文件类型</h3>
+        ${Object.entries(kb.types ?? {})
+          .map(([type, value]) => [type, Math.max(0, Number(value) || 0)])
+          .filter(([, value]) => value > 0)
+          .sort((left, right) => right[1] - left[1])
+          .map(([type, value]) => `<div class="kv"><span>${escapeHtml(type)}</span><strong>${fmtNumber(value)}</strong></div>`)
+          .join("") || `<p class="muted">还没有资料</p>`}
+      </div>
       <div class="panel wide">
         <h3>最近资料</h3>
         ${detail.recentDocs.length === 0 ? `<p class="muted">还没有资料</p>` : `
@@ -383,7 +392,7 @@ function docsToolbar({ query, limit, status, tag = "", facets = { tags: [] }, de
       </div>
       <label class="search docs-search">
         ${icons?.search ?? ""}
-        <input type="search" data-docs-query value="${escapeAttr(query)}" placeholder="搜索标题、摘要或标签…" aria-label="搜索资料" autocomplete="off" />
+        <input type="search" data-docs-query value="${escapeAttr(query)}" placeholder="搜索标题、摘要、标准号或标签…" aria-label="搜索资料" autocomplete="off" />
       </label>
       ${tags.length > 0 || tag !== "" ? `
         <label class="docs-tag-filter">

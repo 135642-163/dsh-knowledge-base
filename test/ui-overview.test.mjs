@@ -45,16 +45,18 @@ function cssRule(selector) {
     .match(new RegExp(`(?:^|\\n)\\s*${escaped}\\s*\\{([^}]*)\\}`))?.[1] ?? "";
 }
 
-test("概览页头汇总文件类型（跨库合计，不再放进卡片）", () => {
+test("总览不再显示文件类型；标签行无论有无标签都占位，保证彩色条对齐", () => {
   const html = render([
-    makeKb({ name: "标准", types: { "pdf-scanned": 3, docx: 2 } }),
-    makeKb({ name: "电能质量", types: { "pdf-scanned": 4, "pdf-text": 1 } }),
+    makeKb({ name: "标准", tags: ["国家标准", "电能质量"] }),
+    makeKb({ name: "历史", tags: [] }),
   ]);
-  assert.match(html, /class="muted overview-types"/);
-  assert.match(html, /类型：pdf-scanned 7 · docx 2 · pdf-text 1/);
-  // 卡片里不再有「类型：」小字
-  assert.equal((html.match(/class="tag-row"/g) ?? []).length, 2);
-  assert.doesNotMatch(html, /<p class="type-line/);
+  assert.doesNotMatch(html, /overview-types/);
+  assert.doesNotMatch(html, /<p class="muted">类型：/);
+  assert.equal((html.match(/class="tag-row"/g) ?? []).length, 2, "每张卡片都保留标签行");
+  assert.match(html, /<div class="tag-row"><span class="tag">国家标准<\/span>/);
+  assert.match(html, /<div class="tag-row"><\/div>/, "无标签时也渲染空行占位");
+  assert.match(cssRule(".tag-row"), /min-height:\s*20px/);
+  assert.match(html, /placeholder="搜索名称、简介或标签"/);
 });
 
 test("卡片彩色条画可信度；标签移到简介下方，底部只留更新时间", () => {
@@ -106,7 +108,7 @@ test("空库：空库徽标 + 空可信度条，不渲染标签行", () => {
   assert.match(html, /<span class="badge">空库<\/span>/);
   assert.match(html, /class="bar empty"/);
   assert.equal(segments(html).length, 0);
-  assert.doesNotMatch(html, /class="tag-row"|overview-types/);
+  assert.match(html, /<div class="tag-row"><\/div>/, "空库也保留标签行占位");
 });
 
 test("知识库名称与标签都做 HTML 转义", () => {
@@ -129,7 +131,8 @@ test("样式约定：可信度条连续、类型概览/标签行各就各位、h
   assert.match(segment, /border-radius:\s*0/);
   assert.match(cssRule(".bar.empty i"), /background:\s*var\(--line\)/);
   assert.match(cssRule(".tag-row"), /display:\s*flex/);
-  assert.match(cssRule(".overview-types"), /font-size:\s*12px/);
+  assert.match(cssRule(".tag-row"), /min-height:\s*20px/);
+  assert.doesNotMatch(css, /\.overview-types/);
   assert.match(css, /\[hidden\]\s*\{\s*display:\s*none\s*!important;?\s*\}/);
 });
 

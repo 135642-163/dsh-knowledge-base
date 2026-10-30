@@ -52,7 +52,7 @@ function render(docs) {
 test("资料工具栏渲染搜索框、每页条数和顶部/底部分页", () => {
   const html = render({ items: [makeDoc("a1"), makeDoc("a2")], total: 120, offset: 0, limit: 50 });
   assert.match(html, /data-docs-query/);
-  assert.match(html, /placeholder="搜索标题、摘要或标签…"/);
+  assert.match(html, /placeholder="搜索标题、摘要、标准号或标签…"/);
   assert.match(html, /<select data-docs-size/);
   assert.match(html, /<option value="50" selected>50<\/option>/);
   assert.match(html, /<option value="100">100<\/option>/);

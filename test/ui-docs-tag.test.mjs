@@ -34,6 +34,15 @@ function render(docs) {
   return renderDetail(makeState(docs), current, { icons, fmtNumber });
 }
 
+test("知识库概览展示文件类型分布", () => {
+  const state = makeState();
+  state.detail.kb.types = { "pdf-scanned": 3, docx: 1 };
+  const html = renderDetail(state, { page: "detail", name: "标准", tab: "overview" }, { icons, fmtNumber });
+  assert.match(html, /<h3>文件类型<\/h3>/);
+  assert.match(html, /<span>pdf-scanned<\/span><strong>3<\/strong>/);
+  assert.match(html, /<span>docx<\/span><strong>1<\/strong>/);
+});
+
 test("知识库标签显示在库名右侧", () => {
   const state = makeState();
   state.detail.kb.tags = ["国家标准", "电能质量"];

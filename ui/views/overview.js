@@ -7,23 +7,12 @@ export function renderOverview(state, { icons, fmtNumber }) {
   const totalPages = state.kbs.reduce((sum, kb) => sum + (kb.pages ?? 0), 0);
   const totalChars = state.kbs.reduce((sum, kb) => sum + (kb.chars ?? 0), 0);
   const empty = state.kbs.filter((kb) => kb.docs.total === 0 || (kb.docs.ready + kb.docs.importing + kb.docs.failed) === 0).length;
-  const typeTotals = new Map();
-  for (const kb of state.kbs) {
-    for (const [type, value] of Object.entries(kb.types ?? {})) {
-      const count = Math.max(0, Number(value) || 0);
-      if (count > 0) typeTotals.set(type, (typeTotals.get(type) ?? 0) + count);
-    }
-  }
-  const typeEntries = [...typeTotals.entries()].sort((left, right) => right[1] - left[1]).slice(0, 6);
-  const typeSummary = typeEntries.length === 0 ? "" : `类型：${typeEntries
-    .map(([type, count]) => `${type} ${count}`).join(" · ")}${typeTotals.size > typeEntries.length ? ` · 等 ${typeTotals.size} 种` : ""}`;
   return `
     <section class="overview">
       <div class="overview-head">
         <div>
           <h1>知识库</h1>
           <p class="muted">${fmtNumber(state.kbs.length)} 个库 · ${fmtNumber(totalDocs)} 篇有效文档 · ${fmtNumber(totalNotes)} 篇笔记 · ${compact(totalPages)} 页 · ${compact(totalChars)} 字</p>
-          ${typeSummary ? `<p class="muted overview-types">${escapeHtml(typeSummary)}</p>` : ""}
           ${rootLine(state)}
         </div>
         <div class="head-actions">
@@ -39,7 +28,7 @@ export function renderOverview(state, { icons, fmtNumber }) {
           </div>
           <label class="search">
             ${icons.search}
-            <input data-filter="query" value="${escapeAttr(state.query)}" placeholder="搜索名称、摘要、标准号或标签" />
+            <input data-filter="query" value="${escapeAttr(state.query)}" placeholder="搜索名称、简介或标签" />
           </label>
         </div>
       </div>
@@ -112,7 +101,6 @@ function tagRow(tags = []) {
   const list = (Array.isArray(tags) ? tags : [])
     .map((tag) => String(tag ?? "").trim())
     .filter(Boolean);
-  if (list.length === 0) return "";
   const shown = list.slice(0, 3);
   const rest = list.length - shown.length;
   return `<div class="tag-row">${shown.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}${rest > 0 ? `<span class="tag-more" title="${escapeAttr(list.join("、"))}">+${rest}</span>` : ""}</div>`;

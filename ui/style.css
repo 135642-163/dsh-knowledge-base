@@ -120,8 +120,7 @@ button { font: inherit; color: inherit; }
 .overview-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 18px; flex-wrap: wrap; }
 .overview-head h1 { margin: 0 0 6px; font-size: 24px; }
 .root-line { margin: 6px 0 0; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.overview-types { margin: 4px 0 0; font-size: 12px; }
-.tag-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: -2px 0 0; }
+.tag-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: -2px 0 0; min-height: 20px; }
 .tag-row .tag { font-size: 11px; }
 .root-path { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; padding: 1px 6px; border-radius: 5px; background: var(--panel-2); color: var(--text); word-break: break-all; }
 .filters { display: flex; align-items: center; gap: 10px; }
