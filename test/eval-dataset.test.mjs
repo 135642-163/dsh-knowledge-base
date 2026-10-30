@@ -63,3 +63,38 @@ test("同一题内的 expected 不重复", () => {
     assert.equal(new Set(keys).size, keys.length, `${item.id} 期望重复`);
   }
 });
+
+test("0.30 独立同义题集：20 题、全 paraphrase、id/字段完整", async () => {
+  const text = await readFile(new URL("../scripts/eval/questions-2026-10-30-paraphrase.jsonl", import.meta.url), "utf8");
+  const items = parseLines(text);
+  assert.equal(items.length, 20);
+  const ids = new Set();
+  const questions = new Set();
+  for (const item of items) {
+    assert.match(item.id, /^N\d{2}$/);
+    assert.equal(item.group, "paraphrase");
+    assert.ok(!ids.has(item.id), `id 重复：${item.id}`);
+    ids.add(item.id);
+    assert.ok(item.q.trim().length >= 6, `${item.id} 问题过短`);
+    assert.ok(!questions.has(item.q), `问题重复：${item.q}`);
+    questions.add(item.q);
+    assert.match(item.note, /独立同义改写/);
+    assert.equal(item.expected.length, 1, `${item.id} 独立同义题应为单文档期望`);
+    const exp = item.expected[0];
+    assert.equal(exp.kb, "标准");
+    assert.match(String(exp.docId), /^[0-9a-f]{12}$/);
+    assert.ok(Number.isInteger(exp.page) && exp.page >= 1);
+    assert.ok(String(exp.clause).length > 0);
+  }
+});
+
+test("0.30 与 0.27 两套题集 id 不冲突、问题不重复", async () => {
+  const text = await readFile(new URL("../scripts/eval/questions-2026-10-30-paraphrase.jsonl", import.meta.url), "utf8");
+  const extra = parseLines(text);
+  const ids = new Set(items.map((item) => item.id));
+  const questions = new Set(items.map((item) => item.q));
+  for (const item of extra) {
+    assert.ok(!ids.has(item.id), `id 冲突：${item.id}`);
+    assert.ok(!questions.has(item.q), `问题重复：${item.q}`);
+  }
+});

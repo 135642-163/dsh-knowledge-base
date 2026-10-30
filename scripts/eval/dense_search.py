@@ -31,6 +31,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--in", dest="dir", default="/tmp/kb-eval-029")
     parser.add_argument("--corpus", default="", help="queries.json 所在目录（默认同 --in）")
+    parser.add_argument("--queries-vectors", default="", help="只含 queries.f32 的目录（默认同 --in，用于复用条款向量）")
     parser.add_argument("--topk", type=int, default=200)
     parser.add_argument("--out", default="")
     args = parser.parse_args()
@@ -39,7 +40,14 @@ def main():
         meta = json.load(handle)
     count, dim = int(meta["clauses"]), int(meta["dim"])
     clauses = load_matrix(os.path.join(args.dir, "clauses.f32"), count, dim)
-    queries = load_matrix(os.path.join(args.dir, "queries.f32"), int(meta["queries"]), int(meta["queryDim"]))
+    query_dir = args.queries_vectors or args.dir
+    if query_dir != args.dir:
+        with open(os.path.join(query_dir, "queries.meta.json"), "r", encoding="utf-8") as handle:
+            query_meta = json.load(handle)
+        query_count, query_dim = int(query_meta["queries"]), int(query_meta["dim"])
+    else:
+        query_count, query_dim = int(meta["queries"]), int(meta["queryDim"])
+    queries = load_matrix(os.path.join(query_dir, "queries.f32"), query_count, query_dim)
     corpus_dir = args.corpus or args.dir
     with open(os.path.join(corpus_dir, "queries.json"), "r", encoding="utf-8") as handle:
         question_ids = [item["id"] for item in json.load(handle)]

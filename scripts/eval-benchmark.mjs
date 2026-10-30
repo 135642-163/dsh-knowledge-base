@@ -36,7 +36,7 @@ const GROUP_LABEL = {
 };
 
 function parseArgs(argv) {
-  const options = { dir: DEFAULT_DIR, questions: DEFAULT_QUESTIONS, out: "", vectors: "", validate: false };
+  const options = { dir: DEFAULT_DIR, questions: DEFAULT_QUESTIONS, out: "", vectors: "", docVectors: "", validate: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--validate") options.validate = true;
@@ -44,17 +44,20 @@ function parseArgs(argv) {
     else if (arg === "--questions") options.questions = argv[++i];
     else if (arg === "--out") options.out = argv[++i];
     else if (arg === "--vectors") options.vectors = argv[++i];
+    else if (arg === "--doc-vectors") options.docVectors = argv[++i];
     else if (arg === "--help" || arg === "-h") options.help = true;
   }
   return options;
 }
 
-async function loadQuestions(path) {
-  const text = await readFile(path, "utf8");
+async function loadQuestions(paths) {
   const items = [];
-  for (const line of text.split("\n")) {
-    if (line.trim() === "") continue;
-    items.push(JSON.parse(line));
+  for (const path of String(paths ?? "").split(",").map((part) => part.trim()).filter(Boolean)) {
+    const text = await readFile(path, "utf8");
+    for (const line of text.split("\n")) {
+      if (line.trim() === "") continue;
+      items.push(JSON.parse(line));
+    }
   }
   return items;
 }
@@ -252,9 +255,12 @@ async function validateQuestions({ dir, manifest, docs, questions, db }) {
       if (exp.kb !== "标准") problems.push(`${item?.id} expected.kb 应为「标准」`);
     }
   }
-  const expectedCounts = { clause: 20, "multi-doc": 15, numeric: 15, paraphrase: 10 };
-  for (const [group, count] of Object.entries(expectedCounts)) {
-    if (groups[group] !== count) problems.push(`分组 ${group} 应为 ${count} 题，实际 ${groups[group]}`);
+  // 60 题主集严格校验分组配比；补充集（如 0.30 的 20 条独立同义题）只校验分组合法。
+  if (questions.length === 60) {
+    const expectedCounts = { clause: 20, "multi-doc": 15, numeric: 15, paraphrase: 10 };
+    for (const [group, count] of Object.entries(expectedCounts)) {
+      if (groups[group] !== count) problems.push(`分组 ${group} 应为 ${count} 题，实际 ${groups[group]}`);
+    }
   }
   return { problems, groups, total: questions.length, docs: manifest.docs.length, dir };
 }
@@ -294,12 +300,39 @@ function clauseInfoFor(db, ids) {
   return map;
 }
 
-function buildReport({ dir, questions, manifest, variants, orderedKeys, denseMeta, indexSizeMb, generatedAt }) {
+/** 读取文档级 dense 产物：dense.json + docs.jsonl（行号 → docId）。 */
+async function loadDocDense(dir, questions) {
+  if (!dir) return null;
+  let payload;
+  let mapping;
+  let meta;
+  try {
+    payload = JSON.parse(await readFile(join(dir, "dense.json"), "utf8"));
+    meta = JSON.parse(await readFile(join(dir, "meta.json"), "utf8"));
+    const lines = (await readFile(join(dir, "docs.jsonl"), "utf8")).split("\n").filter((line) => line.trim() !== "");
+    mapping = new Map(lines.map((line) => {
+      const row = JSON.parse(line);
+      return [row.id, row.docId];
+    }));
+  } catch {
+    return null;
+  }
+  const byId = new Map(payload.results.map((row) => [row.queryId, row]));
+  const ordered = questions.map((question) => byId.get(question.id)).filter(Boolean);
+  if (ordered.length !== questions.length) return null;
+  return { meta: { ...meta, ...payload.meta }, results: ordered, mapping };
+}
+
+function buildReport({ dir, questions, manifest, variants, orderedKeys, denseMeta, docMeta, indexSizeMb, generatedAt }) {
   const hybrid = Boolean(denseMeta);
   const lines = [];
   lines.push(`# ${hybrid ? "0.29 混合检索基准" : "0.27 检索基准"}：60 条人工问题（${orderedKeys.join("/")}）`, "");
   lines.push("> 自动生成：`node scripts/eval-benchmark.mjs`。只读评测，不写清单、不改索引。", "");
   lines.push(`- 语料：\`${dir}\`（${manifest.docs.length} 篇，FTS 索引 ${indexSizeMb.toFixed(0)} MB）`);
+  if (docMeta) {
+    const docMb = docMeta.bytes / (1024 * 1024);
+    lines.push(`- 文档级语义索引：${docMeta.model}（dim ${docMeta.dim}，${docMeta.docs} 篇文档向量，${docMb.toFixed(1)} MB）——建索引约 ${(docMeta.clauseSeconds ?? 0).toFixed(0)}s，比条款级便宜两个数量级`);
+  }
   if (hybrid) {
     const mb = denseMeta.bytes / (1024 * 1024);
     const perThousand = mb / Math.max(1, manifest.docs.length) * 1000;
@@ -319,6 +352,11 @@ function buildReport({ dir, questions, manifest, variants, orderedKeys, denseMet
     lines.push(`- **D dense 条款**：${denseMeta.model} 余弦相似度取 top-${denseMeta.topk ?? "K"} 条款，按最高分文档去重（纯语义，不看词面）。`);
     lines.push("- **E 条款级 RRF**：FTS 条款序（top-200）+ dense 条款序（top-K）做倒数排名融合（k=60），再按文档去重取前 10。");
     lines.push("- **F 文档级 RRF**：B 的 boost 文档序（top-50）+ dense 文档序（top-50）融合（k=20）——更保守的混合，看能否只补召回不伤精度。");
+  }
+  if (docMeta) {
+    lines.push(`- **G 纯文档 dense**：${docMeta.model} 文档向量（标题+标准号+标签+摘要+首段）余弦 top-10；没有页码信息。`);
+    lines.push("- **H 文档 RRF**：B 的 boost 文档序（top-50）+ 文档 dense 序（top-50）融合（k=20）；页码只来自 B 的条款命中。");
+    lines.push("- **J Oracle 路由**：同义改写题走 H、其余走 B——评估「路由完全正确」时的上界，不代表可实现的线上效果。");
   }
   lines.push("");
   lines.push("## 总表", "");
@@ -357,7 +395,7 @@ function buildReport({ dir, questions, manifest, variants, orderedKeys, denseMet
     lines.push(`| ${item.id} | ${GROUP_LABEL[item.group] ?? item.group} | ${String(item.q).replace(/\|/g, "\\|")} | ${expected} | ${ranks.join(" | ")} | ${b?.pageHits ?? 0}/${b?.expectedDocs ?? 0} |${hybrid ? ` ${e?.pageHits ?? 0}/${e?.expectedDocs ?? 0} |` : ""} ${b ? b.elapsedMs.toFixed(1) : "—"} |`);
   }
   lines.push("");
-  for (const key of hybrid ? ["B", "E"] : ["B"]) {
+  for (const key of ["B", ...(hybrid ? ["E"] : []), ...(docMeta ? ["H"] : [])]) {
     lines.push(`## 坏例分析（${key} 变体）`, "");
     const misses = variants[key].results
       .filter((item) => item.docRank === 0 || item.docRank > 3)
@@ -395,8 +433,22 @@ function buildReport({ dir, questions, manifest, variants, orderedKeys, denseMet
     lines.push(`- E（RRF 混合）相对 B：Doc Recall ${formatPercent(b.docRecall)} → ${formatPercent(e.docRecall)}，Page Recall ${formatPercent(b.pageRecall)} → ${formatPercent(e.pageRecall)}，MRR ${b.mrr.toFixed(3)} → ${e.mrr.toFixed(3)}，p95 ${e.p95.toFixed(0)}ms。`);
     const f = variants.F.summary;
     const paraF = groupSummary("F", "paraphrase");
-    lines.push(`- 同义改写组：B ${formatPercent(paraB.docRecall)} / D ${formatPercent(paraD.docRecall)} / E ${formatPercent(paraE.docRecall)} / F ${formatPercent(paraF.docRecall)}（Doc Recall@${TOP_K}）——这是 0.29 的核心判据。`);
+    const paraList = [`B ${formatPercent(paraB.docRecall)}`, `D ${formatPercent(paraD.docRecall)}`, `E ${formatPercent(paraE.docRecall)}`, `F ${formatPercent(paraF.docRecall)}`];
+    if (docMeta) {
+      paraList.push(`G ${formatPercent(groupSummary("G", "paraphrase").docRecall)}`, `H ${formatPercent(groupSummary("H", "paraphrase").docRecall)}`);
+    }
+    lines.push(`- 同义改写组 Doc Recall@${TOP_K}：${paraList.join(" / ")}——这是混合检索的核心判据。`);
     lines.push(`- F（文档级 RRF）相对 B：Doc Recall ${formatPercent(b.docRecall)} → ${formatPercent(f.docRecall)}，MRR ${b.mrr.toFixed(3)} → ${f.mrr.toFixed(3)}，p95 ${f.p95.toFixed(0)}ms。`);
+    if (docMeta) {
+      const g = variants.G.summary;
+      const h = variants.H.summary;
+      const j = variants.J.summary;
+      const paraH = groupSummary("H", "paraphrase");
+      const paraB2 = groupSummary("B", "paraphrase");
+      lines.push(`- G（纯文档 dense，${docMeta.docs} 篇 / ${(docMeta.bytes / (1024 * 1024)).toFixed(1)}MB）：Doc Recall ${formatPercent(g.docRecall)}，MRR ${g.mrr.toFixed(3)}，p95 ${g.p95.toFixed(0)}ms——文档级检索找不到页码，Page Recall 记 0。`);
+      lines.push(`- H（文档 RRF）相对 B：Doc Recall ${formatPercent(b.docRecall)} → ${formatPercent(h.docRecall)}，MRR ${b.mrr.toFixed(3)} → ${h.mrr.toFixed(3)}；同义改写组 ${formatPercent(paraB2.docRecall)} → ${formatPercent(paraH.docRecall)}，同组 MRR ${paraB2.mrr.toFixed(3)} → ${paraH.mrr.toFixed(3)}。`);
+      lines.push(`- J（Oracle 路由上界）：Doc Recall ${formatPercent(j.docRecall)}，MRR ${j.mrr.toFixed(3)}；这是「路由完全正确」时的上限，需要额外的意图判断才可能接近。`);
+    }
     const pass = (e.docRecall - b.docRecall) >= 0.10 && e.p95 < 500 && perThousand < 200;
     lines.push(`- 门槛（0.27 spec §8.5：Doc Recall +10pp、p95 < 500ms、索引 < 200MB/千篇）→ ${pass ? "达标" : "未完全达标"}（体积约 ${perThousand.toFixed(0)} MB/千篇）。`);
     lines.push("- 本轮只做离线评测，不改生产检索；是否把 embedding/RRF 接入 `kb_query` 与工作台留待 0.30，并按本报告的瓶颈（体积/延迟/中文同义词覆盖）决定量化与索引策略。");
@@ -410,7 +462,7 @@ function buildReport({ dir, questions, manifest, variants, orderedKeys, denseMet
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   if (options.help) {
-    process.stdout.write("node scripts/eval-benchmark.mjs [--validate] [--dir <kb>] [--questions <jsonl>] [--vectors <dir>] [--out <md>]\n");
+    process.stdout.write("node scripts/eval-benchmark.mjs [--validate] [--dir <kb>] [--questions <jsonl>] [--vectors <dir>] [--doc-vectors <dir>] [--out <md>]\n");
     return;
   }
   const vectorsDir = options.vectors;
@@ -441,6 +493,7 @@ async function main() {
     await ripgrepRows(rgPath, markdownDir, options.dir, fbManifest, { pattern: "电压偏差", query: "电压偏差" });
 
     const dense = await loadDense(vectorsDir, questions);
+    const docDense = await loadDocDense(options.docVectors, questions);
     let clauseInfo = new Map();
     if (dense) {
       const ids = new Set();
@@ -453,6 +506,10 @@ async function main() {
       results.D = [];
       results.E = [];
       results.F = [];
+    }
+    if (docDense) {
+      results.G = [];
+      results.H = [];
     }
     for (let index = 0; index < questions.length; index += 1) {
       const question = questions[index];
@@ -563,9 +620,49 @@ async function main() {
           elapsedMs: aElapsed + denseRow.tookMs + queryEmbedMs + fFusionMs,
         }));
       }
+
+      if (docDense) {
+        const docRow = docDense.results[index];
+        const queryEmbedMs = (Number(docDense.meta.querySeconds) || 0) * 1000
+          / Math.max(1, Number(docDense.meta.queries) || questions.length);
+        // G：纯文档级 dense（911 篇，秒级建索引）；没有页码信息 → 只影响 Doc Recall
+        const docIds = docRow.hits
+          .map((hit) => docDense.mapping.get(hit.id))
+          .filter((docId) => typeof docId === "string" && docId !== "");
+        results.G.push(scoreQuestion(question, {
+          docOrder: docIds.slice(0, TOP_K),
+          pages: new Map(),
+          elapsedMs: queryEmbedMs + docRow.tookMs,
+        }));
+
+        // H：文档级 RRF（B 的 boost 文档序 + 文档级 dense 序），页码只来自 B 的条款命中
+        const hStarted = performance.now();
+        const fusedDocs2 = rrfFuse({
+          lexical: ranked.slice(0, 50).map((row) => row.docId),
+          dense: docIds.slice(0, 50),
+          k: 20,
+        });
+        const hPages = new Map();
+        for (const [docId, entries] of pagesByDoc(hits)) hPages.set(docId, [...entries]);
+        const hFusionMs = performance.now() - hStarted;
+        results.H.push(scoreQuestion(question, {
+          docOrder: fusedDocs2.slice(0, TOP_K).map((entry) => entry.id),
+          pages: hPages,
+          elapsedMs: aElapsed + queryEmbedMs + docRow.tookMs + hFusionMs,
+        }));
+      }
     }
 
-    const orderedKeys = dense ? ["A", "B", "C", "C1", "D", "E", "F"] : ["A", "B", "C", "C1"];
+    if (docDense) {
+      // J：Oracle 路由——同义改写题走 H，其余走 B；用来评估「路由正确时」的上界。
+      results.J = questions.map((question, index) => ({
+        ...(question.group === "paraphrase" ? results.H[index] : results.B[index]),
+      }));
+    }
+
+    const orderedKeys = ["A", "B", "C", "C1"];
+    if (dense) orderedKeys.push("D", "E", "F");
+    if (docDense) orderedKeys.push("G", "H", "J");
     const variants = {
       A: { label: "当前 FTS", results: results.A, summary: summarize(results.A) },
       B: { label: "FTS + boost", results: results.B, summary: summarize(results.B) },
@@ -577,6 +674,11 @@ async function main() {
       variants.E = { label: "RRF(FTS, dense; k=60)", results: results.E, summary: summarize(results.E) };
       variants.F = { label: "文档级 RRF(B 文档序, dense 文档序; k=20)", results: results.F, summary: summarize(results.F) };
     }
+    if (docDense) {
+      variants.G = { label: `dense 文档（${docDense.meta.model}，911 篇）`, results: results.G, summary: summarize(results.G) };
+      variants.H = { label: "文档级 RRF(B 文档序, 文档 dense 序; k=20)", results: results.H, summary: summarize(results.H) };
+      variants.J = { label: "Oracle 路由（同义改写→H，其余→B）", results: results.J, summary: summarize(results.J) };
+    }
     const indexStat = await stat(join(options.dir, ".index", "fts.sqlite"));
     const report = buildReport({
       dir: options.dir,
@@ -585,6 +687,7 @@ async function main() {
       variants,
       orderedKeys,
       denseMeta: dense ? { ...dense.meta, topk: dense.meta.topk } : null,
+      docMeta: docDense ? { ...docDense.meta, docs: docDense.mapping.size } : null,
       indexSizeMb: indexStat.size / (1024 * 1024),
       generatedAt: new Date().toISOString(),
     });
