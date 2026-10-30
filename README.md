@@ -263,6 +263,25 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
 - `docs/specs/2026-10-25-retrieval-eval.md` 是机制回归（查询取条款原文开头 28 字），不是人工语义评测。
 
 
+## 0.31.2 工作台「检索设置」：语义开关与一键准备
+
+**不用改 YAML 了**：工作台右上角新增「设置」按钮：
+
+- 勾选「启用语义检索」**立即生效**（写入 `<kbRoot>/.semantic.json`，0600，覆盖配置里的
+  `semanticSearch` 默认值），不加载模型；取消勾选后检索路径完全回到 0.30。
+- 面板显示三行状态：**运行组件**（可选依赖是否可解析）、**模型**（3 个文件是否齐全）、
+  **索引**（就绪篇数 / 缺失原因）。
+- 未准备时出现「**一键准备（约 390MB）**」：勾选同意后后台执行
+  ① `npm i --no-save --save-peer onnxruntime-node@^1.31.1 @huggingface/tokenizers@^0.2.0`（插件目录）；
+  ② 下载 `model.onnx` / `tokenizer.json` / `tokenizer_config.json` 到
+  `~/.dsh/tools/models/bge-small-zh-v1.5`（HuggingFace 失败自动回退 hf-mirror；
+  可用 `SEMANTIC_MODEL_BASE_URL` 指定镜像或代理地址）。进度显示在面板里，完成后开开关即用。
+- 终端入口仍保留：`npm run semantic:setup`（= 装依赖 + 下模型，已就绪时直接返回）。
+- API：`GET/PUT /kb/api/semantic`、`POST /kb/api/semantic/prepare`（必须 `{confirm:true}`）。
+
+**已知限制（0.31.2）**：自动准备需要 `npm` 在 PATH、约 390MB 磁盘与可用网络；准备任务不可中途取消
+（完成后可关开关）；插件升级或 `npm install` 可能清掉可选依赖，重新打开面板点一次「一键准备」即可。
+
 ## 0.31.1 知识库路径自检与真实延迟复测
 
 - **指定知识库目录更宽容**：`kbRoot` 现在支持 `~`、`~/`、Windows 的 `~\`、`$HOME`、`${HOME}`、
@@ -290,7 +309,10 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
 - **默认 `semanticSearch=off`**：关闭时行为与 0.30 完全一致（golden 对比测试逐字段校验），
   不加载模型、不读写向量索引。
 
-**如何开启（三步）**
+**如何开启**
+
+0.31.2 起：工作台右上角「设置」→ 勾选「启用语义检索」；未准备时先点「一键准备（约 390MB）」。
+也可以手动三步：
 
 1. 在插件目录装可选依赖（见下「打包策略」）；模型放 `~/.dsh/tools/models/bge-small-zh-v1.5/`；
 2. 在 profile 的 `cordis.patch.yml` 里给 `id: knowledge-wiki` 加 `semanticSearch: on`
@@ -1220,7 +1242,7 @@ curl -s http://127.0.0.1:<dsh 端口>/kb/api/status            # 返回里有 kb
 | --- | --- | --- |
 | `kbRoot` | `~/.dsh/knowledge` | 知识库根目录（怎么改见「指定知识库目录（kbRoot）」） |
 | `defaultKb` | `default` | 未指定 kb 时的默认知识库 |
-| `semanticSearch` | `off` | 可选语义层开关：`off`（默认）/ `on`；开启前需装可选依赖与模型（见 0.31 段） |
+| `semanticSearch` | `off` | 可选语义层**部署默认值**：`off` / `on`；工作台「设置」里的开关会覆盖它（存 `<kbRoot>/.semantic.json`） |
 | `semanticModelDir` | `""` | 语义模型目录；留空用 `~/.dsh/tools/models/bge-small-zh-v1.5` |
 | `ocrLang` | `chi_sim+eng` | OCR 语言（竖排古籍可试 `chi_sim_vert`） |
 | `ocrWorkers` | `0`（自动） | OCR 并行 worker 数；0 = 按本机 CPU/内存自适应：`min(核数一半, 内存/1.5GB)`，下限 2、上限 16（24 线程/32GB 机器 ≈ 12） |
@@ -1281,7 +1303,7 @@ done
 ## 测试
 
 ```bash
-npm test          # node:test（1080 个用例）；覆盖查重精度、同名文件保护、后台失败统计、检索截断/单文档上限、
+npm test          # node:test（1091 个用例）；覆盖查重精度、同名文件保护、后台失败统计、检索截断/单文档上限、
                   # 相似导入提示、OCR 模型检查、流式 zip、心跳与锁回收、
                   # 清单 v1→v2→v3 迁移与备份、内容哈希跳过、kb_reparse、分块索引/页码锚点、
                   # kb_list 分页/过滤/kind、检索排序、跨库检索、文字层质量启发式、
@@ -1298,6 +1320,7 @@ npm test          # node:test（1080 个用例）；覆盖查重精度、同名�
                   # 可选语义层（向量归一化/余弦 topK/RRF/强词面/两阶段页码、索引首建增量删除损坏回退、
                   #   运行时降级与告警一次、/search 与 kb_query 的 hybrid/回退、关闭时 golden 对比）、
                   # 知识库路径展开/启动可写自检与 /status 报错、
+                  # 语义开关设置文件/一键准备（依赖与模型探测、本地 HTTP 下载、失败清理）、
                   # 会话范围存储/继承/工具矩阵/提示段/API/归档重命名同步、
                   # 范围「未启用」模式（21 工具 KB_DISABLED、空选择归一为 none、PUT/胶囊/继承/清理）、
                   # 胶囊客户端（注册、面板、应用/失败回滚、可访问性、外部点击延迟还焦点）VM 测试、
