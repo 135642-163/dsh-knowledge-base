@@ -184,6 +184,16 @@ test("扫描件（无文字层）给出降级横幅且不报错", async (t) => {
   assert.match(rendered.html, /扫描件/);
 });
 
+test("没有检索词时，扫描件也提示「不会显示关键词高亮」", async (t) => {
+  const pdfPath = await makePdf(t, [blankPage]);
+  const rendered = await renderPdfViewerHtml({ pdfPath, title: "扫描件", page: null, terms: [] });
+  assert.match(rendered.html, /扫描件/);
+  assert.match(rendered.html, /不会显示关键词高亮/);
+  const text = await makePdf(t, [textPage("VOLTAGE")]);
+  const plain = await renderPdfViewerHtml({ pdfPath: text, title: "文字版", page: null, terms: [] });
+  assert.doesNotMatch(plain.html, /id="notice"/);
+});
+
 test("有文字层但没命中：提示未找到关键词", async (t) => {
   const pdfPath = await makePdf(t, [textPage("VOLTAGE")]);
   const rendered = await renderPdfViewerHtml({ pdfPath, title: "无命中", page: 1, terms: ["谐波电流"] });

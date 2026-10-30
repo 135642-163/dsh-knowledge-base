@@ -89,7 +89,7 @@ function card(result, index) {
       ${meta ? `<p class="search-card-meta muted">${meta}</p>` : ""}
       <p class="search-card-snippet snippet" data-hl="${index}"></p>
       <div class="search-card-foot">
-        <span class="muted">命中 ${Number(result?.hits) || 0} 处</span>
+        <span class="muted" title="检索命中的条款数；页面里高亮的关键词次数在预览弹窗顶部显示">命中 ${Number(result?.hits) || 0} 条条款</span>
         <button class="btn" type="button" ${attrs}>打开原件</button>
       </div>
     </article>

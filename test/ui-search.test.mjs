@@ -237,7 +237,7 @@ test("结果卡片包含标题、标准号、条款、页码、可信度、命�
   assert.match(html, /GB\/T 19963\.2-2024/);
   assert.match(html, /第 5\.2\.2 条/);
   assert.match(html, /第 12 页/);
-  assert.match(html, /命中 3 处/);
+  assert.match(html, /命中 3 条条款/);
   assert.match(html, /高可信度|高/);
   assert.match(html, /data-kb="标准"/);
   assert.match(html, /data-id="d1"/);
