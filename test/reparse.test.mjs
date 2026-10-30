@@ -7,7 +7,7 @@ import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { apply } from "../lib/index.js";
-import { readManifest } from "../lib/store.js";
+import { readManifest, updateDocsMetaLocked, withManifestLock } from "../lib/store.js";
 
 async function setup() {
   const root = await mkdtemp(join(tmpdir(), "kb-reparse-"));
@@ -79,6 +79,79 @@ test("kb_reparse requires a target and rejects notes", async () => {
       () => tools.get("kb_reparse").execute({ kb: "测试库", doc: note.docId }, exec),
       /笔记没有原始文件/
     );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("kb_reparse preserves the existing stage / stageLabel", async () => {
+  const { root, kbRoot, tools, exec } = await setup();
+  try {
+    const src = join(root, "普通资料.txt");
+    await writeFile(src, "第一版正文。\n", "utf8");
+    const imported = await tools.get("kb_import").execute(
+      { path: src, kb: "测试库", title: "普通资料" },
+      exec
+    );
+    const docId = imported.imported[0].docId;
+    const dir = join(kbRoot, "测试库");
+    // 模拟旧清单：阶段来自历史回填（标题里没有标准号，重解析本会把它冲成 unknown）
+    await withManifestLock(dir, async () => {
+      const manifest = await readManifest(dir);
+      await updateDocsMetaLocked(dir, manifest, [
+        { docId, patch: { stage: "published", stageLabel: "发布稿" } },
+      ]);
+    });
+
+    const reparsed = await tools.get("kb_reparse").execute({ kb: "测试库", doc: docId }, exec);
+    assert.equal(reparsed.results[0].error, undefined);
+    const after = (await readManifest(dir)).docs.find((d) => d.id === docId);
+    assert.equal(after.stage, "published", "重解析不能把已有阶段重置成 unknown");
+    assert.equal(after.stageLabel, "发布稿");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("kb_reparse preserves the existing title instead of re-prefixing the standard number", async () => {
+  const { root, kbRoot, tools, exec } = await setup();
+  try {
+    const src = join(root, "IEEE Std 1124-2003.md");
+    await writeFile(src, "# IEEE Std 1124-2003\n\nGuide for protective relay applications.\n", "utf8");
+    const imported = await tools.get("kb_import").execute({ path: src, kb: "测试库" }, exec);
+    const docId = imported.imported[0].docId;
+    const dir = join(kbRoot, "测试库");
+    // 模拟旧清单里已经清洗干净的身份元数据（人工/旧版回填的结果）
+    await withManifestLock(dir, async () => {
+      const manifest = await readManifest(dir);
+      await updateDocsMetaLocked(dir, manifest, [
+        {
+          docId,
+          patch: {
+            title: "IEEE Std 1124-2003",
+            canonicalTitle: "IEEE Std 1124-2003",
+            rawTitle: "IEEE Std 1124-2003",
+            standardNo: "IEEE 1124-2003",
+            standardPrefix: "IEEE",
+            standardNumber: "1124",
+            standardBase: "1124",
+            standardYear: 2003,
+            standardPart: null,
+            standardSource: "filename",
+            stage: "published",
+            stageLabel: "发布稿",
+          },
+        },
+      ]);
+    });
+
+    const reparsed = await tools.get("kb_reparse").execute({ kb: "测试库", doc: docId }, exec);
+    assert.equal(reparsed.results[0].error, undefined);
+    const after = (await readManifest(dir)).docs.find((d) => d.id === docId);
+    assert.equal(after.title, "IEEE Std 1124-2003", "不能出现「IEEE 1124-2003 IEEE Std 1124-2003」式重复前缀");
+    assert.equal(after.canonicalTitle, "IEEE Std 1124-2003");
+    assert.equal(after.stage, "published");
+    assert.equal(after.standardNo, "IEEE 1124-2003");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -57,6 +57,25 @@ test("kb_snapshot creates a zip with manifest and derived markdown", async () =>
   }
 });
 
+test("kb_snapshot 输出只包含 output schema 声明过的字段（宿主会拒绝多余字段）", async () => {
+  const { root, tools, exec } = await setup();
+  try {
+    const tool = tools.get("kb_snapshot");
+    const declared = new Set(Object.keys(tool.output.schema.properties));
+    const created = await tool.execute({ kb: "测试库", label: "schema-check" }, exec);
+    for (const key of Object.keys(created)) {
+      assert.ok(declared.has(key), `创建快照的返回值多出未声明字段: ${key}`);
+    }
+    assert.equal(created.includeSources, false);
+    const listed = await tool.execute({ kb: "测试库", list: true }, exec);
+    for (const key of Object.keys(listed)) {
+      assert.ok(declared.has(key), `列快照的返回值多出未声明字段: ${key}`);
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("kb_snapshot list=true returns existing snapshots", async () => {
   const { root, tools, exec } = await setup();
   try {
