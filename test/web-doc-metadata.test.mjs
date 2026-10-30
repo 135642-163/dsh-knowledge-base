@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { handleApi } from "../lib/web/api.js";
 import { createKb } from "../lib/kbmeta.js";
 import { readManifest } from "../lib/store.js";
+import { listDocs } from "../lib/web/data.js";
 
 const KB = "标准";
 const KB_URL = encodeURIComponent(KB);
@@ -79,6 +80,50 @@ test("PATCH title marks manual and preserves on reimport", async (t) => {
   assert.equal(doc.titleSource, "manual");
   assert.equal(doc.summarySource, "manual");
   assert.equal(doc.version, 3);
+});
+
+test("PATCH standardNo：识别/规范化并写派生字段，清空后恢复非标准", async (t) => {
+  const { root, kbRoot, dir } = await setup();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const opts = { kbRoot, defaultKb: KB, jobs: null };
+
+  let result = await call(opts, makeReq({
+    method: "PATCH", url: docUrl("d1", "metadata"), body: { standardNo: "  GB 20001.10-2014  " },
+  }));
+  assert.equal(result.res.status, 200);
+  let manifest = await readManifest(dir);
+  let doc = manifest.docs.find((item) => item.id === "d1");
+  assert.equal(doc.standardNo, "GB 20001.10-2014");
+  assert.equal(doc.standardSource, "manual");
+  assert.equal(doc.standardPrefix, "GB");
+  assert.equal(doc.standardNumber, "20001.10");
+  assert.equal(doc.standardYear, 2014);
+  assert.equal(doc.stage, "published");
+
+  // 标准号可被资料搜索命中
+  const listed = await listDocs(kbRoot, KB, { query: "GB 20001.10" });
+  assert.deepEqual(listed.docs.map((item) => item.id), ["d1"]);
+
+  // 清空标准号：恢复非标准资料，不删文档
+  result = await call(opts, makeReq({ method: "PATCH", url: docUrl("d1", "metadata"), body: { standardNo: "" } }));
+  assert.equal(result.res.status, 200);
+  manifest = await readManifest(dir);
+  doc = manifest.docs.find((item) => item.id === "d1");
+  assert.equal(doc.standardNo, "");
+  assert.equal(doc.standardSource, "none");
+  assert.equal(doc.stage, "unknown");
+  assert.equal(doc.title, "风电场接入", "改标准号不改标题");
+});
+
+test("PATCH standardNo：无法识别时 400", async (t) => {
+  const { root, kbRoot } = await setup();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const opts = { kbRoot, defaultKb: KB, jobs: null };
+  const result = await call(opts, makeReq({
+    method: "PATCH", url: docUrl("d1", "metadata"), body: { standardNo: "不是标准号" },
+  }));
+  assert.equal(result.res.status, 400);
+  assert.equal(result.json.error.code, "INVALID_ARGS");
 });
 
 test("clear summary resets source; tags-only keeps manual source", async (t) => {

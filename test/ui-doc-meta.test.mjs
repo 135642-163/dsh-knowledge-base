@@ -5,7 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   docMetaPatch, docMetaUnchanged, normalizeDocSummary, normalizeDocTitleInput,
-  parseDocTagsInput, summarySourceLabel,
+  normalizeStandardNoInput, parseDocTagsInput, summarySourceLabel,
 } from "../ui/views/doc-meta.js";
 import { renderDocModalBody } from "../ui/views/modals.js";
 
@@ -28,9 +28,11 @@ test("summarySourceLabel 与 docMetaPatch", () => {
   assert.deepEqual(docMetaPatch({ summary: " 摘要 ", tags: "#a,b" }), { summary: "摘要", tags: ["a", "b"] });
 });
 
-test("docMetaUnchanged 比较归一化后的标题、摘要与标签", () => {
-  const doc = { title: "风电场接入", summary: "摘要", tags: ["a", "b"] };
-  assert.equal(docMetaUnchanged(doc, { title: " 风电场接入 ", summary: " 摘要 ", tags: "a,b" }), true);
+test("docMetaUnchanged 比较归一化后的标题、摘要、标签与标准号", () => {
+  const doc = { title: "风电场接入", summary: "摘要", tags: ["a", "b"], standardNo: "GB/T 1-2020" };
+  assert.equal(docMetaUnchanged(doc, { title: " 风电场接入 ", summary: " 摘要 ", tags: "a,b", standardNo: " GB/T 1-2020 " }), true);
+  assert.equal(normalizeStandardNoInput("  GB/T 1-2020 "), "GB/T 1-2020");
+  assert.equal(docMetaUnchanged(doc, { title: "风电场接入", summary: "摘要", tags: "a,b", standardNo: "" }), false);
   assert.equal(docMetaUnchanged(doc, { title: "海上风电", summary: "摘要", tags: "a,b" }), false);
   assert.equal(docMetaUnchanged(doc, { title: "风电场接入", summary: "别的", tags: "a,b" }), false);
   assert.equal(docMetaUnchanged(doc, { title: "风电场接入", summary: "摘要", tags: "a,c" }), false);
@@ -46,10 +48,20 @@ test("弹窗渲染可编辑摘要/标签与来源徽标", () => {
   assert.match(html, /name="doc-summary"/);
   assert.match(html, /name="doc-title"/);
   assert.match(html, /name="doc-tags"/);
+  assert.match(html, /name="doc-standard-no"/);
   assert.match(html, /来源：人工/);
-  assert.match(html, /保存名称\/摘要\/标签/);
+  assert.match(html, /保存名称\/摘要\/标签\/标准号/);
   assert.match(html, /摘要 &lt;x&gt;/);
   assert.match(html, /value="并网, 海上风电"/);
+});
+
+test("标准号输入框可编辑并显示当前值", () => {
+  const html = renderDocModalBody({ name: "标准", id: "d1", doc: {
+    title: "标准编写规则", type: "pdf-scanned", status: "ready",
+    standardNo: "GB/T 20001.10-2014", stageLabel: "发布稿", summary: "", tags: [],
+  }});
+  assert.match(html, /name="doc-standard-no"[^>]*value="GB\/T 20001.10-2014"/);
+  assert.doesNotMatch(html, /<span>标准号<\/span><strong>/, "编辑态不再重复只读标准号");
 });
 
 test("已删除/导入中弹窗不渲染编辑器", () => {

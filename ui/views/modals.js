@@ -292,7 +292,7 @@ export function renderPreviewBody({ kind, urls = {}, content, loadingText, page 
     const src = escapeAttr(withPageFragment(urls.pdf ?? "", pageNo));
     const loading = `<p class="muted preview-loading">${escapeHtml(loadingText ?? "正在转换原件，首次可能需要几秒…")}</p>`;
     const pageNote = pageNo ? `<p class="muted preview-page">已定位到第 ${pageNo} 页</p>` : "";
-    return `${pageNote}${loading}<iframe class="preview-frame" src="${src}" title="原件预览"></iframe>`;
+    return `${pageNote}${loading}<iframe class="preview-frame" src="${src}" title="原件预览"></iframe><p class="muted preview-hint">若这里一直空白，说明这台电脑无法转换该旧版/损坏的 Office 文件，请点「下载原件」查看。</p>`;
   }
   if (kind === "image") {
     return `<img class="preview-image" src="${escapeAttr(urls.inline ?? "")}" alt="原件预览" />`;
@@ -605,11 +605,14 @@ export function renderDocModalBody({ name, id, doc } = {}) {
       <div class="kv"><span>页数 / 字数</span><strong>${doc?.pages ?? 0} / ${doc?.chars ?? 0}</strong></div>
       <div class="kv"><span>可信度</span><strong>${escapeHtml(doc?.trust ?? "unknown")}</strong></div>
       <div class="kv"><span>来源文件</span><strong>${escapeHtml(doc?.sourceFile || "—")}</strong></div>
-      ${doc?.standardNo ? `<div class="kv"><span>标准号</span><strong>${escapeHtml(doc.standardNo)}${doc.stageLabel ? `（${escapeHtml(doc.stageLabel)}）` : ""}</strong></div>` : ""}
+      ${!editable && doc?.standardNo ? `<div class="kv"><span>标准号</span><strong>${escapeHtml(doc.standardNo)}${doc.stageLabel ? `（${escapeHtml(doc.stageLabel)}）` : ""}</strong></div>` : ""}
       ${editable ? `
         <div class="doc-meta-editor">
           <label class="field"><span>标题 <span class="muted">（人工修改后重新导入也会保留）</span></span>
             <input name="doc-title" maxlength="200" value="${escapeAttr(doc?.title ?? "")}" placeholder="资料名称" autocomplete="off" />
+          </label>
+          <label class="field"><span>标准号 <span class="muted">（可选，如 GB/T 20001.10-2014；留空=非标准资料）</span></span>
+            <input name="doc-standard-no" maxlength="80" value="${escapeAttr(doc?.standardNo ?? "")}" placeholder="GB/T 20001.10-2014" autocomplete="off" />
           </label>
           <label class="field"><span>摘要 <span class="muted">（来源：${escapeHtml(summarySourceLabel(doc?.summarySource))}）</span></span>
             <textarea name="doc-summary" maxlength="500" rows="3" placeholder="一句话说明这篇资料…">${escapeHtml(doc?.summary || "")}</textarea>
@@ -618,7 +621,7 @@ export function renderDocModalBody({ name, id, doc } = {}) {
             <input name="doc-tags" value="${escapeAttr(tagsValue)}" placeholder="并网, 海上风电" autocomplete="off" />
           </label>
           <div class="modal-actions meta-actions">
-            <button type="button" class="btn primary" data-save-meta disabled>保存名称/摘要/标签</button>
+            <button type="button" class="btn primary" data-save-meta disabled>保存名称/摘要/标签/标准号</button>
           </div>
         </div>` : `
         <div class="kv"><span>摘要</span><strong>${escapeHtml(doc?.summary || "—")}</strong></div>
@@ -736,19 +739,22 @@ export function openDocModal({ name, id, icons, notify = () => {}, onChanged } =
     node.querySelector("[data-remove]")?.addEventListener("click", () => { void remove(); });
 
     const titleInput = node.querySelector('[name="doc-title"]');
+    const standardNoInput = node.querySelector('[name="doc-standard-no"]');
     const summaryInput = node.querySelector('[name="doc-summary"]');
     const tagsInput = node.querySelector('[name="doc-tags"]');
     const saveButton = node.querySelector("[data-save-meta]");
-    if (saveButton && (titleInput || summaryInput || tagsInput)) {
+    if (saveButton && (titleInput || summaryInput || tagsInput || standardNoInput)) {
       const refreshDirty = () => {
         if (savingMeta) return;
         saveButton.disabled = docMetaUnchanged(doc, {
           title: titleInput?.value ?? "",
           summary: summaryInput?.value ?? "",
           tags: tagsInput?.value ?? "",
+          standardNo: standardNoInput?.value ?? "",
         });
       };
       titleInput?.addEventListener("input", refreshDirty);
+      standardNoInput?.addEventListener("input", refreshDirty);
       summaryInput?.addEventListener("input", refreshDirty);
       tagsInput?.addEventListener("input", refreshDirty);
       saveButton.addEventListener("click", () => { void saveMeta(); });
@@ -762,7 +768,8 @@ export function openDocModal({ name, id, icons, notify = () => {}, onChanged } =
     const title = node.querySelector('[name="doc-title"]')?.value ?? doc.title ?? "";
     const summary = node.querySelector('[name="doc-summary"]')?.value ?? doc.summary ?? "";
     const tags = node.querySelector('[name="doc-tags"]')?.value ?? (doc.tags ?? []).join(", ");
-    if (docMetaUnchanged(doc, { title, summary, tags })) return;
+    const standardNo = node.querySelector('[name="doc-standard-no"]')?.value ?? doc.standardNo ?? "";
+    if (docMetaUnchanged(doc, { title, summary, tags, standardNo })) return;
     if (!String(title).trim()) {
       showError("标题不能为空");
       return;
@@ -777,10 +784,11 @@ export function openDocModal({ name, id, icons, notify = () => {}, onChanged } =
         title: String(title).replace(/\s+/g, " ").trim().slice(0, 200),
         summary,
         tags: parseDocTagsInput(tags),
+        standardNo: String(standardNo).replace(/\s+/g, " ").trim(),
       });
       if (!node.isConnected) return;
       paint(saved.doc);
-      notify("已保存名称/摘要/标签");
+      notify("已保存名称/摘要/标签/标准号");
       try {
         await onChanged?.();
       } catch {
@@ -790,7 +798,7 @@ export function openDocModal({ name, id, icons, notify = () => {}, onChanged } =
       if (node.isConnected) {
         if (saveButton) {
           saveButton.disabled = false;
-          saveButton.textContent = "保存名称/摘要/标签";
+          saveButton.textContent = "保存名称/摘要/标签/标准号";
         }
         showError(errorText(failure));
       }
