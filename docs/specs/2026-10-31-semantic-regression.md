@@ -100,3 +100,29 @@ node scripts/eval-benchmark.mjs \
 
 - 本报告不测模型加载/查询嵌入的真实延迟与内存（Task 0 已单测：加载 64ms、查询 p95 2.92ms、RSS 239MB）。
 - 后台建索引进程（>100 篇）只做了代码路径与单元覆盖，未在 911 篇真实库上重跑首建（0.30 实测约 11.5s）。
+
+## 0.31.1 真实嵌入延迟复测
+
+`--semantic-sim` 不含模型嵌入。0.31.1 用 `scripts/eval/semantic-latency.mjs` 复测生产等价路径：
+真实 D1a 运行时（onnxruntime-node + tokenizer + bge-small-zh-v1.5）+ 真实 B 检索 + 两阶段页码
+（`lib/search.js` / `lib/fts-index.js`），文档向量仍用 0.30 的 911×512 矩阵，索引复制到临时目录
+（不写真实库）。
+
+| 项 | 80 题实测 |
+|---|---|
+| 语义融合实际生效 | 80 / 80 |
+| 总延迟（B + 嵌入 + 融合/页码） | mean 42.09ms / **p50 42.4ms / p95 58.21ms** / max 65.47ms |
+| 其中 B（FTS + boost） | mean 38.53ms / p95 54.63ms |
+| 其中查询嵌入（真实模型） | mean 2.25ms / p95 2.83ms |
+| 其中融合 + 两阶段页码 | mean 1.31ms / p95 2.11ms |
+| 模型 + session 加载 | 85.8ms（冷启动一次） |
+| 进程 RSS | 284MB |
+
+结论：开启语义后 p95 **58.2ms**，远低于 120ms 门槛（HTTP/UI 开销另计约几毫秒）；模型热态后每次查询
+只多约 3.5ms（嵌入 + 融合/页码）。复现：
+
+```bash
+node scripts/eval/semantic-latency.mjs \
+  --doc-vectors /tmp/kb-eval-030/vec-docs \
+  --doc-matrix /tmp/kb-eval-030-docs/clauses.f32
+```
