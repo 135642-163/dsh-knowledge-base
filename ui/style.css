@@ -210,6 +210,9 @@ button { font: inherit; color: inherit; }
 .modal-form h2 { margin: 0 0 6px; font-size: 20px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
 .form-error { color: var(--danger); margin: 0; }
+.check-row { display: flex; align-items: flex-start; gap: 8px; margin: 10px 0; cursor: pointer; }
+.check-row input { margin-top: 3px; }
+.semantic-status { display: flex; flex-direction: column; gap: 3px; margin: 10px 0; font-size: 13px; }
 code { background: var(--panel-2); border-radius: 4px; padding: 1px 4px; }
 .right { text-align: right; }
 .trash .empty-card { margin-top: 10px; }

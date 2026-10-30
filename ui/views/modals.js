@@ -1365,6 +1365,122 @@ export function openMoveModal({ name, ids = [], kbs = [], notify = () => {}, onD
   return node;
 }
 
+/**
+ * 0.31.2 检索设置：语义检索开关 + 组件/模型状态 + 一键准备。
+ * 开关持久化在 <kbRoot>/.semantic.json；准备 = 安装可选依赖 + 下载模型（需勾选同意）。
+ */
+export function openSemanticModal({ notify = () => {} } = {}) {
+  const node = overlay(`
+    <div class="modal-form semantic-settings">
+      <h2>检索设置</h2>
+      <label class="check-row"><input type="checkbox" name="semantic-enabled" /> <span>启用语义检索（实验）</span></label>
+      <p class="muted">开启后，用与原文不同的说法也能找到资料；需要一次性准备约 390MB 组件与模型，之后每次查询约多 3 毫秒。关闭时不加载任何模型，行为与默认一致。</p>
+      <div class="semantic-status muted">读取状态中…</div>
+      <label class="check-row" data-consent-row hidden><input type="checkbox" data-consent /> <span>同意下载约 390MB 组件与模型（只下载一次）</span></label>
+      <p class="form-error" hidden></p>
+      <div class="modal-actions">
+        <button type="button" class="btn" data-close>关闭</button>
+        <button type="button" class="btn primary" data-prepare hidden>一键准备</button>
+      </div>
+    </div>
+  `);
+  const enabled = node.querySelector("[name=semantic-enabled]");
+  const statusBox = node.querySelector(".semantic-status");
+  const error = node.querySelector(".form-error");
+  const consentRow = node.querySelector("[data-consent-row]");
+  const consent = node.querySelector("[data-consent]");
+  const prepare = node.querySelector("[data-prepare]");
+
+  function showError(text) {
+    error.textContent = text;
+    error.hidden = !text;
+  }
+
+  function lines(status) {
+    statusBox.textContent = "";
+    const add = (text) => {
+      const line = document.createElement("div");
+      line.textContent = text;
+      statusBox.appendChild(line);
+    };
+    const missing = (value) => (Array.isArray(value) && value.length > 0 ? `（缺 ${value.join("、")}）` : "");
+    add(`运行组件：${status?.dependencies?.ok ? "已安装" : `未安装${missing(status?.dependencies?.missing)}`}`);
+    add(`模型：${status?.model?.ok ? "已下载" : `未下载${missing(status?.model?.missing)}`}`);
+    if (status?.index) {
+      add(`索引：${status.index.indexReady ? `已就绪（${status.index.docs} 篇）` : `未就绪${status.index.reason ? `（${status.index.reason}）` : ""}`}`);
+    }
+    if (status?.preparing) add("正在准备组件/模型…");
+  }
+
+  function paint(status) {
+    enabled.checked = status?.enabled === true;
+    const ready = status?.ready === true;
+    consentRow.hidden = ready;
+    prepare.hidden = ready;
+    prepare.disabled = !ready && consent.checked !== true;
+    lines(status);
+  }
+
+  async function refresh() {
+    try {
+      paint(await api.semantic());
+    } catch (failure) {
+      showError(errorText(failure));
+    }
+  }
+
+  enabled.onchange = async () => {
+    showError("");
+    try {
+      paint(await api.setSemantic(enabled.checked));
+      notify(enabled.checked ? "已开启语义检索" : "已关闭语义检索");
+    } catch (failure) {
+      enabled.checked = !enabled.checked;
+      showError(errorText(failure));
+    }
+  };
+  consent.onchange = () => { prepare.disabled = !(consent.checked === true); };
+  prepare.onclick = async () => {
+    if (consent.checked !== true) return;
+    showError("");
+    prepare.disabled = true;
+    prepare.textContent = "正在准备…";
+    try {
+      const { jobId } = await api.prepareSemantic();
+      await pollPrepare(jobId);
+    } catch (failure) {
+      showError(errorText(failure));
+      prepare.textContent = "一键准备";
+      prepare.disabled = false;
+    }
+  };
+
+  async function pollPrepare(jobId) {
+    while (node.isConnected) {
+      const job = await api.job(jobId).catch(() => null);
+      if (!job) break;
+      if (job.progress?.text) statusBox.textContent = job.progress.text;
+      if (job.status === "running") {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        continue;
+      }
+      prepare.textContent = "一键准备";
+      if (job.status === "succeeded") {
+        notify("语义检索组件已就绪");
+        await refresh();
+        return;
+      }
+      showError(job.detail || "准备失败");
+      prepare.disabled = consent.checked !== true;
+      return;
+    }
+    prepare.textContent = "一键准备";
+  }
+
+  void refresh();
+  return node;
+}
+
 function errorText(failure) {
   return failure instanceof ApiError ? failure.message : String(failure?.message ?? failure);
 }

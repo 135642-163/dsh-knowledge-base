@@ -14,7 +14,7 @@ import {
 } from "./views/trash.js";
 import {
   deleteConfirmBody, openConfirmModal, openCreateModal, openDocModal, openKbPickerModal, openMoveModal,
-  openPreviewModal, openRenameModal, openRestoreModal, retryFailedDoc,
+  openPreviewModal, openRenameModal, openRestoreModal, openSemanticModal, retryFailedDoc,
 } from "./views/modals.js";
 import { openUploadModal } from "./views/upload.js";
 
@@ -1045,6 +1045,7 @@ function render() {
     <header class="topbar">
       <a class="brand" href="${hrefForOverview()}"><span>知识库工作台</span></a>
       <div class="topbar-actions">
+        ${!EMBED ? `<button class="btn" data-action="semantic-settings">设置</button>` : ""}
         ${!EMBED && window.history.length > 1 ? `<button class="btn" data-action="back">${icons.back}<span>返回</span></button>` : ""}
       </div>
     </header>
@@ -1111,6 +1112,8 @@ function bind() {
           });
         },
       });
+    } else if (action === "semantic-settings") {
+      openSemanticModal({ notify: showToast });
     } else if (action === "upload") {
       if (state.kbs.length === 0) { showToast("还没有知识库，先新建一个"); return; }
       openUploadModal({

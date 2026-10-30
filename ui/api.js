@@ -70,6 +70,9 @@ function uploadFile(batchId, item, { onProgress, signal } = {}) {
 
 export const api = {
   status: () => request("GET", "/status"),
+  semantic: () => request("GET", "/semantic"),
+  setSemantic: (enabled) => request("PUT", "/semantic", { enabled: enabled === true }),
+  prepareSemantic: () => request("POST", "/semantic/prepare", { confirm: true }),
   kbs: () => request("GET", "/kbs"),
   kb: (name) => request("GET", `/kbs/${encodeURIComponent(name)}`),
   docs: (name, params = {}) => {
