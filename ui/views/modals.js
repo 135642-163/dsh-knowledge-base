@@ -1423,6 +1423,9 @@ export function openSemanticModal({ notify = () => {} } = {}) {
   function indexLine(status) {
     if (status?.enabled !== true) return "索引：未开启（开启后第一次检索会自动建立）";
     if (status?.index?.indexReady === true) return `索引：已就绪（${status.index.docs} 篇）`;
+    if (Number(status?.index?.docs) > 0) {
+      return `索引：已建立 ${status.index.docs} 篇（${status.index.readyKbs ?? "?"}/${status.index.totalKbs ?? "?"} 个库；其余库首次检索时建立）`;
+    }
     const reason = String(status?.index?.reason ?? "");
     if (reason === "index_stale") return "索引：资料有变化，下次检索会自动更新";
     if (reason === "index_empty") return "索引：当前库还没有可索引的资料";

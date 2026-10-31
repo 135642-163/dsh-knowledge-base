@@ -66,6 +66,8 @@ test("关闭语义：status 返回 enabled=false / reason=disabled，不读索�
       dim: 0,
       profile: "summary-v1",
       docs: 0,
+      readyKbs: 0,
+      totalKbs: 0,
       reason: "disabled",
       kbs: 0,
     });
@@ -103,4 +105,31 @@ test("语义通道默认启用页码范围保护（保留 top-10 的 8 条词法
   assert.equal(channel.pageGuard, 8);
   const custom = createSemanticChannel({ runtime: {}, targets: [], pageGuard: 2 });
   assert.equal(custom.pageGuard, 2);
+});
+
+
+test("部分库就绪：indexReady=false 但 docs/readyKbs 反映已建好的库", async () => {
+  const root = await mkdtemp(join(tmpdir(), "kb-sem-partial-"));
+  try {
+    const kbRoot = join(root, "kb");
+    const a = join(kbRoot, "a");
+    const b = join(kbRoot, "b");
+    await mkdir(join(a, "markdown", "d1"), { recursive: true });
+    await mkdir(join(b, "markdown", "d2"), { recursive: true });
+    await writeFile(join(a, "markdown", "d1", "d1.md"), "# A\n5.1 电压偏差\n", "utf8");
+    await writeFile(join(b, "markdown", "d2", "d2.md"), "# B\n5.1 电压偏差\n", "utf8");
+    const docsA = [{ id: "d1", title: "A", status: "ready", version: 1, updatedAt: "2026-10-01T00:00:00Z" }];
+    const docsB = [{ id: "d2", title: "B", status: "ready", version: 1, updatedAt: "2026-10-01T00:00:00Z" }];
+    await writeFile(join(a, "kb.json"), JSON.stringify({ name: "a", docs: docsA }), "utf8");
+    await writeFile(join(b, "kb.json"), JSON.stringify({ name: "b", docs: docsB }), "utf8");
+    await ensureDocVectors({ dir: a, manifest: { name: "a", docs: docsA }, embedder: fakeEmbedder() });
+    const status = await semanticStatus({ enabled: true, kbRoot });
+    assert.equal(status.indexReady, false);
+    assert.equal(status.reason, "partial");
+    assert.equal(status.docs, 1);
+    assert.equal(status.readyKbs, 1);
+    assert.equal(status.totalKbs, 2);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
