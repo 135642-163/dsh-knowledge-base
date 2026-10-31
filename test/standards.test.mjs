@@ -433,6 +433,25 @@ test("findStdOnSite: 只接受精确同号（分册不算），找不到时返�
   assert.match(hit.reason, /未找到/);
 });
 
+test("runStdCheck: 站点记录标废止但写了“被 X 代替”时，按 X 抓到新版 → 判 update", async () => {
+  const dir = await makeKb([doc({ id: "a", title: "GB/T 4728.12-2008 电气简图用图形符号 第12部分：二进制逻辑元件", stageLabel: "发布稿", standardNo: "GB/T 4728.12-2008", standardNumber: "4728.12", standardYear: 2008 })]);
+  const routes = {
+    // 第一次查询命中 2008（站点把新版放在另一条记录里，只在这里标废止并写「被 … 代替」）
+    "POST /plus/search.php?q=4728.12-2008": pageRes(searchPage([resultBlock({ href: "/guojia/7001.html", stdNo: "GB/T 4728.12-2008", title: "GB/T 4728.12-2008 电气简图用图形符号 第12部分", status: "废止" })])),
+    "GET /guojia/7001.html": pageRes(detailPage({ title: "GB/T 4728.12-2008 电气简图用图形符号 第12部分", stdNo: "GB/T 4728.12-2008", downloadAid: 7001, status: "废止", replaced: "被GB/T 4728.12-2022代替", pub: "2008-06-18", impl: "2009-05-01" })),
+    // 按继任编号能单独抓到 2022 那条记录
+    "POST /plus/search.php?q=4728.12-2022": pageRes(searchPage([resultBlock({ href: "/guojia/7002.html", stdNo: "GB/T 4728.12-2022", title: "GB/T 4728.12-2022 电气简图用图形符号 第12部分：二进制逻辑元件", status: "现行" })])),
+    "GET /guojia/7002.html": pageRes(detailPage({ title: "GB/T 4728.12-2022 电气简图用图形符号 第12部分：二进制逻辑元件", stdNo: "GB/T 4728.12-2022", downloadAid: 7002, status: "现行", replaced: "代替GB/T 4728.12-2008", pub: "2022-10-12", impl: "2023-05-01" })),
+  };
+  const { report } = await runStdCheck({ kbDir: dir, baseUrl: BASE, cookie: "x", rateMs: 0, action: "check", fetchImpl: fakeFetch(routes) });
+  assert.equal(report.superseded.length, 0, "不应只判“已废止”");
+  assert.equal(report.updates.length, 1);
+  assert.equal(report.updates[0].siteNo, "GB/T 4728.12-2022");
+  assert.equal(report.updates[0].maxTextYear, 2008);
+  assert.equal(report.updates[0].replacedBy, "GB/T 4728.12-2022");
+  assert.equal(report.updates[0].downloadAid, 7002);
+});
+
 test("renderStdReport: 更新行用“库内正文”口径，不再出现 2008 → 2008 的自相矛盾", () => {
   const report = {
     kbDir: "/tmp/kb", totalDocs: 10, stdGroups: 3, checked: 3, fresh: 0, deferred: 0,
