@@ -71,3 +71,22 @@ test("FTS5 增量构建只重建变动文档", { skip: !hasSqlite }, async (t) =
   const fresh = await searchFtsIndex(root, "电压暂降", { limit: 10 });
   assert.ok(fresh.matches.some((row) => row.docId === "d1"));
 });
+
+test("摘要参与 FTS：只在摘要中的词可检索，摘要变化触发增量重建", { skip: !hasSqlite }, async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "kb-fts-summary-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(join(root, "markdown", "d1"), { recursive: true });
+  await writeFile(join(root, "markdown", "d1", "d1.md"), "# 标准\n### 第 1 页\n正文没有目标词。\n", "utf8");
+  const first = { docs: [{
+    id: "d1", title: "标准", status: "ready", version: 1,
+    updatedAt: "2026-10-25T00:00:00Z", summary: "uniqueoldterm 并网",
+  }] };
+  await buildFtsIndex(root, first, { force: true, stamp: "s1" });
+  const hit = await searchFtsIndex(root, "uniqueoldterm", { limit: 10 });
+  assert.ok(hit.matches.some((row) => row.docId === "d1" && row.part === 0));
+  const second = { docs: [{ ...first.docs[0], summary: "uniquenewterm 电压暂降" }] };
+  const changed = await buildFtsIndex(root, second, { stamp: "s2" });
+  assert.equal(changed.changed, 1);
+  assert.equal((await searchFtsIndex(root, "uniqueoldterm", { limit: 10 })).matches.length, 0);
+  assert.ok((await searchFtsIndex(root, "uniquenewterm", { limit: 10 })).matches.some((row) => row.docId === "d1"));
+});
