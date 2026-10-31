@@ -474,3 +474,7 @@ body.embed .side-foot a[target="_blank"] { display: none; }
 .package-modes { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
 .package-mode { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border: 1px solid var(--line, #d8d8d8); border-radius: 8px; cursor: pointer; }
 .package-mode input { margin-top: 3px; }
+
+/* 可信度下拉（资料列表内联 / 资料弹窗顶部） */
+.trust-select { padding: 2px 6px; border-radius: 6px; font-size: 12px; max-width: 96px; }
+.kv select { margin-left: auto; font-size: 12px; max-width: 160px; }

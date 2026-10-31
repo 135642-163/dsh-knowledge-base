@@ -1,6 +1,7 @@
 import { hrefForKb } from "../router.js";
 import { statusBadges } from "./badges.js";
 import { renderStdPanel } from "./std.js";
+import { DOC_TRUST_LEVELS } from "./doc-meta.js";
 
 /** 工作台允许的每页条数；服务端仍按 1–200 兜底。 */
 export const DOCS_PAGE_SIZES = [50, 100, 200];
@@ -165,6 +166,8 @@ export function renderDetail(state, current, { icons, fmtNumber }) {
         </div>
         <div class="detail-actions">
           <button class="btn primary" data-action="upload" data-kb="${escapeAttr(kb.name)}">${icons.upload}<span>上传资料</span></button>
+          <button class="btn" data-action="import-package">导入知识库包</button>
+          <button class="btn" data-action="export-kb" data-name="${escapeAttr(kb.name)}">导出知识库</button>
           <button class="btn" data-action="rename-kb-modal" data-name="${escapeAttr(kb.name)}">重命名</button>
           <button class="btn" data-action="archive-kb" data-name="${escapeAttr(kb.name)}">${icons.archive}<span>归档</span></button>
         </div>
@@ -347,7 +350,7 @@ function docs(kb, state, { fmtNumber, icons }) {
                 </td>
                 <td class="muted">${escapeHtml(doc.type ?? "")}</td>
                 <td class="muted">${fmtNumber(doc.pages)}</td>
-                <td class="muted">${escapeHtml(doc.trust)}</td>
+                <td class="muted">${trustSelect(doc, name)}</td>
                 <td class="muted">${formatDate(doc.updatedAt)}</td>
                 <td class="col-actions">${actions.map((action) => docActionButton(doc, action, { busy, retrying: isRetrying })).join("")}</td>
               </tr>`;
@@ -358,6 +361,16 @@ function docs(kb, state, { fmtNumber, icons }) {
       ${docsPager({ pageNo, pages, total, limit, fmtNumber, label: "底部分页" })}
     </div>
   `;
+}
+
+const TRUST_SHORT = { high: "高", medium: "中", low: "低", unknown: "未标注" };
+
+/** 资料列表内联可信度选择：ready 文档可直接改，导入中/已删除保持只读。 */
+function trustSelect(doc, kbName) {
+  if (doc?.deleted || (doc?.status !== undefined && doc?.status !== "ready")) return escapeHtml(doc?.trust ?? "unknown");
+  return `<select class="trust-select" data-action="docs-trust" data-kb="${escapeAttr(kbName)}" data-id="${escapeAttr(doc.id)}" aria-label="修改可信度">
+    ${DOC_TRUST_LEVELS.map((level) => `<option value="${level}"${(doc.trust ?? "unknown") === level ? " selected" : ""}>${TRUST_SHORT[level] ?? level}</option>`).join("")}
+  </select>`;
 }
 
 function renderDocTags(doc, activeTag) {

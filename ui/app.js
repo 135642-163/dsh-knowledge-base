@@ -18,6 +18,7 @@ import {
 } from "./views/modals.js";
 import { openUploadModal } from "./views/upload.js";
 import { openPackageImportModal } from "./views/package.js";
+import { openExportModal } from "./views/export.js";
 
 const app = document.querySelector("#app");
 const EMBED = new URLSearchParams(window.location.search).has("embed");
@@ -1174,6 +1175,26 @@ function bind() {
   docsControls?.detach();
   searchControls?.detach();
   searchControls = null;
+  // 资料列表的可信度下拉：change 事件单独处理（onclick 不会覆盖键盘选择）。
+  app.onchange = async (event) => {
+    const select = event.target.closest('[data-action="docs-trust"]');
+    if (!select || select.disabled) return;
+    const kb = select.dataset.kb;
+    const id = select.dataset.id;
+    if (!kb || !id) return;
+    select.disabled = true;
+    try {
+      const saved = await api.patchDocMetadata(kb, id, { trust: select.value });
+      const doc = pageDocById(id);
+      if (doc && saved?.doc) doc.trust = saved.doc.trust;
+      showToast("可信度已更新");
+      render();
+    } catch (error) {
+      select.disabled = false;
+      showToast(stdErrorText(error), "error");
+    }
+  };
+
   // 全局点击委托
   app.onclick = async (event) => {
     const target = event.target.closest("[data-action]");
@@ -1197,6 +1218,18 @@ function bind() {
       });
     } else if (action === "semantic-settings") {
       openSemanticModal({ notify: showToast });
+    } else if (action === "export-kb") {
+      const name = target.dataset.name;
+      if (name) {
+        openExportModal({ name, notify: showToast });
+      } else if (state.kbs.length === 0) {
+        showToast("还没有知识库");
+      } else {
+        openKbPickerModal({
+          kbs: state.kbs,
+          onPick: (picked) => openExportModal({ name: picked, notify: showToast }),
+        });
+      }
     } else if (action === "import-package") {
       openPackageImportModal({
         notify: showToast,

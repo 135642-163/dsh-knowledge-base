@@ -91,8 +91,8 @@ exports/                   导出产物
   `Thumbs.db` / `desktop.ini` / `.DS_Store` 等系统垃圾文件，并在上传面板与导入结果里报告
   「已跳过 N 个临时/锁文件」；普通 `.tmp` 文件不跳过。
 
-概览页「导入知识库包」：选择 `.zip` 上传后先预检（同名库返回 merge/rename/replace 三选一），确认后后台导入；
-导入中可关闭弹窗，任务继续运行。
+概览页/库详情页「导入知识库包」：选择 `.zip` 上传后先预检（同名库返回 merge/rename/replace 三选一），
+确认后后台导入；「导出知识库」支持正文包 / 完整包 / Markdown，后台生成后在弹窗内下载。
 
 「标准更新」面板（库详情 tab）：读取 `.std-check.json` 的上次检查时间、缓存有效期（TTL 7 天）
 与待下载数（有新版 / 草案转正 / 可补下载）；支持仅检查 / 检查并下载 / 补下载 / 强制全查 / 本轮上限，运行中可取消（当前正在处理的标准完成后停止，之后不再发起新的下载）；新增「按标准号补下载」：输入编号先检索并校验站点确认页（防串档）与金币，确认后再下载并导入；
@@ -285,20 +285,21 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
 - **快照恢复**：新工具 `kb_snapshot_restore`，默认 dry-run；校验 zip/库名/schemaVersion；恢复前自动留
   `before-restore` 快照；`prune=true` 时快照外文档的 markdown/sources 移入 `trash-restore/`；log/schema/history
   不随快照回滚；恢复后重建索引与 FTS。
-- **人工可信度可编辑**：工作台资料弹窗新增可信度选择（高/中/低/未标注），`PATCH metadata` 支持 `trust`，
-  落盘 `trustSource=manual` 且不递增正文版本号；`kb_trust` 单篇/批量行为不变。
+- **人工可信度可编辑**：资料列表每行可直接下拉改可信度（高/中/低/未标注），资料弹窗顶部也有同一选择；
+  `PATCH metadata` 支持 `trust`，落盘 `trustSource=manual` 且不递增正文版本号；`kb_trust` 单篇/批量行为不变。
 - **OCR 前水印净化**：扫描页渲染后按亮度直方图 + 深色核心邻域判定浅灰水印并置白，默认 `watermark=auto`
   （`off`/`strong` 可调）；只改 OCR 用的内存图，不写回原件；`kb_import`/`kb_reparse`/`kb_import_package`
   均可传 `watermark`。配套 `scripts/watermark-ab.mjs` 用真实文字层页做真值、叠加合成水印比较 CER：
   6 页平均 CER 干净 0.1221 → 加水印 0.1901 → 净化后 0.1490（报告 `docs/reports/2026-10-31-watermark-ab.md`）。
-- **工作台导入包**：概览页新增「导入知识库包」按钮：上传 kbpack → 预检（同名库三选一）→
-  `kb-package` 后台任务导入；导入成功后清理上传文件，失败保留 24 小时供重试。
+- **工作台导入/导出包**：概览页与库详情页新增「导入知识库包」「导出知识库」按钮：
+  导入 = 上传 kbpack → 预检（同名库三选一）→ `kb-package` 后台任务；
+  导出 = 正文包 / 完整包（含原件）/ 单文件 Markdown，后台生成后下载到 `exports/`。
 - **P1 标准自动化**：`scripts/std-check-daily.mjs` + launchd 模板（每日检查、报告落
   `docs/reports/std-check-YYYYMMDD.md`，仅 update/released 时通知/退出码 10）；缺口台账
   `<kb>/.std-gaps.json` 跨轮追踪「站点未收录（非站外体系）」与「分册歧义」，站点收录后自动移除；
   工作台标准更新面板新增「按标准号补下载」：先预览确认页/金币（防串档），确认后走 `kb-std` 后台任务
   下载并导入，结果复用现有标准面板；面板同时显示缺口台账的未收录/分册歧义数量。
-- 测试 1154 → **1229**（新增 kbpack 导出/校验/导入、快照恢复、缺口台账、每日报告、水印净化、
+- 测试 1154 → **1235**（新增 kbpack 导出/校验/导入、快照恢复、缺口台账、每日报告、水印净化、
   可信度编辑）。
 
 ## 0.32.0 标准更新链路修复 + 库内版本收敛规则

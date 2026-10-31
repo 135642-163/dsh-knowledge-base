@@ -148,7 +148,7 @@ test("表格列和行保持原样并显示条目区间", () => {
   assert.match(html, /data-action="open-doc" data-kb="标准" data-id="d1"/);
   assert.match(html, /data-action="open-doc" data-kb="标准" data-id="d2"/);
   assert.match(html, /<td class="muted">pdf-text<\/td>/);
-  assert.match(html, /<td class="muted">medium<\/td>/);
+  assert.match(html, /<option value="medium" selected>中<\/option>/);
   assert.match(html, /第 51–52 篇/);
   assert.match(html, /第 2 \/ 2 页 · 共 60 篇/);
 });
@@ -355,4 +355,15 @@ test("详情页头提供重命名入口，保留上传与归档", () => {
   assert.match(html, /data-action="rename-kb-modal" data-name="标准"[^>]*>重命名<\/button>/);
   assert.match(html, /data-action="upload"/);
   assert.match(html, /data-action="archive-kb"/);
+});
+
+test("库详情页提供导入/导出入口，资料行可信度可内联修改", () => {
+  const html = render({ items: [makeDoc("a1", { status: "ready" })], total: 1, offset: 0, limit: 50 });
+  assert.match(html, /data-action="import-package"/);
+  assert.match(html, /data-action="export-kb"[^>]*data-name="标准"/);
+  assert.match(html, /data-action="docs-trust"/);
+  assert.match(html, /data-id="a1"/);
+  assert.match(html, /<option value="high" selected>高<\/option>/);
+  const deleted = render({ items: [makeDoc("d1", { status: "deleted", deleted: true })], total: 1 });
+  assert.doesNotMatch(deleted, /data-action="docs-trust"/);
 });

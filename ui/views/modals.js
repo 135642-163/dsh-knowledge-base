@@ -603,7 +603,9 @@ export function renderDocModalBody({ name, id, doc } = {}) {
       <div class="kv"><span>ID</span><strong>${escapeHtml(doc?.id ?? id ?? "")}</strong></div>
       <div class="kv"><span>类型</span><strong>${escapeHtml(doc?.type ?? "")}</strong></div>
       <div class="kv"><span>页数 / 字数</span><strong>${doc?.pages ?? 0} / ${doc?.chars ?? 0}</strong></div>
-      <div class="kv"><span>可信度</span><strong>${escapeHtml(doc?.trust ?? "unknown")}</strong></div>
+      ${editable
+        ? `<div class="kv"><span>可信度</span><select name="doc-trust" aria-label="可信度">${DOC_TRUST_LEVELS.map((level) => `<option value="${level}"${(doc?.trust ?? "unknown") === level ? " selected" : ""}>${escapeHtml(trustLevelLabel(level))}</option>`).join("")}</select></div>`
+        : `<div class="kv"><span>可信度</span><strong>${escapeHtml(doc?.trust ?? "unknown")}</strong></div>`}
       <div class="kv"><span>来源文件</span><strong>${escapeHtml(doc?.sourceFile || "—")}</strong></div>
       ${!editable && doc?.standardNo ? `<div class="kv"><span>标准号</span><strong>${escapeHtml(doc.standardNo)}${doc.stageLabel ? `（${escapeHtml(doc.stageLabel)}）` : ""}</strong></div>` : ""}
       ${editable ? `
@@ -619,11 +621,6 @@ export function renderDocModalBody({ name, id, doc } = {}) {
           </label>
           <label class="field"><span>标签（逗号分隔，最多 20 个）</span>
             <input name="doc-tags" value="${escapeAttr(tagsValue)}" placeholder="并网, 海上风电" autocomplete="off" />
-          </label>
-          <label class="field"><span>可信度 <span class="muted">（人工选择后检索会优先标注，不再被自动推断覆盖）</span></span>
-            <select name="doc-trust">
-              ${DOC_TRUST_LEVELS.map((level) => `<option value="${level}"${(doc?.trust ?? "unknown") === level ? " selected" : ""}>${escapeHtml(trustLevelLabel(level))}</option>`).join("")}
-            </select>
           </label>
           <div class="modal-actions meta-actions">
             <button type="button" class="btn primary" data-save-meta disabled>保存名称/摘要/标签/标准号/可信度</button>
