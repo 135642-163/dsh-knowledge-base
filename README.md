@@ -298,7 +298,7 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
 - **封面核对补强**：`scripts/audit-cover-stdno.mjs` 把 OCR 的「一」也当连字符归一化，
   能识别 `DL 5383-2007` ↔ 封面 `DL/T 5383-2007` 这类前缀差；脚本改为可安全 import（不再在导入时执行 main）。
 
-测试 **1274/1274**。详见 `docs/reports/2026-10-31-0.34.0.md`。
+测试 **1275/1275**。详见 `docs/reports/2026-10-31-0.34.0.md`。
 
 ## 0.33.0 知识库搬运闭环（kbpack）+ 快照恢复 + 水印净化
 

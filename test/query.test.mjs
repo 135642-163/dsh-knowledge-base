@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { annotateMatches, buildRgArgs, parseRgOutput, searchKb } from "../lib/query.js";
+import { annotateMatches, buildRgArgs, compactMatches, parseRgOutput, searchKb } from "../lib/query.js";
 
 const KB_DIR = await mkdtemp(join(tmpdir(), "kb-query-test-"));
 await mkdir(join(KB_DIR, "markdown", "doc1"), { recursive: true });
@@ -156,4 +156,17 @@ test("searchKb ranks title hits before file order", async () => {
     lineBytes: 400,
   });
   assert.equal(r.matches[0].docId, "a");
+});
+
+test("compactMatches drops undefined fields (lossless tool output)", () => {
+  const cleaned = compactMatches([
+    { docId: "a", title: "A", path: "p", lineNumber: 1, line: "x", clause: undefined, pageStart: undefined, trust: undefined },
+    { docId: "b", title: "B", path: "p", lineNumber: 2, line: "y", clause: "[4.2]", pageStart: 9 },
+  ]);
+  assert.equal("clause" in cleaned[0], false);
+  assert.equal("pageStart" in cleaned[0], false);
+  assert.equal("trust" in cleaned[0], false);
+  assert.equal(cleaned[1].clause, "[4.2]");
+  assert.equal(cleaned[1].pageStart, 9);
+  assert.doesNotThrow(() => JSON.stringify(cleaned));
 });
