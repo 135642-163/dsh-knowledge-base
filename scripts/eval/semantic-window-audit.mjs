@@ -14,6 +14,8 @@ import { expandRoot, kbDirPath, readManifest } from "../../lib/store.js";
 import { docEmbedText } from "../../lib/semantic-index.js";
 import { splitMarkdownWindows } from "../../lib/semantic-windows.js";
 import { createSemanticRuntime } from "../../lib/semantic-runtime.js";
+import { searchFtsIndex } from "../../lib/fts-index.js";
+import { fuseDocRrf } from "../../lib/semantic.js";
 
 const root = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 
@@ -171,9 +173,39 @@ async function main() {
       .sort((left, right) => right.score - left.score || left.index - right.index));
   }
 
+  // 词法候选：直接取 FTS 条款序里的文档顺序（近似 A；不比 boost 的 B 更强，但足够做同口径对比）。
+  async function lexicalDocs(question) {
+    try {
+      const found = await searchFtsIndex(args.dir, question.q, { limit: 200 });
+      if (!found.ok) return [];
+      return [...new Set(found.matches.map((row) => row.docId).filter(Boolean))];
+    } catch {
+      return [];
+    }
+  }
+  const hybridRanked = { current: new Map(), average: new Map(), windows: new Map() };
+  for (let qi = 0; qi < questions.length; qi += 1) {
+    const question = questions[qi];
+    const lexical = (await lexicalDocs(question)).map((id) => idToIndex.get(id)).filter((index) => Number.isInteger(index));
+    const variants = {
+      current: currentRanked.get(question.id)?.slice(0, 50).map((item) => item.index) ?? [],
+      average: averageRanked.get(question.id)?.slice(0, 50).map((item) => item.index) ?? [],
+      windows: bestWindowByDoc.get(question.id)?.slice(0, 50).map((item) => item.index) ?? [],
+    };
+    for (const [name, dense] of Object.entries(variants)) {
+      const fused = fuseDocRrf({ lexical, dense });
+      hybridRanked[name].set(question.id, fused.map((item) => ({ index: item.id, score: item.score })));
+    }
+  }
+
   const current = metrics(questions, currentRanked, idToIndex);
   const average = metrics(questions, averageRanked, idToIndex);
   const windows = metrics(questions, bestWindowByDoc, idToIndex);
+  const hybrid = {
+    current: metrics(questions, hybridRanked.current, idToIndex),
+    average: metrics(questions, hybridRanked.average, idToIndex),
+    windows: metrics(questions, hybridRanked.windows, idToIndex),
+  };
   const byGroup = (list) => Object.fromEntries([...new Set(list.map((row) => row.group))].map((group) => [
     group,
     list.filter((row) => row.group === group).length,
@@ -188,13 +220,18 @@ async function main() {
     current: { recall: current.recall, mrr: current.mrr, groups: byGroup(current.rows) },
     averageProfile: { recall: average.recall, mrr: average.mrr, groups: byGroup(average.rows) },
     windowsProfile: { recall: windows.recall, mrr: windows.mrr, groups: byGroup(windows.rows) },
+    hybrid: {
+      current: { recall: hybrid.current.recall, mrr: hybrid.current.mrr },
+      average: { recall: hybrid.average.recall, mrr: hybrid.average.mrr },
+      windows: { recall: hybrid.windows.recall, mrr: hybrid.windows.mrr },
+    },
     delta: {
       average: { recall: average.recall - current.recall, mrr: average.mrr - current.mrr },
       windows: { recall: windows.recall - current.recall, mrr: windows.mrr - current.mrr },
     },
     rows: { current: current.rows, average: average.rows, windows: windows.rows },
   };
-  console.log(JSON.stringify({ current: summary.current, average: summary.averageProfile, windows: summary.windowsProfile, delta: summary.delta, elapsedMs: summary.elapsedMs }, null, 2));
+  console.log(JSON.stringify({ current: summary.current, average: summary.averageProfile, windows: summary.windowsProfile, hybrid: summary.hybrid, delta: summary.delta, elapsedMs: summary.elapsedMs }, null, 2));
   if (args.out) await writeFile(args.out, JSON.stringify(summary, null, 2), "utf8");
 }
 

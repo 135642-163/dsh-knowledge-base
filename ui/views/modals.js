@@ -1392,8 +1392,8 @@ export function openSemanticModal({ notify = () => {} } = {}) {
       <p class="muted">开启后，用不同说法（比如「灯一直闪」）也能找到写「闪变」的资料。组件和模型放在本机，只需准备一次（约 390MB）；关闭时只按关键词检索，行为和现在完全一样。</p>
       <label class="field"><span>语义画像</span>
         <select name="semantic-profile">
+          <option value="window">全文 8 窗口质心（默认，覆盖后段；建索引约 8 倍，索引大小不变）</option>
           <option value="summary">摘要+首条款（快，约 600 字/篇）</option>
-          <option value="window">全文 8 窗口质心（覆盖后段；建索引约 8 倍，索引大小不变）</option>
         </select>
       </label>
       <p class="muted">画像只影响语义检索的召回范围，不改变词法检索；切换后下次检索会重建索引。</p>
