@@ -234,3 +234,13 @@ test("B 的 top-50 之外结果按原序追加：语义层只改排序，不缩�
     "top-50 之外保持 B 的原序",
   );
 });
+
+
+test("页码保护：预留 B 的带页码结果在头部，语义候选只填充剩余槽位", async () => {
+  const semantic = fakeSemantic();
+  semantic.pageGuard = 1;
+  const response = await run({ semantic });
+  assert.equal(response.results[0].docId, "a");
+  assert.equal(response.results[0].page, 4);
+  assert.ok(response.results.some((row) => row.docId === "c"), "dense-only 文档仍应保留在结果中");
+});

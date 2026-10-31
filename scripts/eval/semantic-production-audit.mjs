@@ -105,9 +105,10 @@ async function main() {
   }
 
   const targets = [{ kb: "标准", dir: args.dir, docs }];
-  function makeSemantic(vectors) {
+  function makeSemantic(vectors, pageGuard = 0) {
     return {
       enabled: true,
+      pageGuard,
       async loadIndex() {
         return { ok: true, ids: docs.map((doc) => doc.id), vectors, dim: vectors[0]?.length ?? 0 };
       },
@@ -124,9 +125,14 @@ async function main() {
   }
   const semanticSummary = makeSemantic(summaryVectors);
   const semantic = makeSemantic(centroids);
+  const guarded = Object.fromEntries([4, 6, 8].map((guard) => [guard, makeSemantic(centroids, guard)]));
 
   const metrics = { B: [], S: [], H: [] };
   const timings = { B: [], S: [], H: [] };
+  for (const guard of [4, 6, 8]) {
+    metrics[`G${guard}`] = [];
+    timings[`G${guard}`] = [];
+  }
   for (const question of questions) {
     const baseStart = performance.now();
     const base = await searchAll({
@@ -168,6 +174,22 @@ async function main() {
     timings.H.push(performance.now() - hybridStart);
     const hybridRank = rankOfExpected(hybrid.results, question.expected, args.limit);
     metrics.H.push({ id: question.id, group: question.group, ...hybridRank, applied: hybrid.semantic?.applied, reason: hybrid.semantic?.reason });
+
+    for (const guard of [4, 6, 8]) {
+      const start = performance.now();
+      const guardedResult = await searchAll({
+        targets,
+        query: question.q,
+        searcher: async (target) => {
+          const found = await searchFtsIndex(target.dir, question.q, { limit: 200 });
+          return { matches: found.ok ? found.matches : [], engine: "fts" };
+        },
+        semantic: guarded[guard],
+      });
+      timings[`G${guard}`].push(performance.now() - start);
+      const rank = rankOfExpected(guardedResult.results, question.expected, args.limit);
+      metrics[`G${guard}`].push({ id: question.id, group: question.group, ...rank, applied: guardedResult.semantic?.applied, reason: guardedResult.semantic?.reason });
+    }
   }
 
   const summarize = (rows) => {
@@ -204,10 +226,15 @@ async function main() {
     B: summarize(metrics.B),
     S: summarize(metrics.S),
     H: summarize(metrics.H),
+    guards: Object.fromEntries([4, 6, 8].map((guard) => [guard, summarize(metrics[`G${guard}`])])),
     latencyMs: {
       B: { mean: timings.B.reduce((a, b) => a + b, 0) / timings.B.length, p95: p95(timings.B) },
       S: { mean: timings.S.reduce((a, b) => a + b, 0) / timings.S.length, p95: p95(timings.S) },
       H: { mean: timings.H.reduce((a, b) => a + b, 0) / timings.H.length, p95: p95(timings.H) },
+      guards: Object.fromEntries([4, 6, 8].map((guard) => [guard, {
+        mean: timings[`G${guard}`].reduce((a, b) => a + b, 0) / timings[`G${guard}`].length,
+        p95: p95(timings[`G${guard}`]),
+      }])),
     },
     rows: metrics,
   };

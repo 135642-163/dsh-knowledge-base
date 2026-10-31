@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { createKb } from "../lib/kbmeta.js";
 import { readManifest } from "../lib/store.js";
 import { ensureDocVectors } from "../lib/semantic-index.js";
-import { semanticStatus } from "../lib/semantic-service.js";
+import { createSemanticChannel, semanticStatus } from "../lib/semantic-service.js";
 
 function fakeEmbedder(dim = 4) {
   let counter = 0;
@@ -95,4 +95,12 @@ test("启用语义：索引就绪时 indexReady=true；清单变动后变为 ind
     assert.equal(stale.indexReady, false);
     assert.equal(stale.reason, "index_stale");
   });
+});
+
+
+test("语义通道默认启用页码范围保护（保留 top-10 的 8 条词法页码结果）", async () => {
+  const channel = createSemanticChannel({ runtime: {}, targets: [] });
+  assert.equal(channel.pageGuard, 8);
+  const custom = createSemanticChannel({ runtime: {}, targets: [], pageGuard: 2 });
+  assert.equal(custom.pageGuard, 2);
 });

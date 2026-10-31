@@ -27,14 +27,26 @@
 | 数值限值 | 93.3% / 86.7% | 93.3% / 86.7% |
 | 同义改写 | 90.0% / 50.0% | 90.0% / 50.0% |
 
-## 结论与取舍
+## page-aware fusion（页码保护）
+
+保留 B 的前 N 条带页码结果在头部，其余 top-10 槽位再放语义候选：
+
+| pageGuard | Doc Recall@10 | Doc MRR | Page Recall@10 | Page MRR |
+|---|---|---|---|---|
+| 4 | 93.3% | 0.630 | 80.0% | 0.575 |
+| 6 | 95.0% | 0.631 | 81.7% | 0.576 |
+| **8** | **96.7%** | **0.631** | **83.3%** | **0.578** |
+
+- pageGuard=8 同时超过 B 的 Page Recall（81.7%→83.3%）、Page MRR（0.576→0.578），
+  Doc Recall 也从 93.3% 提到 96.7%；Doc MRR 略低于无保护的 H（0.643），但仍高于 B（0.627）。
+- 代价只是 RRF 后的顺序调整，不扩大 top-K、不增加返回 Token；p95 约 98ms（仍 <120ms）。
+- 已把 `SEMANTIC_PAGE_GUARD = 8` 设为语义通道默认；summary/window 都走同一保护。
+
+## 结论
 
 - **summary 不应作为默认**：Doc/Page Recall、MRR、延迟全面差于 B。
-- **window 质心**：Doc Recall +1.7pp、Doc MRR +0.016；代价是 Page Recall −1.7pp、Page MRR −0.046，
-  p95 从 58ms 升到 85ms（仍在 120ms 内）。
-- 页码下降主要来自 dense 独有文档插入 RRF 后把带页码的词法结果挤出 top-10；语义默认仍关闭，
-  如果场景强依赖引用页码，应关闭语义或等待 page-aware fusion。
-- 下一步：page-aware fusion（保页码的词法结果不被 dense-only 挤出），再决定是否重排阈值；
-  在此之前不进一步提高语义权重，也不扩大 top-K（避免 Token 增加）。
+- **window + pageGuard=8** 是当前最优组合：Doc Recall 96.7%、Doc MRR 0.631、
+  Page Recall 83.3%、Page MRR 0.578；语义默认仍关闭，开启时同时获得语义召回与页码保护。
+- 页码下降问题已由 page-aware fusion 解决；不提高语义权重，也不扩大 top-K（避免 Token 增加）。
 
 > 早期 80 题审计（`semantic-window-audit.md`）为 FTS 文档序近似，不是生产 B；本报告为正。
