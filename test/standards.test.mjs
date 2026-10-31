@@ -17,6 +17,7 @@ import {
   classifyStatus,
   classifyDocKind,
   collectKbStandards,
+  findStdOnSite,
   runStdCheck,
   renderStdReport,
 } from "../lib/standards.js";
@@ -401,6 +402,35 @@ test("runStdCheck: 站点提示每日上限时停止后续下载", async () => {
   assert.equal(report.dailyLimit, true);
   assert.match(report.downloadFailed[0].reason, /今日下载次数已用完/);
   assert.match(renderStdReport(report), /今日下载次数已用完/);
+});
+
+test("findStdOnSite: 按编号精确抓取指定版本（分类路径 + 详情下载 id）", async () => {
+  const routes = {
+    "POST /plus/search.php": pageRes(
+      searchPage([
+        resultBlock({ href: "/guojia/9001.html", stdNo: "GB/T 4728.6-2008", title: "GB/T 4728.6-2008 电气简图用图形符号 第6部分" }),
+        resultBlock({ href: "/guojia/9002.html", stdNo: "GB/T 4728.6-2022", title: "GB/T 4728.6-2022 电气简图用图形符号 第6部分" }),
+      ])
+    ),
+    "GET /guojia/9002.html": pageRes(detailPage({ title: "GB/T 4728.6-2022 电气简图用图形符号 第6部分：电能的发生与转换", stdNo: "GB/T 4728.6-2022", downloadAid: 9002, pub: "2022-03-09", impl: "2022-10-01", replaced: "代替GB/T 4728.6-2008" })),
+  };
+  const hit = await findStdOnSite({ baseUrl: BASE, stdNo: "GB/T 4728.6-2022", cookie: "x", rateMs: 0, fetchImpl: fakeFetch(routes) });
+  assert.equal(hit.found, true);
+  assert.equal(hit.stdNo, "GB/T 4728.6-2022");
+  assert.equal(hit.downloadAid, 9002);
+  assert.equal(hit.year, 2022);
+  assert.match(hit.replaced, /4728\.6-2008/);
+});
+
+test("findStdOnSite: 只接受精确同号（分册不算），找不到时返回 found=false", async () => {
+  const routes = {
+    "POST /plus/search.php": pageRes(
+      searchPage([resultBlock({ href: "/guojia/9003.html", stdNo: "GB/T 4728.6-2022", title: "GB/T 4728.6-2022 电气简图用图形符号 第6部分" })])
+    ),
+  };
+  const hit = await findStdOnSite({ baseUrl: BASE, stdNo: "GB/T 4728-2022", cookie: "x", rateMs: 0, fetchImpl: fakeFetch(routes) });
+  assert.equal(hit.found, false);
+  assert.match(hit.reason, /未找到/);
 });
 
 test("renderStdReport: 更新行用“库内正文”口径，不再出现 2008 → 2008 的自相矛盾", () => {
