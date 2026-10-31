@@ -160,6 +160,11 @@ test("导出可只包含选中的文档", async () => {
     assert.equal(pack.docs[0].id, first.id);
     assert.ok(zip.file(`markdown/${first.id}/${first.id}.md`));
     assert.equal(zip.file("markdown/" + manifest.docs.find((doc) => doc.id !== first.id && doc.type !== "note").id), null);
+    const readme = await zip.file("README.md").async("string");
+    assert.match(readme, /交付子集/);
+    assert.match(readme, /导出资料/);
+    assert.doesNotMatch(readme, /第二篇资料/);
+    assert.doesNotMatch(readme, /完整快照/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
