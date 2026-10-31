@@ -495,3 +495,31 @@ test("runStdCheck: 纯数字候选全空时回退到「前缀+编号」，GB/T 1
   assert.equal(report.currents.length, 1);
   assert.equal(report.currents[0].siteNo, "GB/T 1.1-2020");
 });
+
+test("runStdCheck: onlyKeys 只复查指定组（即使缓存新鲜），不动其他组", async () => {
+  const dir = await makeKb([
+    doc({ id: "a", title: "GB/T 1.1-2020 标准化工作导则 第1部分", standardNo: "GB/T 1.1-2020", standardNumber: "1.1", standardYear: 2020 }),
+    doc({ id: "b", title: "GB/T 2.2-2020 另一标准", standardNo: "GB/T 2.2-2020", standardNumber: "2.2", standardYear: 2020 }),
+  ]);
+  await writeFile(
+    join(dir, ".std-check.json"),
+    JSON.stringify({
+      items: {
+        "GB:1.1": { key: "GB:1.1", prefix: "GB/T", number: "1.1", status: "current", checkedAt: 1, siteNo: "GB/T 1.1-2020", docs: [{ id: "a" }] },
+        "GB:2.2": { key: "GB:2.2", prefix: "GB/T", number: "2.2", status: "current", checkedAt: 1, siteNo: "GB/T 2.2-2020", docs: [{ id: "b" }] },
+      },
+    }),
+    "utf8"
+  );
+  const routes = {
+    "POST /plus/search.php": pageRes(searchPage([resultBlock({ href: "/guojia/1.html", stdNo: "GB/T 1.1-2020", title: "GB/T 1.1-2020 标准化工作导则 第1部分" })])),
+    "GET /guojia/1.html": pageRes(detailPage({ title: "GB/T 1.1-2020 标准化工作导则 第1部分", stdNo: "GB/T 1.1-2020", downloadAid: 1 })),
+  };
+  const { report, cache } = await runStdCheck({
+    kbDir: dir, baseUrl: BASE, cookie: "x", rateMs: 0, action: "check",
+    onlyKeys: ["GB:1.1"], fetchImpl: fakeFetch(routes),
+  });
+  assert.equal(report.checked, 1);
+  assert.equal(report.currents.length, 1);
+  assert.equal(cache.items["GB:2.2"].checkedAt, 1, "未指定组不能被顺手刷新");
+});
