@@ -282,12 +282,12 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
 - **状态修正**：语义索引按非空库统计 `readyKbs/totalKbs`，部分就绪不再误报“尚未建立”。
 - **摘要候选（只读）**：`scripts/summary-candidates.mjs` 识别封面/OCR 噪声摘要，从正文提取
   “本标准规定了…”范围句；报告 `docs/reports/2026-10-31-standard-summary-candidates.md`
-  列出 114 篇噪声摘要、80 篇可自动提取候选，确认后再用 `kb_describe` 应用。
+  列出噪声摘要与可自动提取候选（按完整「1 范围」小节提取），确认后再用 `kb_describe` 应用。
 - **摘要试点（真实库）**：已对 10 篇高置信候选执行 `kb_describe`，摘要来源为 `model`，不改变
   文档版本；FTS/语义索引按 manifest stamp 增量刷新。详见
   `docs/reports/2026-10-31-standard-summary-pilot.md`。
 
-测试 **1251/1251**。详见 `docs/reports/2026-10-31-0.34.0.md`。
+测试 **1252/1252**。详见 `docs/reports/2026-10-31-0.34.0.md`。
 
 ## 0.33.0 知识库搬运闭环（kbpack）+ 快照恢复 + 水印净化
 
@@ -327,7 +327,7 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
   下载并导入，结果复用现有标准面板；面板同时显示缺口台账的未收录/分册歧义数量。
 - **摘要进入词法索引（0.33 后续）**：FTS schema 3 为每篇文档增加一条摘要行；摘要变化触发增量重建，
   只在摘要里出现的词也能被 `kb_query` 命中。首次升级会触发一次 FTS 全量重建（后台）。
-- 测试 1154 → **1251**（新增 kbpack 导出/校验/导入、快照恢复、缺口台账、每日报告、水印净化、
+- 测试 1154 → **1252**（新增 kbpack 导出/校验/导入、快照恢复、缺口台账、每日报告、水印净化、
   可信度编辑）。
 
 ## 0.32.0 标准更新链路修复 + 库内版本收敛规则
