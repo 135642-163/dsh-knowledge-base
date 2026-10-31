@@ -7,7 +7,7 @@ import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createImportWorkerRunner, prepareImportArgs } from "../lib/import-job.js";
+import { createImportWorkerRunner, jobOwnerId, prepareImportArgs } from "../lib/import-job.js";
 import { createKb } from "../lib/kbmeta.js";
 
 /**
@@ -201,4 +201,12 @@ test("runner 在进程异常退出时返回 failed 并带已完成计数", async
   } finally {
     await rm(ctx.root, { recursive: true, force: true });
   }
+});
+
+test("jobOwnerId: owner 必须是 agent/session id 字符串", () => {
+  assert.equal(jobOwnerId("sess-1"), "sess-1");
+  assert.equal(jobOwnerId({ id: "sess-2" }), "sess-2");
+  assert.equal(jobOwnerId({ id: "  sess-3  " }), "sess-3");
+  assert.equal(jobOwnerId({ session: { id: "sess-4" } }), "");
+  assert.equal(jobOwnerId(undefined), "");
 });
