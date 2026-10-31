@@ -9,6 +9,8 @@ const STATUS_LABELS = {
   downloaded: "下载成功",
   update: "有新版",
   released: "草案转正",
+  ambiguous: "编号歧义",
+  superseded: "已废止",
   failed: "失败",
   importFailed: "导入失败",
   notfound: "未找到",
@@ -85,7 +87,7 @@ function stdResultHtml(result, { escape }) {
   const entries = Array.isArray(result.entries) ? result.entries : [];
   return `
     <div class="progress-line">
-      <strong>检查 ${count(counts.checked)} 组 · 更新 ${count(counts.updates)} · 下载 ${count(counts.downloaded)} · 导入 ${count(counts.imported)} · 导入失败 ${count(counts.importFailed)} · 下载失败 ${count(counts.downloadFailed)}</strong>
+      <strong>检查 ${count(counts.checked)} 组 · 更新 ${count(counts.updates)} · 已废止 ${count(counts.superseded)} · 编号歧义 ${count(counts.ambiguous)} · 下载 ${count(counts.downloaded)} · 导入 ${count(counts.imported)} · 导入失败 ${count(counts.importFailed)} · 下载失败 ${count(counts.downloadFailed)}</strong>
     </div>
     ${counts.authOk === false ? `<p class="form-error">登录态失效：请更新 bzCookie 后重试。</p>` : ""}
     ${entries.length === 0 ? `<p class="muted">没有结果</p>` : `

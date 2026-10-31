@@ -13,6 +13,7 @@ import {
   parseDocMeta,
   safeRetitle,
   stageKeyOf,
+  stageScanText,
   textFingerprint,
   titleKey,
   trustHeuristic,
@@ -70,6 +71,53 @@ test("canonicalizeTitle 只规范开头标准号，不改正文", () => {
   assert.equal(canonicalizeTitle("GB_T 15543-1995 电能质量"), "GB/T 15543-1995 电能质量");
   assert.equal(canonicalizeTitle("2018 500kV XLPE 海底电缆线路参数"), "2018 500kV XLPE 海底电缆线路参数");
   assert.equal(canonicalizeTitle("电能质量管理办法（暂行）"), "电能质量管理办法（暂行）");
+});
+
+test("stageScanText 只扫封面区，目录/样板句里的“编制说明”不算阶段", () => {
+  const qgdw = `ICS 29.240
+Q/GDW 12214—2022
+电力系统宽频测量装置技术规范
+2022-01-29 发布
+### 目  次
+前
+言.....................II
+附录 E（资料性附录）编制说明`;
+  assert.ok(!/编制说明/.test(stageScanText(qgdw)), "目次里的编制说明不应进入扫描区");
+
+  const boilerplate = `GB/T 24337-2009
+电能质量 公用电网间谐波
+前言
+凡是注日期的引用文件，其随后所有的修改单（不包括勘误的内容）均不适用。`;
+  const scan = stageScanText(boilerplate);
+  assert.ok(!/修改单|勘误/.test(scan), "引用文件样板句不应判成说明材料/勘误版");
+
+  const notes = `GB 32880.1-2016 征求意见稿-编制说明
+一、任务来源
+本标准由……归口。`;
+  assert.match(stageScanText(notes), /编制说明/);
+});
+
+test("parseContentStandard: Q/GDW 正文附目录里的编制说明不再把正文标成说明材料", () => {
+  const content = parseContentStandard(`ICS 29.240
+Q/GDW 10878—2023
+风电场无功配置及电压控制技术规定
+2023-12-25 发布
+目  次
+前  言
+1 范围
+附录 D（资料性附录）编制说明`);
+  assert.ok(content, "应识别出标准号");
+  assert.notEqual(content.stage, "notes", "正文不能因为目录里有编制说明就变成说明材料");
+});
+
+test("parseContentStandard: 真编制说明（封面就是编制说明）仍判 notes", () => {
+  const content = parseContentStandard(`GB/T 24337-2009
+电能质量 公用电网间谐波
+编制说明
+一、任务来源
+二、编制原则`);
+  assert.equal(content.stage, "notes");
+  assert.equal(content.stageLabel, "说明材料");
 });
 
 test("parseContentStandard 从封面识别 GB/T 19963.2 与标题", () => {
