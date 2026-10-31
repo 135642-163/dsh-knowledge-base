@@ -9,6 +9,7 @@ import { join } from "node:path";
 import JSZip from "jszip";
 import { apply } from "../lib/index.js";
 import { readManifest, SCHEMA_VERSION } from "../lib/store.js";
+import { restoreKbSnapshot } from "../lib/snapshot-restore.js";
 
 async function setup(prefix = "kb-snapshot-restore-") {
   const root = await mkdtemp(join(tmpdir(), prefix));
@@ -206,6 +207,30 @@ test("latest=true 与 snapshot 唯一子串选择", async () => {
       exec
     );
     assert.match(byPart.snapshot.name, /first/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("forceStream：流式读取快照并恢复 markdown/sources", async () => {
+  const { root, kbDir, tools, exec } = await setup();
+  try {
+    const docId = await seed(tools, exec, root, "a.txt", "流式快照正文。\n");
+    await tools.get("kb_snapshot").execute({ kb: "测试库", label: "stream", includeSources: true }, exec);
+    const names = await readdir(join(kbDir, "snapshots"));
+    const snapshotPath = join(kbDir, "snapshots", names.find((name) => name.endsWith(".zip")));
+    const sourceFile = (await readdir(join(kbDir, "sources"))).find((name) => name.startsWith(docId));
+    await writeFile(join(kbDir, "sources", sourceFile), "被破坏", "utf8");
+    const result = await restoreKbSnapshot({
+      kbDir,
+      snapshotPath,
+      dryRun: false,
+      includeSources: true,
+      forceStream: true,
+    });
+    assert.equal(result.restored.markdown, 1);
+    assert.equal(result.restored.sources, 1);
+    assert.equal(await readFile(join(kbDir, "sources", sourceFile), "utf8"), "流式快照正文。\n");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

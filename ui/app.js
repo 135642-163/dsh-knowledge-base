@@ -17,6 +17,7 @@ import {
   openPreviewModal, openRenameModal, openRestoreModal, openSemanticModal, retryFailedDoc,
 } from "./views/modals.js";
 import { openUploadModal } from "./views/upload.js";
+import { openPackageImportModal } from "./views/package.js";
 
 const app = document.querySelector("#app");
 const EMBED = new URLSearchParams(window.location.search).has("embed");
@@ -1196,6 +1197,15 @@ function bind() {
       });
     } else if (action === "semantic-settings") {
       openSemanticModal({ notify: showToast });
+    } else if (action === "import-package") {
+      openPackageImportModal({
+        notify: showToast,
+        onFinished: async () => {
+          await loadKbs();
+          const current = route();
+          if (current.page === "detail") await loadDetail(current.name, current.tab);
+        },
+      });
     } else if (action === "upload") {
       if (state.kbs.length === 0) { showToast("还没有知识库，先新建一个"); return; }
       openUploadModal({

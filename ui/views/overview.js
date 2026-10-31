@@ -18,6 +18,7 @@ export function renderOverview(state, { icons, fmtNumber }) {
         <div class="head-actions">
           <button class="btn" data-action="std-open">标准更新</button>
           <button class="btn" data-action="upload">上传资料</button>
+          <button class="btn" data-action="import-package">导入知识库包</button>
         </div>
         <div class="filters">
           <div class="segmented">

@@ -10,6 +10,7 @@ import { join } from "node:path";
 import JSZip from "jszip";
 import { apply } from "../lib/index.js";
 import { readManifest, writeManifestAtomic } from "../lib/store.js";
+import { importKbpack } from "../lib/kbpack.js";
 
 async function makeRoot(prefix) {
   const root = await mkdtemp(join(tmpdir(), prefix));
@@ -396,6 +397,43 @@ test("标题尾随空格在包导入后逐字保留（导出→导入不改写�
     const manifest = await readManifest(join(target.kbRoot, "空格库"));
     assert.equal(manifest.docs[0].title, "标题带尾随空格 ");
   } finally {
+    await rm(target.root, { recursive: true, force: true });
+  }
+});
+
+test("forceStream：流式解压也能恢复正文与原件", async () => {
+  const source = await makeRoot("kb-pack-stream-src-");
+  const target = await makeRoot("kb-pack-stream-dst-");
+  try {
+    const src = await seedFile(source.root, "资料.md", "流式解压正文。\n");
+    const imported = await source.tools.get("kb_import").execute(
+      { path: src, kb: "来源库", title: "流式资料" },
+      source.exec
+    );
+    const docId = imported.imported[0].docId;
+    const pack = await exportPack(source.tools, source.exec, source.root, "来源库");
+    const result = await importKbpack({
+      kbRoot: target.kbRoot,
+      path: pack,
+      kb: "流式库",
+      forceStream: true,
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.created, 1);
+    const manifest = await readManifest(join(target.kbRoot, "流式库"));
+    assert.equal(manifest.docs.length, 1);
+    assert.equal(manifest.docs[0].id, docId);
+    const read = await target.tools.get("kb_list").execute({ kb: "流式库" }, target.exec);
+    assert.equal(read.total, 1);
+    const markdown = await readFile(join(target.kbRoot, "流式库", "markdown", docId, `${docId}.md`), "utf8");
+    assert.match(markdown, /流式解压正文/);
+    const sourceFile = (await import("node:fs/promises")).readdir(join(target.kbRoot, "流式库", "sources"));
+    const names = await sourceFile;
+    assert.ok(names.some((name) => name.startsWith(docId)));
+    const bytes = await readFile(join(target.kbRoot, "流式库", "sources", names.find((name) => name.startsWith(docId))), "utf8");
+    assert.match(bytes, /流式解压正文/);
+  } finally {
+    await rm(source.root, { recursive: true, force: true });
     await rm(target.root, { recursive: true, force: true });
   }
 });

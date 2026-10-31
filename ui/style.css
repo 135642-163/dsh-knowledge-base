@@ -467,3 +467,10 @@ body.embed .side-foot a[target="_blank"] { display: none; }
 .badge.trust-medium { color: #9a6700; border-color: color-mix(in srgb, #9a6700 35%, transparent); }
 .badge.trust-low { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
 .side-action.active { color: var(--accent); }
+
+/* 知识库包导入弹窗 */
+.package-summary { margin: 8px 0 12px; padding: 10px 12px; border: 1px solid var(--line, #d8d8d8); border-radius: 8px; background: var(--bg-soft, #fafafa); }
+.package-summary .kv { display: flex; gap: 8px; margin: 2px 0; font-size: 13px; }
+.package-modes { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
+.package-mode { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border: 1px solid var(--line, #d8d8d8); border-radius: 8px; cursor: pointer; }
+.package-mode input { margin-top: 3px; }

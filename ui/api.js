@@ -68,6 +68,48 @@ function uploadFile(batchId, item, { onProgress, signal } = {}) {
   });
 }
 
+function uploadPackage(file, { onProgress, signal } = {}) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${BASE}/packages?name=${encodeURIComponent(file?.name ?? "kbpack.zip")}`);
+    xhr.setRequestHeader("x-kb-ui", "1");
+    xhr.setRequestHeader("content-type", "application/zip");
+    xhr.responseType = "json";
+    if (xhr.upload) {
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable && event.total > 0) onProgress?.(event.loaded / event.total);
+      };
+    }
+    let finished = false;
+    const onAbort = () => xhr.abort();
+    const settle = (fn, value) => {
+      if (finished) return;
+      finished = true;
+      if (signal) signal.removeEventListener("abort", onAbort);
+      xhr.onload = null;
+      xhr.onerror = null;
+      xhr.onabort = null;
+      fn(value);
+    };
+    xhr.onload = () => {
+      const payload = xhr.response ?? null;
+      if (xhr.status >= 200 && xhr.status < 300) {
+        settle(resolve, payload);
+        return;
+      }
+      settle(reject, new ApiError(xhr.status, payload?.error?.code ?? "HTTP_ERROR", payload?.error?.message ?? `上传失败 (${xhr.status})`));
+    };
+    xhr.onerror = () => settle(reject, new ApiError(0, "NETWORK_ERROR", "上传失败（网络错误）"));
+    xhr.onabort = () => settle(reject, new ApiError(0, "ABORTED", "上传已取消"));
+    if (signal?.aborted) {
+      settle(reject, new ApiError(0, "ABORTED", "上传已取消"));
+      return;
+    }
+    if (signal) signal.addEventListener("abort", onAbort, { once: true });
+    xhr.send(file);
+  });
+}
+
 export const api = {
   status: () => request("GET", "/status"),
   semantic: () => request("GET", "/semantic"),
@@ -182,6 +224,8 @@ export const api = {
   deleteBatch: (id) => request("DELETE", `/upload-batches/${encodeURIComponent(id)}`),
   importBatch: (id, body) => request("POST", `/upload-batches/${encodeURIComponent(id)}/import`, body),
   uploadFile,
+  uploadPackage,
+  importPackage: (uploadId, body) => request("POST", `/packages/${encodeURIComponent(uploadId)}/import`, body),
   job: async (id) => (await request("GET", `/jobs/${encodeURIComponent(id)}`)).job,
   cancelJob: async (id) => (await request("POST", `/jobs/${encodeURIComponent(id)}/cancel`)).job,
   jobs: async (params = {}) => {

@@ -91,6 +91,9 @@ exports/                   导出产物
   `Thumbs.db` / `desktop.ini` / `.DS_Store` 等系统垃圾文件，并在上传面板与导入结果里报告
   「已跳过 N 个临时/锁文件」；普通 `.tmp` 文件不跳过。
 
+概览页「导入知识库包」：选择 `.zip` 上传后先预检（同名库返回 merge/rename/replace 三选一），确认后后台导入；
+导入中可关闭弹窗，任务继续运行。
+
 「标准更新」面板（库详情 tab）：读取 `.std-check.json` 的上次检查时间、缓存有效期（TTL 7 天）
 与待下载数（有新版 / 草案转正 / 可补下载）；支持仅检查 / 检查并下载 / 补下载 / 强制全查 / 本轮上限，运行中可取消（当前正在处理的标准完成后停止，之后不再发起新的下载）；新增「按标准号补下载」：输入编号先检索并校验站点确认页（防串档）与金币，确认后再下载并导入；
 下载前必须勾选金币确认（每个标准约 6 金币，VIP 免金币）；`bzCookie` 只在状态里显示“已配置 / 未配置”，
@@ -276,9 +279,9 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
   的 `*Source=manual` 不覆盖目标库人工值；导入后一次清单写入、重建索引/FTS、log 记 `import-package`。
 - **同名库由用户选**：目标库已存在且未给 `mode` 时不写入，返回 `merge` / `rename`（自动加「(导入)」后缀）/
   `replace` 三选一；`dryRun=true` 只预演。
-- **大包限制**：带 `sources` 的整库包在真实「标准」库实测 4.76 GB；当前内联导入上限 1 GB，
-  超限会在写入前明确拒绝。换机迁移建议先导出 `includeSources=false` 的正文包（913 篇约 58 MB，
-  2.7 秒可导入），原件留在原机按需 `kb_reparse`。
+- **大包支持**：>256 MB 的包自动切换**流式 ZIP 解压**（不整包进内存）；真实「标准」库
+  带 sources 的 **4.76 GB** 包实测 7.2 秒导入 913 篇 + 906 份原件（RSS 峰值约 218 MB）。
+  单包上限 8 GB；正文包（913 篇约 58 MB）仍是最快迁移方式。
 - **快照恢复**：新工具 `kb_snapshot_restore`，默认 dry-run；校验 zip/库名/schemaVersion；恢复前自动留
   `before-restore` 快照；`prune=true` 时快照外文档的 markdown/sources 移入 `trash-restore/`；log/schema/history
   不随快照回滚；恢复后重建索引与 FTS。
@@ -287,12 +290,14 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
 - **OCR 前水印净化**：扫描页渲染后按亮度直方图 + 深色核心邻域判定浅灰水印并置白，默认 `watermark=auto`
   （`off`/`strong` 可调）；只改 OCR 用的内存图，不写回原件；`kb_import`/`kb_reparse`/`kb_import_package`
   均可传 `watermark`。
+- **工作台导入包**：概览页新增「导入知识库包」按钮：上传 kbpack → 预检（同名库三选一）→
+  `kb-package` 后台任务导入；导入成功后清理上传文件，失败保留 24 小时供重试。
 - **P1 标准自动化**：`scripts/std-check-daily.mjs` + launchd 模板（每日检查、报告落
   `docs/reports/std-check-YYYYMMDD.md`，仅 update/released 时通知/退出码 10）；缺口台账
   `<kb>/.std-gaps.json` 跨轮追踪「站点未收录（非站外体系）」与「分册歧义」，站点收录后自动移除；
   工作台标准更新面板新增「按标准号补下载」：先预览确认页/金币（防串档），确认后走 `kb-std` 后台任务
   下载并导入，结果复用现有标准面板；面板同时显示缺口台账的未收录/分册歧义数量。
-- 测试 1154 → **1214**（新增 kbpack 导出/校验/导入、快照恢复、缺口台账、每日报告、水印净化、
+- 测试 1154 → **1227**（新增 kbpack 导出/校验/导入、快照恢复、缺口台账、每日报告、水印净化、
   可信度编辑）。
 
 ## 0.32.0 标准更新链路修复 + 库内版本收敛规则
