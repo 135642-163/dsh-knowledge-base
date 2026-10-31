@@ -48,12 +48,14 @@ const OPTIONS = [
   },
 ];
 
-export function exportOptionBody(option) {
-  if (option === "md") return { format: "md" };
-  return { format: "zip", includeSources: option === "zip-sources" };
+export function exportOptionBody(option, docIds = null) {
+  const base = option === "md"
+    ? { format: "md" }
+    : { format: "zip", includeSources: option === "zip-sources" };
+  return Array.isArray(docIds) && docIds.length > 0 ? { ...base, docIds } : base;
 }
 
-export function openExportModal({ name, notify = () => {}, onFinished = () => {} } = {}) {
+export function openExportModal({ name, docIds = null, notify = () => {}, onFinished = () => {} } = {}) {
   const node = document.createElement("div");
   node.className = "overlay";
   node.innerHTML = `<div class="modal" role="dialog" aria-modal="true"></div>`;
@@ -66,6 +68,7 @@ export function openExportModal({ name, notify = () => {}, onFinished = () => {}
     job: null,
     jobId: "",
     error: "",
+    docIds: Array.isArray(docIds) && docIds.length > 0 ? docIds : null,
     timer: null,
     closed: false,
   };
@@ -158,7 +161,7 @@ export function openExportModal({ name, notify = () => {}, onFinished = () => {}
     state.error = "";
     render();
     try {
-      const started = await api.exportKb(name, exportOptionBody(state.choice));
+      const started = await api.exportKb(name, exportOptionBody(state.choice, state.docIds));
       state.jobId = started?.jobId;
       if (!state.jobId) throw new Error("导出任务没有返回 jobId");
       await poll();

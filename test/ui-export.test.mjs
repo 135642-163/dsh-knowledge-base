@@ -13,6 +13,7 @@ test("导出选项映射到 format/includeSources", () => {
   assert.deepEqual(exportOptionBody("zip"), { format: "zip", includeSources: false });
   assert.deepEqual(exportOptionBody("zip-sources"), { format: "zip", includeSources: true });
   assert.deepEqual(exportOptionBody("md"), { format: "md" });
+  assert.deepEqual(exportOptionBody("zip", ["d1", "d2"]), { format: "zip", includeSources: false, docIds: ["d1", "d2"] });
 });
 
 test("概览页有导入/导出知识库入口", () => {

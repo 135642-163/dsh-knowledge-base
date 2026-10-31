@@ -118,6 +118,7 @@ export function renderDocsBulkBar({ selected = [], busy = false } = {}) {
   return `
     <div class="docs-bulk">
       <strong>已选 ${count} 篇</strong>
+      <button type="button" class="btn" data-action="docs-export-selected"${busy ? " disabled" : ""}>导出选中</button>
       <button type="button" class="btn" data-action="docs-move"${busy ? " disabled" : ""}>移动到…</button>
       <button type="button" class="btn danger" data-action="docs-trash-selected"${busy ? " disabled" : ""}>移入回收站</button>
       <button type="button" class="btn" data-action="docs-clear-selection"${busy ? " disabled" : ""}>取消选择</button>

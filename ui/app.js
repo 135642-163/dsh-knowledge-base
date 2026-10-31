@@ -2,7 +2,7 @@ import { api, ApiError } from "./api.js";
 import { icons } from "./icons.js";
 import { hrefForKb, hrefForOverview, hrefForSearch, hrefForTrash, parseHash } from "./router.js";
 import { renderOverview } from "./views/overview.js";
-import { docsPageSize, docsStatus, renderDetail, selectionToggle, selectionToggleOne } from "./views/detail.js";
+import { docsPageSize, docsStatus, renderDetail, selectionIds, selectionToggle, selectionToggleOne } from "./views/detail.js";
 import { attachDocsControls, createRequestGate } from "./docs-controls.js";
 import { parsePreviewDeepLink } from "./deep-link.js";
 import { applyHighlights, mergeResults, searchParamsOf, searchStateFromQuery } from "./search-core.js";
@@ -1360,6 +1360,11 @@ function bind() {
       if (state.docs.busy) return;
       state.docs.selected = [];
       render();
+    } else if (action === "docs-export-selected") {
+      const current = route();
+      const ids = selectionIds(state.docs.selected);
+      if (current.page !== "detail" || ids.length === 0) return;
+      openExportModal({ name: current.name, docIds: ids, notify: showToast });
     } else if (action === "docs-move") {
       if (state.docs.busy) return;
       moveSelectedDocs();

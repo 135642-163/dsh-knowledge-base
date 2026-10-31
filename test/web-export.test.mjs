@@ -11,6 +11,7 @@ import { handleApi } from "../lib/web/api.js";
 import { createKb } from "../lib/kbmeta.js";
 import { createJobRegistry } from "../lib/web/jobs.js";
 import { importFileInto } from "../lib/pipeline.js";
+import { readManifest } from "../lib/store.js";
 
 function makeRes() {
   const chunks = [];
@@ -130,6 +131,35 @@ test("导出下载拒绝目录穿越", async () => {
     }));
     assert.equal(result.res.status, 400);
     assert.equal(result.json.error.code, "INVALID_ARGS");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+
+test("导出可只包含选中的文档", async () => {
+  const { root, dir, jobs, opts } = await setup();
+  try {
+    const src2 = join(root, "第二篇.txt");
+    await writeFile(src2, "第二篇正文。\n", "utf8");
+    await importFileInto(dir, { sourcePath: src2, relKey: "第二篇.txt", title: "第二篇资料", config: { partMaxChars: 500 } });
+    const manifest = await readManifest(dir);
+    const first = manifest.docs.find((doc) => doc.title === "导出资料");
+    assert.ok(first);
+    const started = await call(opts, makeReq({
+      method: "POST",
+      url: `${KB_API}/export`,
+      body: { format: "zip", docIds: [first.id] },
+    }));
+    const job = await waitJob(jobs, started.json.jobId);
+    assert.equal(job.status, "succeeded");
+    const { default: JSZip } = await import("jszip");
+    const zip = await JSZip.loadAsync(await readFile(join(dir, "exports", job.result.fileName)));
+    const pack = JSON.parse(await zip.file("manifest.json").async("string"));
+    assert.equal(pack.counts.docs, 1);
+    assert.equal(pack.docs[0].id, first.id);
+    assert.ok(zip.file(`markdown/${first.id}/${first.id}.md`));
+    assert.equal(zip.file("markdown/" + manifest.docs.find((doc) => doc.id !== first.id && doc.type !== "note").id), null);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
