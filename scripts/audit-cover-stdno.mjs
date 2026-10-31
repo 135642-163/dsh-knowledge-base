@@ -59,11 +59,16 @@ export function coverText(kbDir, docId, n = 700) {
     .replace(/[—–－‐]/g, "-");
 }
 
-/** 从封面文本取标准号要素。 */
+/** 从封面文本取标准号要素；跳过「代替 …」「引用 …」这类提到别人的上下文。 */
 export function coverStdNo(text) {
-  const hit = String(text ?? "").match(STD);
-  if (!hit) return null;
-  return { prefix: normPrefix(hit[2]), number: hit[3], year: Number(hit[4]) };
+  const t = String(text ?? "");
+  const skip = /代替|被替代|代替标准|引用|参见|参照|符合|按照|依据/;
+  for (const hit of t.matchAll(new RegExp(STD.source, "g"))) {
+    const before = t.slice(Math.max(0, (hit.index ?? 0) - 30), hit.index ?? 0);
+    if (skip.test(before)) continue; // 封面上的「代替 GB/T 20000.2—2009」不是本文的标准号
+    return { prefix: normPrefix(hit[2]), number: hit[3], year: Number(hit[4]) };
+  }
+  return null;
 }
 
 /** 元数据标准号要素。 */

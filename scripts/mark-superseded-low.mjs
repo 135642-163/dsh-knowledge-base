@@ -10,10 +10,10 @@
  * 默认 dry-run；--apply 才写清单（带锁 + 原子写 + 刷新 index.md + 写 log.md）。
  * 会覆盖 trustSource=manual 的人工标注——执行前必须已获得用户授权并留快照。
  */
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { readManifest, updateDocsMetaLocked, withManifestLock, expandRoot, kbDirPath } from "../lib/store.js";
-import { collectLibrarySuperseded, librarySupersedeReason, libraryHolds, successorsOf } from "../lib/supersede.js";
+import { collectLibrarySuperseded, librarySupersedeReason, libraryHolds, successorsOf, collectCoverSuperseded, coverSupersedeReason } from "../lib/supersede.js";
 import { appendLog } from "../lib/wiki.js";
 import { refreshKbIndex } from "../lib/import-job.js";
 
@@ -21,7 +21,7 @@ const SITE_LABEL = "标准网";
 const TODAY = new Date().toISOString().slice(0, 10);
 
 function parseArgs(argv) {
-  const args = { root: "", kb: "", apply: false, limit: 20, report: "", json: false, date: TODAY, library: false, refresh: false };
+  const args = { root: "", kb: "", apply: false, limit: 20, report: "", json: false, date: TODAY, library: false, refresh: false, covers: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--apply") args.apply = true;
@@ -32,9 +32,15 @@ function parseArgs(argv) {
     else if (arg === "--report") args.report = argv[++i] ?? "";
     else if (arg === "--json") args.json = true;
     else if (arg === "--library") args.library = true;
+    else if (arg === "--covers") args.covers = true;
     else if (arg === "--refresh") args.refresh = true;
     else if (arg === "--help" || arg === "-h") {
-      console.log("用法: node scripts/mark-superseded-low.mjs --root <kbRoot> --kb <库名> [--dry-run|--apply] [--limit 20] [--library] [--refresh] [--report out.json]\n  --library  用离线规则（同号已有更新年份 ⇒ 旧版废止）而不是站点废止标记\n  --refresh  只更新已有 low 标注的理由（不改变 trust 级别）");
+      console.log([
+        "用法: node scripts/mark-superseded-low.mjs --root <kbRoot> --kb <库名> [--dry-run|--apply] [--limit 20] [--library|--covers] [--refresh] [--report out.json]",
+        "  --library  离线规则：同号已有更新年份 ⇒ 旧版废止",
+        "  --covers   封面/前言声明「代替 X」⇒ X 废止（比年份可靠，能跨编号）",
+        "  --refresh  只刷新已有 low 标注的理由（不改级别）",
+      ].join("\\n"));
       process.exit(0);
     } else throw new Error(`未知参数: ${arg}`);
   }
@@ -76,7 +82,31 @@ async function main() {
 
   // 计算每篇待标文档的理由
   const plan = [];
-  if (args.library) {
+  if (args.covers) {
+    const texts = new Map();
+    for (const doc of live) {
+      const f = join(kbDir, "markdown", doc.id, `${doc.id}.md`);
+      if (!existsSync(f)) continue;
+      texts.set(doc.id, readFileSync(f, "utf8").slice(0, 2500));
+    }
+    const { groups } = collectCoverSuperseded({ manifest, texts });
+    for (const group of groups) {
+      const reason = coverSupersedeReason(group);
+      for (const old of group.olds) {
+        const doc = byId.get(old.docId);
+        if (!doc) continue;
+        plan.push({
+          docId: old.docId,
+          title: doc.title,
+          siteNo: old.standardNo || old.title,
+          tier: "C",
+          successors: group.keep.map((k) => k.standardNo || k.title),
+          from: { trust: doc.trust ?? "unknown", trustSource: doc.trustSource ?? "unknown", trustReason: doc.trustReason ?? "" },
+          to: { trust: "low", trustSource: "manual", reason },
+        });
+      }
+    }
+  } else if (args.library) {
     const { groups } = collectLibrarySuperseded(manifest);
     for (const group of groups) {
       const reason = librarySupersedeReason(group);
@@ -123,7 +153,7 @@ async function main() {
   // 去重：同一篇只标一次
   const seen = new Set();
   const unique = plan.filter((p) => (seen.has(p.docId) ? false : (seen.add(p.docId), true)));
-  const REFRESHABLE = /^(站点标注废止|库内已有同号更新版本)/;
+  const REFRESHABLE = /^(站点标注废止|库内已有同号更新版本|封面声明代替)/;
   const todo = args.refresh
     ? unique.filter((p) => p.from.trust === "low" && REFRESHABLE.test(p.from.trustReason) && p.from.trustReason !== p.to.reason)
     : unique.filter((p) => p.from.trust !== "low");
@@ -146,7 +176,7 @@ async function main() {
     });
     await appendLog(kbDir, {
       action: "trust",
-      title: args.refresh ? `更新废止理由：${applied} 篇` : `标注可信度 low：${applied} 篇（${args.library ? "库内同号旧版" : "站点标注废止"}）`,
+      title: args.refresh ? `更新废止理由：${applied} 篇` : `标注可信度 low：${applied} 篇（${args.covers ? "封面代替关系" : args.library ? "库内同号旧版" : "站点标注废止"}）`,
       detail: `A/B/C 分层见 docs/reports/2026-10-31-superseded-review.md`,
     });
     await refreshKbIndex(kbDir);
@@ -167,7 +197,7 @@ async function main() {
     console.log(JSON.stringify(report, null, 2));
     return;
   }
-  const scope = args.library ? "库内同号旧版" : "站点废止";
+  const scope = args.covers ? "封面代替关系" : args.library ? "库内同号旧版" : "站点废止";
   console.log(`知识库「${args.kb}」：${scope}规则命中 ${unique.length} 篇，${args.refresh ? "待刷新理由" : "待标 low"} ${todo.length} 篇；本次${args.apply ? "已应用" : "预演"} ${batch.length} 篇${todo.length > batch.length ? `（余 ${todo.length - batch.length} 篇下批）` : ""}`);
   for (const item of batch) {
     console.log(`  ${item.docId} | ${item.from.trust}/${item.from.trustSource} → low | [${item.tier}] ${item.siteNo} | ${item.title.slice(0, 46)}`);

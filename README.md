@@ -277,6 +277,8 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
   站点字段；`superseded` 记录里写了「被 X 代替」时会按 X 去抓新版（抓到更新版本即判 `update`）。
 - **库内版本收敛规则**（离线）：同编号存在更新年份时，旧版按已废止处理（名称相似度 ≥0.8 把关，
   草案/编制说明不参与，分册与体系各自收敛）。配套 `scripts/mark-superseded-low.mjs --library`。
+- **封面「代替」关系**（更可靠的废止判据）：解析封面/前言里的「代替 X」声明建立替代关系，
+  能跨编号判定（`GB/T 22386-2008` 被 `GB/T 14598.24-2017` 代替）；`--covers` 模式批量标 low。
 - **新脚本**：`scripts/fix-std-stage.mjs`（纠正被内容阶段词误标的 stage）、
   `scripts/fetch-standards.mjs`（按标准号补下载）、`scripts/audit-cover-stdno.mjs`
   （封面标准号 vs 元数据核对）、`scripts/refresh-trust-verdict.mjs`（刷新核对结论）。

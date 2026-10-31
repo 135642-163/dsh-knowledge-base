@@ -9,6 +9,9 @@ import {
   nameSimilarity,
   collectLibrarySuperseded,
   librarySupersedeReason,
+  replacementTargets,
+  collectCoverSuperseded,
+  coverSupersedeReason,
 } from "../lib/supersede.js";
 
 function doc(id, title, { stage = "published", stageLabel = "发布稿", standardNo, standardNumber, standardYear, deletedAt } = {}) {
@@ -113,4 +116,57 @@ test("同一年份有多份（重复导入）时全部保留为新版", () => {
   const { groups } = collectLibrarySuperseded(manifest);
   assert.equal(groups[0].keep.length, 2);
   assert.deepEqual(groups[0].olds.map((o) => o.docId), ["a"]);
+});
+
+test("replacementTargets：只取「代替 …」方向，忽略「被 … 代替」", () => {
+  assert.deepEqual(replacementTargets("代替 GB/T 20000.2—2009、GB/T 20000.9—2014"), ["GB/T 20000.2-2009", "GB/T 20000.9-2014"]);
+  assert.deepEqual(replacementTargets("本标准代替 GB 12326—2000《电能质量 电压波动和闪变》。"), ["GB 12326-2000"]);
+  assert.deepEqual(replacementTargets("代替GB/Z 19963-2005被GB/T 19963.1-2021代替"), ["GB/Z 19963-2005"]);
+  assert.deepEqual(replacementTargets("被GB/T 14598.24-2017代替"), []);
+});
+
+test("collectCoverSuperseded：跨编号替代也能建立关系（22386 ← 14598.24）", () => {
+  const manifest = {
+    docs: [
+      doc("new", "GB/T 14598.24-2017 量度继电器和保护装置 第24部分", { standardNo: "GB/T 14598.24-2017", standardNumber: "14598.24", standardYear: 2017 }),
+      doc("old", "GB/T 22386-2008 电力系统暂态数据交换通用格式", { standardNo: "GB/T 22386-2008", standardNumber: "22386", standardYear: 2008 }),
+    ],
+  };
+  const texts = new Map([["new", "GB/T 14598.24—2017\n代替 GB/T 22386-2008\n前言 …"]]);
+  const { groups, docs } = collectCoverSuperseded({ manifest, texts });
+  assert.equal(docs, 1);
+  assert.equal(docs, groups.length);
+  assert.deepEqual(groups[0].olds.map((o) => o.docId), ["old"]);
+  assert.deepEqual(groups[0].keep.map((k) => k.docId), ["new"]);
+  assert.match(coverSupersedeReason(groups[0]), /封面声明代替 GB\/T 22386-2008/);
+});
+
+test("collectCoverSuperseded：声明的被替代标准不在库里时不产生条目；自引用忽略", () => {
+  const manifest = {
+    docs: [
+      doc("a", "GB/T 1.2-2020 标准化工作导则 第2部分", { standardNo: "GB/T 1.2-2020", standardNumber: "1.2", standardYear: 2020 }),
+      doc("b", "GB/T 20000.2-2009 标准化工作指南 第2部分", { standardNo: "GB/T 20000.2-2009", standardNumber: "20000.2", standardYear: 2009 }),
+    ],
+  };
+  // 声明代替 20000.2 且库里也有 → 建立关系
+  const hit = collectCoverSuperseded({ manifest, texts: new Map([["a", "代替 GB/T 20000.2—2009"]]) });
+  assert.equal(hit.docs, 1);
+  // 声明代替一个库里没有的编号 → 不产生条目
+  const miss = collectCoverSuperseded({ manifest, texts: new Map([["a", "代替 GB/T 99999-2001"]]) });
+  assert.equal(miss.docs, 0);
+  // 自己声明代替自己 → 忽略
+  const self = collectCoverSuperseded({ manifest, texts: new Map([["a", "代替 GB/T 1.2-2020"]]) });
+  assert.equal(self.docs, 0);
+});
+
+test("collectCoverSuperseded：草案/编制说明里的「代替」声明不作数", () => {
+  const manifest = {
+    docs: [
+      // 新版是送审稿 → 不能据此判定旧版废止
+      doc("draft", "NB/T 42043-2021 高压静止同步补偿装置 送审稿", { stage: "review", stageLabel: "送审稿" }),
+      doc("old", "NB/T 42043-2014 高压静止同步补偿装置", { standardNo: "NB/T 42043-2014", standardNumber: "42043", standardYear: 2014 }),
+    ],
+  };
+  const { docs } = collectCoverSuperseded({ manifest, texts: new Map([["draft", "代替 NB/T 42043-2014"]]) });
+  assert.equal(docs, 0, "草案声明代替不能作为废止依据");
 });
