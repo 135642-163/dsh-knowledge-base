@@ -1,0 +1,19 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { extractScopeSummary, looksNoisySummary } from "../lib/summary-candidates.js";
+
+test("识别封面/OCR 噪声摘要", () => {
+  assert.equal(looksNoisySummary("!!89 WxT PQjk"), true);
+  assert.equal(looksNoisySummary("ICS 29.020 中华人民共和国国家标准"), true);
+  assert.equal(looksNoisySummary("本标准规定了电压偏差的限值。"), false);
+  assert.equal(looksNoisySummary(""), true);
+});
+
+test("从正文提取范围句并截断", () => {
+  const md = `# 标题\n### 第 1 页\nICS 29.020 封面\n### 第 2 页\n本标准规定了电压暂降与短时中断的指标及测试、统计和评估方法。\n本标准适用于交流 50 Hz 电力系统。`;
+  assert.equal(
+    extractScopeSummary(md),
+    "本标准规定了电压暂降与短时中断的指标及测试、统计和评估方法。",
+  );
+  assert.equal(extractScopeSummary("# 只有标题"), "");
+});
