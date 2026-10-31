@@ -82,6 +82,40 @@ test("PATCH title marks manual and preserves on reimport", async (t) => {
   assert.equal(doc.version, 3);
 });
 
+test("PATCH trust：人工可信度落盘且 trustSource=manual", async (t) => {
+  const { root, kbRoot, dir } = await setup();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const opts = { kbRoot, defaultKb: KB, jobs: null };
+  let result = await call(opts, makeReq({
+    method: "PATCH", url: docUrl("d1", "metadata"),
+    body: { trust: "high", trustReason: "现行版" },
+  }));
+  assert.equal(result.res.status, 200);
+  assert.equal(result.json.doc.trust, "high");
+  assert.equal(result.json.doc.trustSource, "manual");
+  assert.equal(result.json.doc.trustReason, "现行版");
+  let manifest = await readManifest(dir);
+  let doc = manifest.docs.find((item) => item.id === "d1");
+  assert.equal(doc.trust, "high");
+  assert.equal(doc.trustSource, "manual");
+  assert.equal(doc.version, 3, "可信度编辑不递增正文版本号");
+
+  result = await call(opts, makeReq({
+    method: "PATCH", url: docUrl("d1", "metadata"), body: { trust: "unknown" },
+  }));
+  assert.equal(result.res.status, 200);
+  manifest = await readManifest(dir);
+  doc = manifest.docs.find((item) => item.id === "d1");
+  assert.equal(doc.trust, "unknown");
+  assert.equal(doc.trustSource, "unknown");
+
+  result = await call(opts, makeReq({
+    method: "PATCH", url: docUrl("d1", "metadata"), body: { trust: "bogus" },
+  }));
+  assert.equal(result.res.status, 400);
+  assert.equal(result.json.error.code, "INVALID_ARGS");
+});
+
 test("PATCH standardNo：识别/规范化并写派生字段，清空后恢复非标准", async (t) => {
   const { root, kbRoot, dir } = await setup();
   t.after(() => rm(root, { recursive: true, force: true }));

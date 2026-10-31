@@ -111,6 +111,7 @@ test("批次详情/删除/导入/标准检查的方法与请求体", async () =>
   await api.deleteBatch("b-0123456789ab");
   await api.importBatch("b-0123456789ab", { kb: "标准", create: true });
   await api.stdCheck("标准", { action: "check", force: true, limit: 1, dryRun: false });
+  await api.stdFetch("标准", { stdNo: "GB/T 4728.12-2022", dryRun: true });
 
   assert.equal(calls[0].url, "/kb/api/upload-batches/b-0123456789ab");
   assert.equal(calls[0].options.method, "GET");
@@ -123,6 +124,9 @@ test("批次详情/删除/导入/标准检查的方法与请求体", async () =>
   assert.equal(calls[3].url, "/kb/api/kbs/%E6%A0%87%E5%87%86/std-check");
   assert.equal(calls[3].options.method, "POST");
   assert.deepEqual(JSON.parse(calls[3].options.body), { action: "check", force: true, limit: 1, dryRun: false });
+  assert.equal(calls[4].url, "/kb/api/kbs/%E6%A0%87%E5%87%86/std-fetch");
+  assert.equal(calls[4].options.method, "POST");
+  assert.deepEqual(JSON.parse(calls[4].options.body), { stdNo: "GB/T 4728.12-2022", dryRun: true });
 });
 
 test("预取消 signal 直接拒绝且不发送", async () => {

@@ -839,14 +839,14 @@ test("kb_rename: requires explicit kb and rejects out-of-scope targets", async (
   assert.equal(renamed.kb, "甲库2");
 });
 
-test("none mode disables all 21 kb_* tools with KB_DISABLED", async () => {
+test("none mode disables all 23 kb_* tools with KB_DISABLED", async () => {
   const { tools, scoped, importDoc, none, root } = await setup();
   const doc = await importDoc("a.md", "# 甲\n\n继电保护技术条件正文。\n", "甲库", "甲文档");
   await importDoc("b.md", "# 乙\n\n乙库正文。\n", "乙库", "乙文档");
   const path = join(root, "locked.md");
   await writeFile(path, "# 锁定\n\n未启用时不应导入。\n", "utf8");
   await none("s1");
-  assert.equal(tools.size, 21, "expected the full kb_* tool matrix");
+  assert.equal(tools.size, 23, "expected the full kb_* tool matrix");
 
   const cases = [
     ["kb_list", {}],
@@ -863,11 +863,13 @@ test("none mode disables all 21 kb_* tools with KB_DISABLED", async () => {
     ["kb_keep", { docs: [doc.docId], note: "保留" }],
     ["kb_edit_batch", { edits: [{ doc: doc.docId, old_string: "正文", new_string: "修订" }] }],
     ["kb_snapshot", {}],
+    ["kb_snapshot_restore", {}],
     ["kb_add_note", { title: "笔记", content: "内容" }],
     ["kb_remove", {}],
     ["kb_restore", { doc: doc.docId }],
     ["kb_history", { doc: doc.docId }],
     ["kb_export", { format: "md" }],
+    ["kb_import_package", { path }],
     ["kb_rename", {}],
     ["kb_std_check", { action: "check" }],
   ];

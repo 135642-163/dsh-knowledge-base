@@ -1,6 +1,6 @@
 import { api, ApiError } from "../api.js";
 import { formatBytes } from "../upload-core.js";
-import { docMetaUnchanged, parseDocTagsInput, summarySourceLabel } from "./doc-meta.js";
+import { DOC_TRUST_LEVELS, docMetaUnchanged, parseDocTagsInput, summarySourceLabel, trustLevelLabel } from "./doc-meta.js";
 import { clampPage, withPageFragment } from "../deep-link.js";
 
 // 弹窗关闭统一走 closeOverlay：同时摘掉 Esc 监听并从栈里移除。
@@ -620,8 +620,13 @@ export function renderDocModalBody({ name, id, doc } = {}) {
           <label class="field"><span>标签（逗号分隔，最多 20 个）</span>
             <input name="doc-tags" value="${escapeAttr(tagsValue)}" placeholder="并网, 海上风电" autocomplete="off" />
           </label>
+          <label class="field"><span>可信度 <span class="muted">（人工选择后检索会优先标注，不再被自动推断覆盖）</span></span>
+            <select name="doc-trust">
+              ${DOC_TRUST_LEVELS.map((level) => `<option value="${level}"${(doc?.trust ?? "unknown") === level ? " selected" : ""}>${escapeHtml(trustLevelLabel(level))}</option>`).join("")}
+            </select>
+          </label>
           <div class="modal-actions meta-actions">
-            <button type="button" class="btn primary" data-save-meta disabled>保存名称/摘要/标签/标准号</button>
+            <button type="button" class="btn primary" data-save-meta disabled>保存名称/摘要/标签/标准号/可信度</button>
           </div>
         </div>` : `
         <div class="kv"><span>摘要</span><strong>${escapeHtml(doc?.summary || "—")}</strong></div>
@@ -742,8 +747,9 @@ export function openDocModal({ name, id, icons, notify = () => {}, onChanged } =
     const standardNoInput = node.querySelector('[name="doc-standard-no"]');
     const summaryInput = node.querySelector('[name="doc-summary"]');
     const tagsInput = node.querySelector('[name="doc-tags"]');
+    const trustInput = node.querySelector('[name="doc-trust"]');
     const saveButton = node.querySelector("[data-save-meta]");
-    if (saveButton && (titleInput || summaryInput || tagsInput || standardNoInput)) {
+    if (saveButton && (titleInput || summaryInput || tagsInput || standardNoInput || trustInput)) {
       const refreshDirty = () => {
         if (savingMeta) return;
         saveButton.disabled = docMetaUnchanged(doc, {
@@ -751,12 +757,14 @@ export function openDocModal({ name, id, icons, notify = () => {}, onChanged } =
           summary: summaryInput?.value ?? "",
           tags: tagsInput?.value ?? "",
           standardNo: standardNoInput?.value ?? "",
+          trust: trustInput?.value ?? "unknown",
         });
       };
       titleInput?.addEventListener("input", refreshDirty);
       standardNoInput?.addEventListener("input", refreshDirty);
       summaryInput?.addEventListener("input", refreshDirty);
       tagsInput?.addEventListener("input", refreshDirty);
+      trustInput?.addEventListener("change", refreshDirty);
       saveButton.addEventListener("click", () => { void saveMeta(); });
       refreshDirty();
     }
@@ -769,7 +777,8 @@ export function openDocModal({ name, id, icons, notify = () => {}, onChanged } =
     const summary = node.querySelector('[name="doc-summary"]')?.value ?? doc.summary ?? "";
     const tags = node.querySelector('[name="doc-tags"]')?.value ?? (doc.tags ?? []).join(", ");
     const standardNo = node.querySelector('[name="doc-standard-no"]')?.value ?? doc.standardNo ?? "";
-    if (docMetaUnchanged(doc, { title, summary, tags, standardNo })) return;
+    const trust = node.querySelector('[name="doc-trust"]')?.value ?? doc.trust ?? "unknown";
+    if (docMetaUnchanged(doc, { title, summary, tags, standardNo, trust })) return;
     if (!String(title).trim()) {
       showError("标题不能为空");
       return;
@@ -785,6 +794,7 @@ export function openDocModal({ name, id, icons, notify = () => {}, onChanged } =
         summary,
         tags: parseDocTagsInput(tags),
         standardNo: String(standardNo).replace(/\s+/g, " ").trim(),
+        trust: String(trust),
       });
       if (!node.isConnected) return;
       paint(saved.doc);

@@ -6,6 +6,15 @@
 
 const STATUS_LABELS = {
   imported: "导入成功",
+  "skipped-existing": "库内已有",
+  ready: "可下载",
+  "daily-limit": "每日上限",
+  "auth-required": "需登录",
+  "no-download-id": "无下载链接",
+  "confirm-mismatch": "确认页不符",
+  "download-failed": "下载失败",
+  "import-failed": "导入失败",
+  "not-found": "站点未找到",
   downloaded: "下载成功",
   update: "有新版",
   released: "草案转正",
@@ -18,7 +27,7 @@ const STATUS_LABELS = {
   current: "已是最新",
 };
 
-const PHASE_LABELS = { collect: "收集", check: "检查", download: "下载", import: "导入" };
+const PHASE_LABELS = { collect: "收集", check: "检查", search: "检索", confirm: "校验确认页", download: "下载", import: "导入" };
 
 const JOB_STATUS_LABELS = { running: "进行中", succeeded: "已完成", failed: "失败", cancelled: "已取消" };
 
@@ -59,6 +68,7 @@ export function renderStdPanel(state, kb, { escapeHtml = defaultEscapeHtml } = {
           ? `${count(cache.items)} 条 · ${ageText(cache.ageDays)} · ${cache.valid ? "有效" : "已过期"} · TTL ${count(cache.ttlDays ?? 7)} 天`
           : `无记录 · TTL ${count(cache.ttlDays ?? 7)} 天`}</strong></div>
         <div class="kv"><span>待下载</span><strong>有新版 ${count(pending.update)} · 草案转正 ${count(pending.released)} · 可补下载 ${count(pending.downloadable)}</strong></div>
+        ${status.gaps && Number(status.gaps.total ?? 0) > 0 ? `<div class="kv"><span>缺口台账</span><strong>未收录 ${count(status.gaps.notFound)} · 分册歧义 ${count(status.gaps.ambiguous)}（.std-gaps.json）</strong></div>` : ""}
       </div>
       <div class="panel wide">
         <h3>运行</h3>
@@ -69,6 +79,11 @@ export function renderStdPanel(state, kb, { escapeHtml = defaultEscapeHtml } = {
           <label class="check"><input type="checkbox" id="std-force" ${running ? "disabled" : ""} /> 强制全查</label>
           <label class="check">本轮上限 <input id="std-limit" type="number" min="0" step="1" value="0" style="width:70px" ${running ? "disabled" : ""} /></label>
         </div>
+        <div class="form-row">
+          <input id="std-fetch-no" type="text" maxlength="80" placeholder="按标准号补下载：GB/T 4728.12-2022" style="min-width:240px" ${running || !configured ? "disabled" : ""} />
+          <button class="btn" data-action="std-fetch-preview" ${running || !configured || std.fetching ? "disabled" : ""}>${std.fetching ? "校验中…" : "预览并补下载"}</button>
+        </div>
+        <p class="muted">「预览并补下载」先检索并校验站点确认页（防串档）与金币，确认后才下载并导入；只按精确同号处理。</p>
         <p class="muted">默认只检查过期（TTL）或待下载项；「强制全查」忽略缓存重查全部；「本轮上限」限制本次检查组数，未查完的会顺延并在结果里提示。</p>
         ${running ? `<div class="progress-line"><strong>${escape(phaseLabel(progress?.phase))}</strong>
           <span class="muted">${count(progress?.done)}/${count(progress?.total)} · ${escape(progress?.current ?? "")}</span>

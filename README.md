@@ -8,7 +8,8 @@
 
 | 工具 | 作用 |
 | --- | --- |
-| `kb_import` | 导入文件或目录（.docx / .doc 自动转换 / .pptx / .xlsx / .xlsm / .pdf / .md / .txt / .epub / .mobi / .azw3，扫描版 PDF 自动逐页 OCR 中文，自动识别文字层损坏页并只对问题页 OCR，文字层双栏页自动重排；Word OMML 公式转 LaTeX；Excel 按工作表转 Markdown 表格；.txt 自动识别 UTF-8/UTF-16/GBK；MOBI/AZW3 自动经 Calibre 转 EPUB）。旧版 .doc/.ppt 与 MOBI/AZW3 一律在后台任务中转换；正在导入中的同名文档自动跳过。**导入前自动查重**：同库重合跳过、跨库重合默认跳过并报告（见下文）；标准/书籍正文/封面优先，其他资料只用文件名 |
+| `kb_import` | 导入文件或目录（.docx / .doc 自动转换 / .pptx / .xlsx / .xlsm / .pdf / .md / .txt / .epub / .mobi / .azw3，扫描版 PDF 自动逐页 OCR 中文，自动识别文字层损坏页并只对问题页 OCR，文字层双栏页自动重排；Word OMML 公式转 LaTeX；Excel 按工作表转 Markdown 表格；.txt 自动识别 UTF-8/UTF-16/GBK；MOBI/AZW3 自动经 Calibre 转 EPUB）。旧版 .doc/.ppt 与 MOBI/AZW3 一律在后台任务中转换；正在导入中的同名文档自动跳过。**导入前自动查重**：同库重合跳过、跨库重合默认跳过并报告（见下文）；标准/书籍正文/封面优先，其他资料只用文件名；扫描页 OCR 前默认做水印净化（`watermark=auto/off/strong`）；`path` 是 kbpack 包（.zip）时自动路由到 `kb_import_package` |
+| `kb_import_package` | 导入 kbpack 知识库包（`kb_export format=zip` 产出的 `.zip`，带 `manifest.json`）：安全校验（坏包/路径穿越/符号链接/版本过高拒绝）、同 id 相同内容幂等跳过、同 id 不同内容另存新 id、同标准号不同 id 走导入查重；同名库**不静默写入**，返回 `merge` / `rename` / `replace` 三选一（replace 需 `confirm:"replace"`），`dryRun=true` 只预演；包内 `*Source=manual` 字段不覆盖目标库人工值 |
 | `kb_reparse` | 从库内 `sources/` 重新解析文档（无需重新上传），用于 OCR/解析器升级后刷新旧管线产物；`doc` 单个、`all=true` 批量，支持 `forceOcr`、`forceOcrPages`/`skipOcrPages`、后台任务 |
 | `kb_list` | 列出知识库 / 知识库内文档与状态（旧管线/已修订/文字层损坏/OCR 低置信会标注），每条带一行摘要与标签；省略 `kb` 时只列本会话范围内的库；默认最多 50 条，支持 `limit/offset/query/status/kind` 分页过滤（`kind=note` 只看笔记、`kind=source` 只看资料）；本库有维护规范时会提示 |
 | `kb_query` | 全文检索（纯文本优先 FTS5/BM25 条款索引，正则/索引不可用时回退 ripgrep；中文短语直接搜；标准号自动兼容 GBT=GB/T=GB_T=GB∕T 与年份分隔符变体）；按标题/标题行/命中密度/更新时间排序，每文档默认 5 条；`kb="*"` 跨库检索；限定模式下省略 `kb` 检索范围内全部库；命中项带 part、页码、条款与笔记类型；返回结构化 `sources`（含深链）供界面引用 |
@@ -21,11 +22,12 @@
 | `kb_lint` | 机械体检：导入失败、旧管线、文字层损坏/OCR 低置信、内容重复、同标准号同期同阶段重复、同号多版本、正文完整性/文件名与封面不一致、未编目、笔记无来源、续/修订版提示、无入链笔记、临时/锁文件（`~$*`、`.~lock.*`、`Thumbs.db`/`desktop.ini`/`.DS_Store`）、缺 schema；输出分组问题与建议动作（`kb_reparse`/`kb_describe`/`kb_remove`/`kb_edit`）；限定模式下省略 `kb` 逐库体检 |
 | `kb_edit_batch` | 批量精确修订（事务语义）：一次提交 1–50 条 `{doc, old_string, new_string, replaceAll?}`，**先全部校验再写入**；任一条失败整批不改并回滚已写分块；`dryRun=true` 只校验。适合“一次改 10–15 页”的跨文档维护；同一文档一批只允许一条编辑 |
 | `kb_snapshot` | 库级快照：把 `kb.json`、`schema/index/log`、派生 `markdown/`（可选 `sources/`）打包到知识库 `snapshots/`，用于批量编辑/重解析前留档；`list=true` 列出已有快照 |
+| `kb_snapshot_restore` | 从快照恢复：`list=true` 列快照，`snapshot`/`latest` 选择；默认 `dryRun=true` 只预演新增/移除/变更篇数，`dryRun=false` 才写入；恢复前自动留 `before-restore` 快照，`prune=true` 时快照外文档的 markdown/sources 移到 `trash-restore/`；重建索引与 FTS 并写 log |
 | `kb_add_note` | 写入编译页/笔记（单篇上限 2MB）：`kind=summary/entity/concept/topic/note`、`tags`、`sources`（docId#页码 或 [[标题]]）；**同一标题再次调用=更新同一篇**（版本+1、保留历史），不要用「续」「修订版」另起新页 |
 | `kb_remove` | 删除文档（默认软删除，可用 `kb_restore` 恢复；`soft=false` 永久删除）或整个知识库（删整库需显式 `kb` + `removeKb=true` 且 `confirm` 逐字等于知识库名称） |
 | `kb_restore` | 恢复软删除文档（不带 `version`）或恢复历史版本（`version=N`，来自 `kb_history`） |
 | `kb_history` | 列出文档保存过的历史版本（覆盖导入/重解析/编辑前的快照，最多 10 个） |
-| `kb_export` | 导出 md（单文件）/ jsonl（分块，RAG 用；`chunkSize`/`chunkOverlap` 可切 RAG 小块）/ zip（完整包，内置 JSZip 打包，不依赖系统命令）/ **vault**（Obsidian Vault：`index.md` + `wiki/` 笔记与资料页 + `[[双链]]`，`includeSources=true` 时带 `raw/`） |
+| `kb_export` | 导出 md（单文件）/ jsonl（分块，RAG 用；`chunkSize`/`chunkOverlap` 可切 RAG 小块）/ zip（完整包，内置 JSZip 打包、不依赖系统命令；带 `manifest.json` = kbpack/v1，可被 `kb_import_package` 还原）/ **vault**（Obsidian Vault：`index.md` + `wiki/` 笔记与资料页 + `[[双链]]`，`includeSources=true` 时带 `raw/`） |
 | `kb_rename` | 重命名知识库（`kb` 必填，须在本会话范围内） |
 
 大文件（如整本扫描书）导入自动转为**后台任务**，与内置 `job_list` / `job_output` 联动查看进度；
@@ -90,7 +92,7 @@ exports/                   导出产物
   「已跳过 N 个临时/锁文件」；普通 `.tmp` 文件不跳过。
 
 「标准更新」面板（库详情 tab）：读取 `.std-check.json` 的上次检查时间、缓存有效期（TTL 7 天）
-与待下载数（有新版 / 草案转正 / 可补下载）；支持仅检查 / 检查并下载 / 补下载 / 强制全查 / 本轮上限，运行中可取消（当前正在处理的标准完成后停止，之后不再发起新的下载）；
+与待下载数（有新版 / 草案转正 / 可补下载）；支持仅检查 / 检查并下载 / 补下载 / 强制全查 / 本轮上限，运行中可取消（当前正在处理的标准完成后停止，之后不再发起新的下载）；新增「按标准号补下载」：输入编号先检索并校验站点确认页（防串档）与金币，确认后再下载并导入；
 下载前必须勾选金币确认（每个标准约 6 金币，VIP 免金币）；`bzCookie` 只在状态里显示“已配置 / 未配置”，
 不会回传给浏览器。
 
@@ -262,6 +264,36 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
 - 其余 6 个库没有 standardNo/标签（回填只做「标准」）。
 - `docs/specs/2026-10-25-retrieval-eval.md` 是机制回归（查询取条款原文开头 28 字），不是人工语义评测。
 
+
+## 0.33.0 知识库搬运闭环（kbpack）+ 快照恢复 + 水印净化
+
+- **kbpack 导出**：`kb_export(format="zip")` 新增 `manifest.json`（`format=kbpack/v1`、`kbName`、
+  `exporter`、`withSources`、`counts`、每篇 `id/title/standardNo/contentHash/chars/pages/trust/hasSource/hasMarkdown`）。
+  包内不写 `sourcePath`、不带 `history` / `.std-check.json` / `.preview/`，软删除文档不入包。
+- **kbpack 导入**：新工具 `kb_import_package`（`kb_import` 收到 `.zip` 自动路由）。坏包/路径穿越/
+  符号链接/包格式版本过高拒绝；同 id 相同内容幂等跳过；同 id 不同内容另存新 docId；同标准号不同 id
+  走现有 dedup；同 id 覆盖用 `replace` + `confirm:"replace"`，旧版进 history；包内 `title/summary/trust/standard`
+  的 `*Source=manual` 不覆盖目标库人工值；导入后一次清单写入、重建索引/FTS、log 记 `import-package`。
+- **同名库由用户选**：目标库已存在且未给 `mode` 时不写入，返回 `merge` / `rename`（自动加「(导入)」后缀）/
+  `replace` 三选一；`dryRun=true` 只预演。
+- **大包限制**：带 `sources` 的整库包在真实「标准」库实测 4.76 GB；当前内联导入上限 1 GB，
+  超限会在写入前明确拒绝。换机迁移建议先导出 `includeSources=false` 的正文包（913 篇约 58 MB，
+  2.7 秒可导入），原件留在原机按需 `kb_reparse`。
+- **快照恢复**：新工具 `kb_snapshot_restore`，默认 dry-run；校验 zip/库名/schemaVersion；恢复前自动留
+  `before-restore` 快照；`prune=true` 时快照外文档的 markdown/sources 移入 `trash-restore/`；log/schema/history
+  不随快照回滚；恢复后重建索引与 FTS。
+- **人工可信度可编辑**：工作台资料弹窗新增可信度选择（高/中/低/未标注），`PATCH metadata` 支持 `trust`，
+  落盘 `trustSource=manual` 且不递增正文版本号；`kb_trust` 单篇/批量行为不变。
+- **OCR 前水印净化**：扫描页渲染后按亮度直方图 + 深色核心邻域判定浅灰水印并置白，默认 `watermark=auto`
+  （`off`/`strong` 可调）；只改 OCR 用的内存图，不写回原件；`kb_import`/`kb_reparse`/`kb_import_package`
+  均可传 `watermark`。
+- **P1 标准自动化**：`scripts/std-check-daily.mjs` + launchd 模板（每日检查、报告落
+  `docs/reports/std-check-YYYYMMDD.md`，仅 update/released 时通知/退出码 10）；缺口台账
+  `<kb>/.std-gaps.json` 跨轮追踪「站点未收录（非站外体系）」与「分册歧义」，站点收录后自动移除；
+  工作台标准更新面板新增「按标准号补下载」：先预览确认页/金币（防串档），确认后走 `kb-std` 后台任务
+  下载并导入，结果复用现有标准面板；面板同时显示缺口台账的未收录/分册歧义数量。
+- 测试 1154 → **1214**（新增 kbpack 导出/校验/导入、快照恢复、缺口台账、每日报告、水印净化、
+  可信度编辑）。
 
 ## 0.32.0 标准更新链路修复 + 库内版本收敛规则
 
@@ -1367,6 +1399,7 @@ curl -s http://127.0.0.1:<dsh 端口>/kb/api/status            # 返回里有 kb
 | `ocrDpi` | `0`（自动） | 扫描页渲染分辨率；0 = 300 DPI（tesseract best 模型的设计分辨率；低清扫描源可显式调低，上限 400） |
 | `ocrEngine` | `auto` | OCR 引擎：auto（rapidocr > tesserocr > 原生 tesseract > wasm 兜底）/ rapidocr / tesseract / wasm |
 | `pdfColumnReorder` | `true` | 文字层 PDF 是否自动检测双栏并重排阅读顺序；误判时可关闭 |
+| `watermark` | `auto` | OCR 前水印净化：`auto`（默认，浅灰水印）/ `off`（关闭）/ `strong`（水印压在正文上）；只影响 OCR 用的页面图，不改原件 |
 | `autoDownloadModels` | `true` | tesseract 家族模型缺失时自动下载到 `~/.dsh/tools/tessdata`；rapidocr 自带模型不触发 |
 | `ocrNativeBin` | `""` | 原生 tesseract / tesserocr 环境的显式二进制或 python 路径（留空自动探测） |
 | `ocrPythonBin` | `""` | rapidocr 环境的显式 python 路径（留空自动探测 `~/.dsh/tools/rapidocr-env` 与 PATH） |

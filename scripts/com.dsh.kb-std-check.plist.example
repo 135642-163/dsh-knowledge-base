@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  macOS launchd 模板：每天 09:10 跑一次标准检查，只检查不下载。
+  安装：
+    1. 复制为 ~/Library/LaunchAgents/com.dsh.kb-std-check.plist
+    2. 把 __NODE__ / __SCRIPT__ / __ROOT__ / __PLUGIN__ 换成真实绝对路径（__HOME__ 可保留）
+    3. launchctl load ~/Library/LaunchAgents/com.dsh.kb-std-check.plist
+  报告写到 <插件>/docs/reports/std-check-YYYYMMDD.md；
+  有 update/released 时脚本退出码 10 并弹 macOS 通知（可用 --no-notify 关闭）。
+  需要下载时在 ProgramArguments 里把 --action check 换成 check-download（会消耗站点金币）。
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.dsh.kb-std-check</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__NODE__</string>
+    <string>__SCRIPT__</string>
+    <string>--root</string>
+    <string>__ROOT__</string>
+    <string>--kb</string>
+    <string>标准</string>
+    <string>--action</string>
+    <string>check</string>
+    <string>--reports-dir</string>
+    <string>__PLUGIN__/docs/reports</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>9</integer>
+    <key>Minute</key>
+    <integer>10</integer>
+  </dict>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>StandardOutPath</key>
+  <string>__HOME__/Library/Logs/dsh-kb-std-check.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/Library/Logs/dsh-kb-std-check.err.log</string>
+</dict>
+</plist>

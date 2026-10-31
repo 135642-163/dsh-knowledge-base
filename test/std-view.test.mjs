@@ -39,10 +39,37 @@ test("标准面板显示缓存/待下载/按钮状态", () => {
   assert.match(html, /data-action="std-download"/);
 });
 
+test("缺口台账显示未收录/分册歧义", () => {
+  const html = panel(std({ status: withStatus({ gaps: { total: 3, notFound: 2, ambiguous: 1 } }) }));
+  assert.match(html, /缺口台账/);
+  assert.match(html, /未收录 2/);
+  assert.match(html, /分册歧义 1/);
+  const empty = panel(std());
+  assert.doesNotMatch(empty, /缺口台账/);
+});
+
 test("未配置 cookie 时下载按钮禁用", () => {
   const html = panel(std({ status: withStatus({ configured: false }) }));
   assert.match(html, /data-action="std-download"[^>]*disabled/);
+  assert.match(html, /data-action="std-fetch-preview"[^>]*disabled/);
   assert.match(html, /bzCookie/);
+});
+
+test("按标准号补下载入口：输入框、预览按钮与校验中状态", () => {
+  const html = panel(std());
+  assert.match(html, /id="std-fetch-no"/);
+  assert.match(html, /data-action="std-fetch-preview"/);
+  assert.match(html, /按标准号补下载/);
+  assert.doesNotMatch(html, /data-action="std-fetch-preview"[^>]*disabled/);
+  const fetching = panel(std({ fetching: true }));
+  assert.match(fetching, /校验中…/);
+  assert.match(fetching, /data-action="std-fetch-preview"[^>]*disabled/);
+  const running = panel(std({
+    status: withStatus({ activeJobId: "job-9" }),
+    job: { id: "job-9", status: "running", progress: { phase: "search", done: 0, total: 1, current: "GB/T 1" } },
+  }));
+  assert.match(running, /<strong>检索<\/strong>/);
+  assert.match(running, /data-action="std-fetch-preview"[^>]*disabled/);
 });
 
 test("运行阶段显示中文标签且不出现 collect", () => {
@@ -89,6 +116,12 @@ test("结果摘要显示导入失败计数、hint、登录失效与截断提示"
   assert.match(html, /请稍后重试/);
   assert.match(html, /登录态失效/);
   assert.match(html, /仅显示前 200 条/);
+});
+
+test("补下载状态标签可读", () => {
+  assert.equal(stdStatusLabel("skipped-existing"), "库内已有");
+  assert.equal(stdStatusLabel("confirm-mismatch"), "确认页不符");
+  assert.equal(stdStatusLabel("daily-limit"), "每日上限");
 });
 
 test("std.error 显示错误与重试按钮", () => {

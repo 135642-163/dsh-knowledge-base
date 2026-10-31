@@ -49,7 +49,7 @@ const state = {
     busy: false,
   },
   std: {
-    kb: "", loading: false, error: "", warning: "", starting: false, cancelling: false,
+    kb: "", loading: false, error: "", warning: "", starting: false, fetching: false, cancelling: false,
     status: null, job: null, timer: null, pollRetry: 0, inFlight: null,
   },
   search: {
@@ -613,6 +613,7 @@ async function loadStd(name) {
     error: "",
     warning: "",
     starting: false,
+    fetching: false,
     cancelling: false,
     pollRetry: 0,
     ...(sameKb ? {} : { status: null, job: null }),
@@ -722,6 +723,86 @@ async function pollStd(name, token) {
     render();
   } finally {
     if (state.std.inFlight === inFlightKey) state.std.inFlight = null;
+  }
+}
+
+/**
+ * 按标准号补下载：先 dryRun 校验（检索 + 确认页反查 + 金币），
+ * 用户确认后再启动 kb-std 后台任务（复用现有轮询/结果面板）。
+ */
+async function previewStdFetch() {
+  const name = state.std.kb;
+  const input = app.querySelector("#std-fetch-no");
+  const stdNo = String(input?.value ?? "").trim();
+  if (!name || state.std.fetching || state.std.starting) return;
+  if (stdNo === "") {
+    showToast("请输入要补下载的标准号");
+    return;
+  }
+  const token = stdToken;
+  state.std.fetching = true;
+  state.std.error = "";
+  render();
+  try {
+    const result = await api.stdFetch(name, { stdNo, dryRun: true });
+    if (token !== stdToken || state.std.kb !== name || !isStdRoute(name)) return;
+    if (!result?.ok) {
+      showToast(result?.reason || "站点未找到可下载的该编号", "error");
+      return;
+    }
+    const cost = result.costCoins == null
+      ? "金币以确认页为准"
+      : result.costCoins > 0 ? `${result.costCoins} 金币` : "免费";
+    const free = result.vipFree ? "（VIP 免费）" : "";
+    openConfirmModal({
+      title: "补下载并导入",
+      body: `${result.siteStdNo || stdNo}「${result.title || ""}」\n\n${cost}${free}；下载后会直接导入「${name}」。`,
+      confirmText: "下载并导入",
+      requireCheckbox: true,
+      onConfirm: () => startStdFetch(result.siteStdNo || stdNo),
+    });
+  } catch (error) {
+    if (token !== stdToken || state.std.kb !== name || !isStdRoute(name)) return;
+    state.std.error = stdErrorText(error);
+  } finally {
+    if (state.std.kb === name) {
+      state.std.fetching = false;
+      if (isStdRoute(name)) render();
+    }
+  }
+}
+
+async function startStdFetch(stdNo) {
+  const name = state.std.kb;
+  if (!name || state.std.starting) return;
+  const token = stdToken;
+  state.std.job = null;
+  state.std.error = "";
+  state.std.warning = "";
+  state.std.pollRetry = 0;
+  state.std.cancelling = false;
+  state.std.starting = true;
+  render();
+  try {
+    const result = await api.stdFetch(name, { stdNo, dryRun: false });
+    if (state.std.kb !== name || !isStdRoute(name)) return;
+    if (token !== stdToken) {
+      if (isStdRoute(name)) await loadStd(name);
+      return;
+    }
+    if (!result?.jobId) throw new Error("补下载任务没有返回 jobId");
+    const job = await api.job(result.jobId);
+    if (token !== stdToken || state.std.kb !== name || !isStdRoute(name)) return;
+    state.std.job = job;
+    void pollStd(name, token);
+  } catch (error) {
+    if (state.std.kb !== name || !isStdRoute(name)) return;
+    state.std.error = stdErrorText(error);
+  } finally {
+    if (state.std.kb === name) {
+      state.std.starting = false;
+      if (isStdRoute(name)) render();
+    }
   }
 }
 
@@ -1136,6 +1217,8 @@ function bind() {
       const current = route();
       const name = current.page === "detail" ? current.name : state.std.kb;
       if (name) await loadStd(name);
+    } else if (action === "std-fetch-preview") {
+      await previewStdFetch();
     } else if (action === "std-run") {
       await startStd(target.dataset.mode ?? "check");
     } else if (action === "std-download") {

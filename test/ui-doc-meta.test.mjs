@@ -4,8 +4,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  docMetaPatch, docMetaUnchanged, normalizeDocSummary, normalizeDocTitleInput,
-  normalizeStandardNoInput, parseDocTagsInput, summarySourceLabel,
+  DOC_TRUST_LEVELS, docMetaPatch, docMetaUnchanged, normalizeDocSummary, normalizeDocTitleInput,
+  normalizeStandardNoInput, normalizeDocTrust, parseDocTagsInput, summarySourceLabel, trustLevelLabel,
 } from "../ui/views/doc-meta.js";
 import { renderDocModalBody } from "../ui/views/modals.js";
 
@@ -28,14 +28,20 @@ test("summarySourceLabel 与 docMetaPatch", () => {
   assert.deepEqual(docMetaPatch({ summary: " 摘要 ", tags: "#a,b" }), { summary: "摘要", tags: ["a", "b"] });
 });
 
-test("docMetaUnchanged 比较归一化后的标题、摘要、标签与标准号", () => {
-  const doc = { title: "风电场接入", summary: "摘要", tags: ["a", "b"], standardNo: "GB/T 1-2020" };
+test("docMetaUnchanged 比较归一化后的标题、摘要、标签、标准号与可信度", () => {
+  const doc = { title: "风电场接入", summary: "摘要", tags: ["a", "b"], standardNo: "GB/T 1-2020", trust: "high" };
   assert.equal(docMetaUnchanged(doc, { title: " 风电场接入 ", summary: " 摘要 ", tags: "a,b", standardNo: " GB/T 1-2020 " }), true);
   assert.equal(normalizeStandardNoInput("  GB/T 1-2020 "), "GB/T 1-2020");
   assert.equal(docMetaUnchanged(doc, { title: "风电场接入", summary: "摘要", tags: "a,b", standardNo: "" }), false);
   assert.equal(docMetaUnchanged(doc, { title: "海上风电", summary: "摘要", tags: "a,b" }), false);
   assert.equal(docMetaUnchanged(doc, { title: "风电场接入", summary: "别的", tags: "a,b" }), false);
   assert.equal(docMetaUnchanged(doc, { title: "风电场接入", summary: "摘要", tags: "a,c" }), false);
+  assert.equal(docMetaUnchanged(doc, { title: "风电场接入", summary: "摘要", tags: "a,b", trust: "high" }), true);
+  assert.equal(docMetaUnchanged(doc, { title: "风电场接入", summary: "摘要", tags: "a,b", trust: "low" }), false);
+  assert.equal(normalizeDocTrust(" HIGH "), "high");
+  assert.equal(normalizeDocTrust("bogus"), "unknown");
+  assert.deepEqual(DOC_TRUST_LEVELS, ["high", "medium", "low", "unknown"]);
+  assert.match(trustLevelLabel("high"), /现行/);
   assert.equal(normalizeDocTitleInput("  风电场  接入 "), "风电场 接入");
   assert.deepEqual(docMetaPatch({ title: "  新  名称 ", summary: " 摘要 ", tags: "#a,b" }), { title: "新 名称", summary: "摘要", tags: ["a", "b"] });
 });
@@ -49,8 +55,9 @@ test("弹窗渲染可编辑摘要/标签与来源徽标", () => {
   assert.match(html, /name="doc-title"/);
   assert.match(html, /name="doc-tags"/);
   assert.match(html, /name="doc-standard-no"/);
+  assert.match(html, /name="doc-trust"/);
   assert.match(html, /来源：人工/);
-  assert.match(html, /保存名称\/摘要\/标签\/标准号/);
+  assert.match(html, /保存名称\/摘要\/标签\/标准号\/可信度/);
   assert.match(html, /摘要 &lt;x&gt;/);
   assert.match(html, /value="并网, 海上风电"/);
 });

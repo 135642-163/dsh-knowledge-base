@@ -45,6 +45,10 @@ function postStd(opts, body) {
   return call(opts, makeReq({ method: "POST", url: `${KB_API}/std-check`, body }));
 }
 
+function postStdFetch(opts, body) {
+  return call(opts, makeReq({ method: "POST", url: `${KB_API}/std-fetch`, body }));
+}
+
 function getStd(opts) {
   return call(opts, makeReq({ method: "GET", url: `${KB_API}/std` }));
 }
@@ -53,7 +57,7 @@ function cancelStdJob(opts, id) {
   return call(opts, makeReq({ method: "POST", url: `/kb/api/jobs/${encodeURIComponent(id)}/cancel` }));
 }
 
-async function setup({ configured = true, runStdCheck, importDownloadedImpl } = {}) {
+async function setup({ configured = true, runStdCheck, importDownloadedImpl, fetchStdNumberImpl } = {}) {
   const kbRoot = join(await mkdtemp(join(tmpdir(), "kb-std-")), "kb");
   await createKb(kbRoot, { name: "标准" });
   const jobs = createJobRegistry();
@@ -70,6 +74,7 @@ async function setup({ configured = true, runStdCheck, importDownloadedImpl } = 
       importConfig: {},
       ...(runStdCheck ? { runStdCheck } : {}),
       ...(importDownloadedImpl ? { importDownloadedImpl } : {}),
+      ...(fetchStdNumberImpl ? { fetchStdNumberImpl } : {}),
     },
   };
   return { kbRoot, kbDir: join(kbRoot, "标准"), opts, jobs };
@@ -473,4 +478,78 @@ test("取消未知任务 404 JOB_NOT_FOUND", async () => {
   const missing = await cancelStdJob(opts, "kb-std-nope");
   assert.equal(missing.res.status, 404);
   assert.equal(missing.json.error.code, "JOB_NOT_FOUND");
+});
+
+test("std-fetch dryRun：同步校验并返回确认页信息", async () => {
+  const calls = [];
+  const { opts } = await setup({
+    fetchStdNumberImpl: async (args) => {
+      calls.push(args);
+      return { ok: true, status: "ready", stdNo: args.stdNo, siteStdNo: "GB/T 4728.12-2022", title: "图形符号", costCoins: 2, vipFree: false };
+    },
+  });
+  const { res, json } = await postStdFetch(opts, { stdNo: "GB/T 4728.12-2022", dryRun: true });
+  assert.equal(res.status, 200);
+  assert.equal(json.ok, true);
+  assert.equal(json.costCoins, 2);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].dryRun, true);
+  assert.equal(calls[0].cookie, "secret-cookie");
+});
+
+test("std-fetch 参数/登录态校验", async () => {
+  const { opts } = await setup({ configured: false });
+  let result = await postStdFetch(opts, { dryRun: true });
+  assert.equal(result.res.status, 400);
+  assert.equal(result.json.error.code, "INVALID_ARGS");
+  result = await postStdFetch(opts, { stdNo: "GB/T 1-2020", dryRun: false });
+  assert.equal(result.res.status, 400);
+  assert.equal(result.json.error.code, "STD_NO_COOKIE");
+});
+
+test("std-fetch dryRun=false：启动 kb-std 任务并把结果投影成标准面板形状", async () => {
+  const { opts, jobs } = await setup({
+    fetchStdNumberImpl: async (args) => {
+      args.onProgress?.({ phase: "download", current: "GB/T 4728.12-2022" });
+      return {
+        ok: true,
+        status: "imported",
+        stdNo: args.stdNo,
+        siteStdNo: "GB/T 4728.12-2022",
+        title: "图形符号",
+        docId: "doc123",
+        downloaded: true,
+        costCoins: 0,
+        file: { name: "GB_T 4728.12-2022.pdf", bytes: 10 },
+      };
+    },
+  });
+  const { res, json } = await postStdFetch(opts, { stdNo: "GB/T 4728.12-2022", dryRun: false });
+  assert.equal(res.status, 202);
+  assert.ok(json.jobId);
+  const job = await waitJob(jobs, json.jobId);
+  assert.equal(job.status, "succeeded");
+  assert.equal(job.result.counts.downloaded, 1);
+  assert.equal(job.result.counts.imported, 1);
+  assert.equal(job.result.entries[0].status, "imported");
+  assert.match(job.result.entries[0].number, /GB\/T 4728\.12/);
+  assert.match(job.detail, /已下载并导入/);
+});
+
+test("std-fetch 失败结果：任务 failed 且保留原因", async () => {
+  const { opts, jobs } = await setup({
+    fetchStdNumberImpl: async () => ({
+      ok: false,
+      status: "confirm-mismatch",
+      stdNo: "GB/T 1-2020",
+      siteStdNo: "GB/T 1-2020",
+      title: "目标",
+      reason: "下载确认页与目标标准不一致",
+    }),
+  });
+  const { json } = await postStdFetch(opts, { stdNo: "GB/T 1-2020", dryRun: false });
+  const job = await waitJob(jobs, json.jobId);
+  assert.equal(job.status, "failed");
+  assert.match(job.detail, /不一致/);
+  assert.equal(job.result.entries[0].status, "confirm-mismatch");
 });
