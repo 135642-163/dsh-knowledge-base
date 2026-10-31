@@ -1380,6 +1380,44 @@ export function openMoveModal({ name, ids = [], kbs = [], notify = () => {}, onD
   return node;
 }
 
+/** 批量设置可信度：已选 N 篇共用一次选择，逐篇 PATCH；失败时保留弹窗并提示。 */
+export function openBulkTrustModal({ count = 0, onConfirm } = {}) {
+  const node = overlay(`
+    <form class="modal-form">
+      <h2>批量设置可信度</h2>
+      <p class="muted">将对已选的 ${Number(count) || 0} 篇资料统一设置可信度；只改元数据，不改正文版本。</p>
+      <label class="field"><span>可信度</span>
+        <select name="bulk-trust">
+          ${DOC_TRUST_LEVELS.map((level) => `<option value="${level}">${escapeHtml(trustLevelLabel(level))}</option>`).join("")}
+        </select>
+      </label>
+      <p class="form-error" hidden></p>
+      <div class="modal-actions">
+        <button type="button" class="btn" data-close>取消</button>
+        <button type="submit" class="btn primary">应用到选中文档</button>
+      </div>
+    </form>
+  `);
+  const form = node.querySelector("form");
+  const error = node.querySelector(".form-error");
+  const button = form.querySelector("button[type=submit]");
+  form.onsubmit = async (event) => {
+    event.preventDefault();
+    const trust = String(new FormData(form).get("bulk-trust") ?? "unknown");
+    button.disabled = true;
+    error.hidden = true;
+    try {
+      await onConfirm?.(trust);
+      closeOverlay(node);
+    } catch (failure) {
+      error.textContent = failure instanceof ApiError ? failure.message : String(failure?.message ?? failure);
+      error.hidden = false;
+      button.disabled = false;
+    }
+  };
+  return node;
+}
+
 /**
  * 0.31.2 检索设置：语义检索开关 + 组件/模型状态 + 一键准备。
  * 开关持久化在 <kbRoot>/.semantic.json；准备 = 安装可选依赖 + 下载模型（需勾选同意）。

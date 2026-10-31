@@ -13,7 +13,7 @@ import {
   trashPurgeTarget, trashRestoreTargets, trashSelectionToggleAll, trashSelectionToggleOne,
 } from "./views/trash.js";
 import {
-  deleteConfirmBody, openConfirmModal, openCreateModal, openDocModal, openKbPickerModal, openMoveModal,
+  deleteConfirmBody, openBulkTrustModal, openConfirmModal, openCreateModal, openDocModal, openKbPickerModal, openMoveModal,
   openPreviewModal, openRenameModal, openRestoreModal, openSemanticModal, retryFailedDoc,
 } from "./views/modals.js";
 import { openUploadModal } from "./views/upload.js";
@@ -1365,6 +1365,32 @@ function bind() {
       const ids = selectionIds(state.docs.selected);
       if (current.page !== "detail" || ids.length === 0) return;
       openExportModal({ name: current.name, docIds: ids, notify: showToast });
+    } else if (action === "docs-trust-bulk") {
+      const current = route();
+      const ids = selectionIds(state.docs.selected);
+      if (current.page !== "detail" || ids.length === 0 || state.docs.busy) return;
+      openBulkTrustModal({
+        count: ids.length,
+        onConfirm: async (trust) => {
+          let ok = 0;
+          const failures = [];
+          for (const id of ids) {
+            try {
+              await api.patchDocMetadata(current.name, id, { trust });
+              ok += 1;
+            } catch (failure) {
+              failures.push(`${id}: ${stdErrorText(failure)}`);
+            }
+          }
+          await loadDetail(current.name, "docs");
+          if (failures.length > 0) {
+            throw new Error(`已更新 ${ok} 篇，${failures.length} 篇失败：${failures.slice(0, 3).join("；")}`);
+          }
+          state.docs.selected = [];
+          showToast(`已更新 ${ok} 篇可信度`);
+          render();
+        },
+      });
     } else if (action === "docs-move") {
       if (state.docs.busy) return;
       moveSelectedDocs();

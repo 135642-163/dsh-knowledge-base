@@ -292,7 +292,7 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
   均可传 `watermark`。配套 `scripts/watermark-ab.mjs` 用真实文字层页做真值、叠加合成水印比较 CER：
   6 页平均 CER 干净 0.1221 → 加水印 0.1901 → 净化后 0.1490（报告 `docs/reports/2026-10-31-watermark-ab.md`）。
 - **工作台导入/导出包**：概览页与库详情页新增「导入知识库包」「导出知识库」按钮；
-  资料多选工具条新增「导出选中」，可按选中文档生成交付子集（包内 README 列出选中文档清单、标准号、页数与摘要）：
+  资料多选工具条新增「导出选中」「批量可信度」，可按选中文档生成交付子集（包内 README 列出选中文档清单、标准号、页数与摘要）：
   导入 = 上传 kbpack → 预检（同名库三选一）→ `kb-package` 后台任务；
   导出 = 正文包 / 完整包（含原件）/ 单文件 Markdown，后台生成后下载到 `exports/`。
 - **语义完整性审计（0.33 起）**：`scripts/eval/semantic-window-audit.mjs` 对比当前 600 字文档画像与

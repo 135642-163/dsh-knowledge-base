@@ -127,9 +127,10 @@ test("文档表格有勾选列，已删除行没有复选框但保留行内操�
   assert.match(html, /data-action="docs-purge" data-id="d"/);
 });
 
-test("多选工具条显示数量与导出/移动/回收站/取消操作，busy 时禁用", () => {
+test("多选工具条显示数量与导出/可信度/移动/回收站/取消操作，busy 时禁用", () => {
   const idle = renderDocsBulkBar({ selected: [{ id: "a" }, { id: "b" }] });
   assert.match(idle, /data-action="docs-export-selected"/);
+  assert.match(idle, /data-action="docs-trust-bulk"/);
   assert.match(idle, /已选 2 篇/);
   assert.match(idle, /data-action="docs-move"/);
   assert.match(idle, /data-action="docs-trash-selected"/);
@@ -138,7 +139,7 @@ test("多选工具条显示数量与导出/移动/回收站/取消操作，busy 
   assert.equal(renderDocsBulkBar({ selected: [] }), "");
 
   const busy = renderDocsBulkBar({ selected: [{ id: "a" }], busy: true });
-  assert.equal((busy.match(/ disabled/g) ?? []).length, 4);
+  assert.equal((busy.match(/ disabled/g) ?? []).length, 5);
 });
 
 test("docs 渲染在多选时插入工具条", () => {
