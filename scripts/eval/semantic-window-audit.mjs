@@ -130,6 +130,22 @@ async function main() {
   const started = Date.now();
   const currentVectors = await embedAll(currentTexts, "current");
   const windowVectors = await embedAll(windowTexts, "windows");
+  // 低成本候选：每个文档的窗口向量取平均（再 L2 归一化），仍是一条向量/文档。
+  const averageVectors = docs.map(() => null);
+  for (let index = 0; index < windowVectors.length; index += 1) {
+    const docIndex = windowDoc[index];
+    if (!averageVectors[docIndex]) averageVectors[docIndex] = new Float32Array(windowVectors[index].length);
+    const target = averageVectors[docIndex];
+    const source = windowVectors[index];
+    for (let dim = 0; dim < source.length; dim += 1) target[dim] += source[dim];
+  }
+  for (const vector of averageVectors) {
+    if (!vector) continue;
+    let norm = 0;
+    for (const value of vector) norm += value * value;
+    norm = Math.sqrt(norm);
+    if (norm > 0) for (let dim = 0; dim < vector.length; dim += 1) vector[dim] /= norm;
+  }
   const queryVectors = [];
   for (const question of questions) {
     const result = await runtime.embedQuery(question.q);
@@ -138,10 +154,12 @@ async function main() {
   }
 
   const currentRanked = new Map();
+  const averageRanked = new Map();
   const bestWindowByDoc = new Map();
   for (let qi = 0; qi < questions.length; qi += 1) {
     const query = queryVectors[qi];
     currentRanked.set(questions[qi].id, rankDocs(query, currentVectors));
+    averageRanked.set(questions[qi].id, rankDocs(query, averageVectors));
     const best = new Array(docs.length).fill(-Infinity);
     for (let wi = 0; wi < windowVectors.length; wi += 1) {
       const score = cosine(query, windowVectors[wi]);
@@ -154,6 +172,7 @@ async function main() {
   }
 
   const current = metrics(questions, currentRanked, idToIndex);
+  const average = metrics(questions, averageRanked, idToIndex);
   const windows = metrics(questions, bestWindowByDoc, idToIndex);
   const byGroup = (list) => Object.fromEntries([...new Set(list.map((row) => row.group))].map((group) => [
     group,
@@ -167,11 +186,15 @@ async function main() {
     windowChars: args.windowChars,
     elapsedMs: Date.now() - started,
     current: { recall: current.recall, mrr: current.mrr, groups: byGroup(current.rows) },
+    averageProfile: { recall: average.recall, mrr: average.mrr, groups: byGroup(average.rows) },
     windowsProfile: { recall: windows.recall, mrr: windows.mrr, groups: byGroup(windows.rows) },
-    delta: { recall: windows.recall - current.recall, mrr: windows.mrr - current.mrr },
-    rows: { current: current.rows, windows: windows.rows },
+    delta: {
+      average: { recall: average.recall - current.recall, mrr: average.mrr - current.mrr },
+      windows: { recall: windows.recall - current.recall, mrr: windows.mrr - current.mrr },
+    },
+    rows: { current: current.rows, average: average.rows, windows: windows.rows },
   };
-  console.log(JSON.stringify({ current: summary.current, windows: summary.windowsProfile, delta: summary.delta, elapsedMs: summary.elapsedMs }, null, 2));
+  console.log(JSON.stringify({ current: summary.current, average: summary.averageProfile, windows: summary.windowsProfile, delta: summary.delta, elapsedMs: summary.elapsedMs }, null, 2));
   if (args.out) await writeFile(args.out, JSON.stringify(summary, null, 2), "utf8");
 }
 

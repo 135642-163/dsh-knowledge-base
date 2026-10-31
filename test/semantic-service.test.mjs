@@ -64,6 +64,7 @@ test("关闭语义：status 返回 enabled=false / reason=disabled，不读索�
       indexReady: false,
       model: "",
       dim: 0,
+      profile: "summary-v1",
       docs: 0,
       reason: "disabled",
       kbs: 0,

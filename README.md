@@ -303,7 +303,7 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
   `<kb>/.std-gaps.json` 跨轮追踪「站点未收录（非站外体系）」与「分册歧义」，站点收录后自动移除；
   工作台标准更新面板新增「按标准号补下载」：先预览确认页/金币（防串档），确认后走 `kb-std` 后台任务
   下载并导入，结果复用现有标准面板；面板同时显示缺口台账的未收录/分册歧义数量。
-- 测试 1154 → **1238**（新增 kbpack 导出/校验/导入、快照恢复、缺口台账、每日报告、水印净化、
+- 测试 1154 → **1239**（新增 kbpack 导出/校验/导入、快照恢复、缺口台账、每日报告、水印净化、
   可信度编辑）。
 
 ## 0.32.0 标准更新链路修复 + 库内版本收敛规则
@@ -467,6 +467,10 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
   >100 篇首次启用走**后台进程**建索引（当次检索回退 B 并在 note 里说明）；
 - `/kb/api/status` 暴露 `semantic: {enabled,indexReady,model,dim,docs,reason}`；工作台状态行在
   `engine=hybrid` 时显示「语义」；
+- **语义画像可选 `summary` / `window`**：默认 `summary`（标准号+标题+标签+摘要+首条款，600 字）；
+  `semanticProfile: window` 会把全文按页切成 8 个窗口、分别嵌入后取质心（仍是一条向量/文档）。
+  80 题纯 dense 审计：当前 600 字 Recall@10 54.2%，窗口质心 65.0%、多窗口 max 71.7%；
+  质心 MRR 从 0.282 提到 0.440，索引仍 1.9MB，但建索引约 8 倍时间。
 - **默认 `semanticSearch=off`**：关闭时行为与 0.30 完全一致（golden 对比测试逐字段校验），
   不加载模型、不读写向量索引。
 
@@ -1404,6 +1408,7 @@ curl -s http://127.0.0.1:<dsh 端口>/kb/api/status            # 返回里有 kb
 | `kbRoot` | `~/.dsh/knowledge` | 知识库根目录（怎么改见「指定知识库目录（kbRoot）」） |
 | `defaultKb` | `default` | 未指定 kb 时的默认知识库 |
 | `semanticSearch` | `off` | 可选语义层**部署默认值**：`off` / `on`；工作台「设置」里的开关会覆盖它（存 `<kbRoot>/.semantic.json`） |
+| `semanticProfile` | `summary` | 语义画像：`summary`（600 字）/ `window`（全文 8 窗口质心；建索引约 8 倍，索引大小不变） |
 | `semanticModelDir` | `""` | 语义模型目录；留空用 `~/.dsh/tools/models/bge-small-zh-v1.5` |
 | `ocrLang` | `chi_sim+eng` | OCR 语言（竖排古籍可试 `chi_sim_vert`） |
 | `ocrWorkers` | `0`（自动） | OCR 并行 worker 数；0 = 按本机 CPU/内存自适应：`min(核数一半, 内存/1.5GB)`，下限 2、上限 16（24 线程/32GB 机器 ≈ 12） |

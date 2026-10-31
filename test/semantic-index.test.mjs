@@ -8,6 +8,8 @@ import { mkdtemp, mkdir, readFile, rm, stat, truncate, writeFile } from "node:fs
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  DOC_PROFILE_SUMMARY,
+  DOC_PROFILE_WINDOW,
   DOC_VECTORS_FILE,
   DOC_VECTORS_META_FILE,
   SEMANTIC_MODEL,
@@ -292,5 +294,39 @@ test("docEmbedText：标准号+标题+标签+摘要+首条款，总长 ≤600", 
     // 原件缺失时退回元数据，不抛错。
     const missing = makeDoc("c");
     assert.equal(await docEmbedText({ dir, doc: missing }), "GB/T c 标准 c 电能质量 摘要 c");
+  });
+});
+
+test("window 画像：多窗口取质心、meta.profile 可区分，切换画像会判 stale", async () => {
+  await withRoot(async (dir) => {
+    const doc = makeDoc("w1");
+    const body = [
+      "### 第 1 页", "第一页范围。", "### 第 2 页", `${"中段条款内容。".repeat(60)}`,
+      "### 第 3 页", "第三页限值。",
+    ].join("\n\n");
+    await writeMarkdown(dir, doc, body);
+    const { embedder, calls } = fakeEmbedder();
+    const result = await ensureDocVectors({
+      dir,
+      manifest: makeManifest([doc]),
+      embedder,
+      profile: DOC_PROFILE_WINDOW,
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.profile, DOC_PROFILE_WINDOW);
+    assert.equal(result.docs, 1);
+    assert.ok(calls[0].length > 1, "window profile must embed multiple windows per doc");
+    const meta = JSON.parse(await readFile(pathOf(dir, DOC_VECTORS_META_FILE), "utf8"));
+    assert.equal(meta.profile, DOC_PROFILE_WINDOW);
+    const windowRead = await readDocVectors({ dir, manifest: makeManifest([doc]), profile: DOC_PROFILE_WINDOW });
+    assert.equal(windowRead.ok, true);
+    assert.equal(windowRead.ids.length, 1);
+    assert.ok(Math.abs(windowRead.vectors[0].reduce((sum, value) => sum + value * value, 0) - 1) < 1e-5);
+    const summaryRead = await readDocVectors({ dir, manifest: makeManifest([doc]), profile: DOC_PROFILE_SUMMARY });
+    assert.equal(summaryRead.ok, false);
+    assert.equal(summaryRead.reason, "profile");
+    const status = await docVectorsStatus({ dir, manifest: makeManifest([doc]), profile: DOC_PROFILE_WINDOW });
+    assert.equal(status.ready, true);
+    assert.equal(status.profile, DOC_PROFILE_WINDOW);
   });
 });
