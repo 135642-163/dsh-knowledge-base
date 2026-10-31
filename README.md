@@ -289,7 +289,8 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
   落盘 `trustSource=manual` 且不递增正文版本号；`kb_trust` 单篇/批量行为不变。
 - **OCR 前水印净化**：扫描页渲染后按亮度直方图 + 深色核心邻域判定浅灰水印并置白，默认 `watermark=auto`
   （`off`/`strong` 可调）；只改 OCR 用的内存图，不写回原件；`kb_import`/`kb_reparse`/`kb_import_package`
-  均可传 `watermark`。
+  均可传 `watermark`。配套 `scripts/watermark-ab.mjs` 用真实文字层页做真值、叠加合成水印比较 CER：
+  6 页平均 CER 干净 0.1221 → 加水印 0.1901 → 净化后 0.1490（报告 `docs/reports/2026-10-31-watermark-ab.md`）。
 - **工作台导入包**：概览页新增「导入知识库包」按钮：上传 kbpack → 预检（同名库三选一）→
   `kb-package` 后台任务导入；导入成功后清理上传文件，失败保留 24 小时供重试。
 - **P1 标准自动化**：`scripts/std-check-daily.mjs` + launchd 模板（每日检查、报告落
@@ -297,7 +298,7 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
   `<kb>/.std-gaps.json` 跨轮追踪「站点未收录（非站外体系）」与「分册歧义」，站点收录后自动移除；
   工作台标准更新面板新增「按标准号补下载」：先预览确认页/金币（防串档），确认后走 `kb-std` 后台任务
   下载并导入，结果复用现有标准面板；面板同时显示缺口台账的未收录/分册歧义数量。
-- 测试 1154 → **1227**（新增 kbpack 导出/校验/导入、快照恢复、缺口台账、每日报告、水印净化、
+- 测试 1154 → **1229**（新增 kbpack 导出/校验/导入、快照恢复、缺口台账、每日报告、水印净化、
   可信度编辑）。
 
 ## 0.32.0 标准更新链路修复 + 库内版本收敛规则
