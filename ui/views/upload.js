@@ -66,6 +66,7 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
     pollRetry: 0,
     allowCrossDuplicates: false,
     ocrModel: "best",
+    watermark: "auto",
     forceOcr: false,
   };
 
@@ -154,8 +155,15 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
               <option value="fast" ${state.ocrModel === "fast" ? "selected" : ""}>fast（更快）</option>
             </select>
           </label>
+          <label class="check ocr-field">水印净化
+            <select id="upload-watermark">
+              <option value="auto" ${state.watermark === "auto" ? "selected" : ""}>auto（推荐）</option>
+              <option value="off" ${state.watermark === "off" ? "selected" : ""}>off（关闭）</option>
+              <option value="strong" ${state.watermark === "strong" ? "selected" : ""}>strong（水印压正文）</option>
+            </select>
+          </label>
           <label class="check"><input type="checkbox" id="upload-force-ocr" ${state.forceOcr ? "checked" : ""} /> 强制 OCR</label>
-          <span class="muted">仅扫描版 PDF / 图片需要；文字层损坏时勾选「强制 OCR」</span>
+          <span class="muted">仅扫描版 PDF / 图片需要；文字层损坏时勾选「强制 OCR」；best 模型与去水印均无需额外安装</span>
         </div>
         ${state.resumeChecked ? "" : `<p class="muted">正在检查目标库的上次导入任务…</p>`}
         <p class="form-error" ${state.error ? "" : "hidden"}>${escapeHtml(state.error)}</p>
@@ -289,6 +297,12 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
     if (ocrSelect) {
       ocrSelect.addEventListener("change", (event) => {
         state.ocrModel = event.target.value === "fast" ? "fast" : "best";
+      });
+    }
+    const watermarkSelect = modal.querySelector("#upload-watermark");
+    if (watermarkSelect) {
+      watermarkSelect.addEventListener("change", (event) => {
+        state.watermark = ["auto", "off", "strong"].includes(event.target.value) ? event.target.value : "auto";
       });
     }
     modal.querySelector("#upload-force-ocr")?.addEventListener("change", (event) => {
@@ -430,6 +444,7 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
     const imported = await api.importBatch(state.batchId, {
       allowCrossDuplicates: state.allowCrossDuplicates,
       ocrModel: state.ocrModel,
+      watermark: state.watermark,
       forceOcr: state.forceOcr,
     });
     if (state.closed) {

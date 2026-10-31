@@ -469,3 +469,22 @@ test("工作台重新上传 kb_import 导入过的文档：原位更新并版本
   assert.equal(manifest.docs.length, 1, "同名重传不能另建文档");
   assert.equal(manifest.docs[0].version, 2, "同名重传应原位更新并版本 +1");
 });
+
+test("上传导入透传 OCR 模型与水印净化选项", async () => {
+  const { opts } = await setup();
+  let seen = null;
+  opts.importConfig = (input) => {
+    seen = input;
+    return { partMaxChars: 2000 };
+  };
+  const id = await createBatch(opts, { "a.md": "# a\n内容\n" });
+  const { json } = await call(opts, makeReq({
+    method: "POST",
+    url: `/kb/api/upload-batches/${id}/import`,
+    body: JSON.stringify({ ocrModel: "fast", watermark: "strong" }),
+  }));
+  assert.ok(json.jobId);
+  await waitJob(opts, json.jobId);
+  assert.equal(seen.ocrModel, "fast");
+  assert.equal(seen.watermark, "strong");
+});
