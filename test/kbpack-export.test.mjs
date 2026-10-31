@@ -164,3 +164,19 @@ test("buildKbpackManifest 不计软删除文档、无源文件时 notes 计数�
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("kb_export docIds 只导出选中文档（zip manifest/计数同步）", async () => {
+  const { root, tools, exec, docId } = await setup();
+  try {
+    const out = join(root, "pack-selected.zip");
+    await tools.get("kb_export").execute({ kb: "导出库", format: "zip", out, docIds: [docId] }, exec);
+    const { default: JSZip } = await import("jszip");
+    const zip = await JSZip.loadAsync(await readFile(out));
+    const manifest = JSON.parse(await zip.file("manifest.json").async("string"));
+    assert.equal(manifest.counts.docs, 1);
+    assert.deepEqual(manifest.docs.map((doc) => doc.id), [docId]);
+    assert.equal(zip.file("markdown/" + manifest.docs[0].id + "/" + manifest.docs[0].id + ".md") !== null, true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

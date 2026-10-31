@@ -27,7 +27,7 @@
 | `kb_remove` | 删除文档（默认软删除，可用 `kb_restore` 恢复；`soft=false` 永久删除）或整个知识库（删整库需显式 `kb` + `removeKb=true` 且 `confirm` 逐字等于知识库名称） |
 | `kb_restore` | 恢复软删除文档（不带 `version`）或恢复历史版本（`version=N`，来自 `kb_history`） |
 | `kb_history` | 列出文档保存过的历史版本（覆盖导入/重解析/编辑前的快照，最多 10 个） |
-| `kb_export` | 导出 md（单文件）/ jsonl（分块，RAG 用；`chunkSize`/`chunkOverlap` 可切 RAG 小块）/ zip（完整包，内置 JSZip 打包、不依赖系统命令；带 `manifest.json` = kbpack/v1，可被 `kb_import_package` 还原）/ **vault**（Obsidian Vault：`index.md` + `wiki/` 笔记与资料页 + `[[双链]]`，`includeSources=true` 时带 `raw/`） |
+| `kb_export` | 导出 md（单文件）/ jsonl（分块，RAG 用；`chunkSize`/`chunkOverlap` 可切 RAG 小块）/ zip（完整包，内置 JSZip 打包、不依赖系统命令；带 `manifest.json` = kbpack/v1，可被 `kb_import_package` 还原；`docIds` 可只导出选中资料）/ **vault**（Obsidian Vault：`index.md` + `wiki/` 笔记与资料页 + `[[双链]]`，`includeSources=true` 时带 `raw/`） |
 | `kb_rename` | 重命名知识库（`kb` 必填，须在本会话范围内） |
 
 大文件（如整本扫描书）导入自动转为**后台任务**，与内置 `job_list` / `job_output` 联动查看进度；
@@ -306,7 +306,7 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
   下载并导入，结果复用现有标准面板；面板同时显示缺口台账的未收录/分册歧义数量。
 - **摘要进入词法索引（0.33 后续）**：FTS schema 3 为每篇文档增加一条摘要行；摘要变化触发增量重建，
   只在摘要里出现的词也能被 `kb_query` 命中。首次升级会触发一次 FTS 全量重建（后台）。
-- 测试 1154 → **1246**（新增 kbpack 导出/校验/导入、快照恢复、缺口台账、每日报告、水印净化、
+- 测试 1154 → **1247**（新增 kbpack 导出/校验/导入、快照恢复、缺口台账、每日报告、水印净化、
   可信度编辑）。
 
 ## 0.32.0 标准更新链路修复 + 库内版本收敛规则
