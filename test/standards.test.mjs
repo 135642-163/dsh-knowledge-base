@@ -17,6 +17,7 @@ import {
   classifyStatus,
   classifyDocKind,
   collectKbStandards,
+  queryCandidates,
   findStdOnSite,
   runStdCheck,
   renderStdReport,
@@ -261,6 +262,9 @@ test("runStdCheck: 站内别的标准同号（不同体系）不算命中", asyn
       searchPage([resultBlock({ href: "/guojia/44104.html", stdNo: "GB/T 31005-2014", title: "GB/T 31005-2014 托盘编码及条码表示" })])
     ),
     "GET /plus/search.php?q=31005&PageNo=2": pageRes(searchPage([])),
+    // 纯数字查不到后，新增的「前缀+编号」候选会继续查；这里统一返回空页
+    "POST /plus/search.php": pageRes(searchPage([])),
+    "GET /plus/search.php": pageRes(searchPage([])),
   };
   const { report } = await runStdCheck({ kbDir: dir, baseUrl: BASE, cookie: "x", rateMs: 0, action: "check", fetchImpl: fakeFetch(routes) });
   assert.equal(report.notFound.length, 1);
@@ -462,4 +466,32 @@ test("renderStdReport: 更新行用“库内正文”口径，不再出现 2008 
   const text = renderStdReport(report);
   assert.match(text, /库内正文 2000 → 站点 2008/);
   assert.match(text, /代替标准: 代替GB 12326-2000/);
+});
+
+test("queryCandidates: 纯数字之后追加「前缀+编号」，短号不再只靠数字检索", () => {
+  const list = queryCandidates({ compareNumber: "1.1", year: 2020, prefix: "GB/T" });
+  assert.deepEqual(list.slice(0, 4), ["1.1-2020", "11-2020", "1.1", "11"]);
+  assert.ok(list.includes("GB/T 1.1-2020"), "应带前缀+带年份");
+  assert.ok(list.includes("GB/T1.1-2020"), "应带无空格写法");
+  assert.ok(list.includes("GB/T 1.1"), "应带前缀裸号");
+  assert.equal(new Set(list).size, list.length, "候选不能重复");
+  assert.deepEqual(queryCandidates({ compareNumber: "19963", year: 2011 }), ["19963-2011", "19963"]);
+});
+
+test("runStdCheck: 纯数字候选全空时回退到「前缀+编号」，GB/T 1.1 不再误判未收录", async () => {
+  const dir = await makeKb([
+    doc({ id: "a", title: "GB/T 1.1-2020 标准化工作导则 第1部分：标准化文件的结构和起草规则", standardNo: "GB/T 1.1-2020", standardNumber: "1.1", standardYear: 2020 }),
+  ]);
+  const routes = {
+    "POST /plus/search.php?q=1.1-2020": pageRes(searchPage([])),
+    "POST /plus/search.php?q=11-2020": pageRes(searchPage([])),
+    "POST /plus/search.php?q=1.1": pageRes(searchPage([])),
+    "POST /plus/search.php?q=11": pageRes(searchPage([])),
+    "POST /plus/search.php?q=GB/T 1.1-2020": pageRes(searchPage([resultBlock({ href: "/guojia/1.html", stdNo: "GB/T 1.1-2020", title: "GB/T 1.1-2020 标准化工作导则 第1部分" })])),
+    "GET /guojia/1.html": pageRes(detailPage({ title: "GB/T 1.1-2020 标准化工作导则 第1部分", stdNo: "GB/T 1.1-2020", downloadAid: 1, pub: "2020-03-31", impl: "2021-01-01" })),
+  };
+  const { report } = await runStdCheck({ kbDir: dir, baseUrl: BASE, cookie: "x", rateMs: 0, action: "check", fetchImpl: fakeFetch(routes) });
+  assert.equal(report.notFound.length, 0, "不应判未收录");
+  assert.equal(report.currents.length, 1);
+  assert.equal(report.currents[0].siteNo, "GB/T 1.1-2020");
 });

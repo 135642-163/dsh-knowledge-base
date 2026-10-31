@@ -294,11 +294,11 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
   （7 篇 DL→DL/T、1 篇库内同号旧版未标 low、1 篇占位理由、31 组缓存滞后）、15 项需人工、7 项仅报告；
   关键发现是 24 组「站点未收录」里 **8 组为查法误判**（`queryCandidates` 从不试「前缀+编号」/完整标准号，
   短编号还会被站点拒绝），16 组疑似真缺口；另有 5 篇封面/内容疑点（含 1 篇整份是另一标准）。
-  报告：`docs/reports/2026-10-31-standard-data-audit.md`。
+  报告：`docs/reports/2026-10-31-standard-data-audit.md`。已按用户批准执行确定性修正（快照后 7 篇 DL→DL/T、1 篇 low、7 篇占位理由刷新）；并给 `queryCandidates` 追加「前缀+编号」/完整标准号候选，修复 GB/T 1.1、DL/T 393 等 8 组「站点未收录」的查法误判（补 2 个测试）。
 - **封面核对补强**：`scripts/audit-cover-stdno.mjs` 把 OCR 的「一」也当连字符归一化，
   能识别 `DL 5383-2007` ↔ 封面 `DL/T 5383-2007` 这类前缀差；脚本改为可安全 import（不再在导入时执行 main）。
 
-测试 **1272/1272**。详见 `docs/reports/2026-10-31-0.34.0.md`。
+测试 **1274/1274**。详见 `docs/reports/2026-10-31-0.34.0.md`。
 
 ## 0.33.0 知识库搬运闭环（kbpack）+ 快照恢复 + 水印净化
 
@@ -1717,3 +1717,41 @@ npm install          # 安装依赖（生成 node_modules/）
   （站点仅微信扫码登录；未配置时工具只做检查报告）
 - 请求限速：config `stdRateMs`（默认 1200ms/次），防站点封控
 - 站点每次下载消耗 6 金币（VIP 免金币），金币不足的标准在报告中列出失败原因
+
+### 配置标准网 Cookie（bzCookie）
+
+**Cookie 不会进仓库。** 它只保存在你自己的 DSH profile 配置
+（`~/.dsh/profiles/<profile>/cordis.patch.yml`），不在插件目录、不会被 `git` 跟踪；
+插件只会在状态里返回“已配置 / 未配置”，不会回传或写日志。每个用户必须配置**自己的** Cookie，
+不能共用（下载会消耗账号金币，站点也会按账号限次）。
+
+1. 在浏览器用微信扫码登录 <https://www.biaozhun.org>；
+2. 打开开发者工具 → Application/Storage → Cookies → `biaozhun.org`（或任意请求的
+   `Cookie` 请求头），取这 6 个键：`DedeUserID`、`DedeUserID__ckMd5`、`DedeLoginTime`、
+   `DedeLoginTime__ckMd5`、`dede_csrf_token`、`dede_csrf_token__ckMd5`；
+3. 拼成一行（分号+空格分隔），写进 profile 的插件配置：
+
+```yaml
+# ~/.dsh/profiles/web/cordis.patch.yml（市场/bundle 安装：按 loader id 覆盖）
+- id: knowledge-wiki
+  config:
+    bzCookie: 'DedeUserID=...; DedeUserID__ckMd5=...; DedeLoginTime=...; DedeLoginTime__ckMd5=...; dede_csrf_token=...; dede_csrf_token__ckMd5=...'
+```
+
+源码/`install-to-machine.sh` 安装的 profile 用的是 `insert` 行（id `knowledge-base`），
+把 `bzCookie` 加在同一个 `config:` 下即可：
+
+```yaml
+- insert:
+    - id: knowledge-base
+      name: dsh-knowledge-wiki
+      config:
+        kbRoot: /Users/你/知识库
+        bzCookie: 'DedeUserID=...; ...'
+```
+
+- 保存后 HMR 会热应用；不生效就重启 `dsh web`。工作台「标准更新」面板显示“已配置”即生效。
+- Cookie 是账号凭据：**不要提交到 git、不要贴到聊天/issue**。若怀疑泄露，在站点重新扫码登录
+  （旧 Cookie 失效）并更新配置；不想用时把 `bzCookie` 设为空字符串即可关闭下载。
+- `.std-check.json` 是检查缓存（站点编号/状态/金币），不包含 Cookie；删除它只会让下次检查变慢。
+
