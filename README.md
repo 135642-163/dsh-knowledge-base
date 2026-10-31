@@ -303,7 +303,7 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
   `<kb>/.std-gaps.json` 跨轮追踪「站点未收录（非站外体系）」与「分册歧义」，站点收录后自动移除；
   工作台标准更新面板新增「按标准号补下载」：先预览确认页/金币（防串档），确认后走 `kb-std` 后台任务
   下载并导入，结果复用现有标准面板；面板同时显示缺口台账的未收录/分册歧义数量。
-- 测试 1154 → **1239**（新增 kbpack 导出/校验/导入、快照恢复、缺口台账、每日报告、水印净化、
+- 测试 1154 → **1241**（新增 kbpack 导出/校验/导入、快照恢复、缺口台账、每日报告、水印净化、
   可信度编辑）。
 
 ## 0.32.0 标准更新链路修复 + 库内版本收敛规则
@@ -467,8 +467,9 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
   >100 篇首次启用走**后台进程**建索引（当次检索回退 B 并在 note 里说明）；
 - `/kb/api/status` 暴露 `semantic: {enabled,indexReady,model,dim,docs,reason}`；工作台状态行在
   `engine=hybrid` 时显示「语义」；
-- **语义画像可选 `summary` / `window`**：默认 `summary`（标准号+标题+标签+摘要+首条款，600 字）；
-  `semanticProfile: window` 会把全文按页切成 8 个窗口、分别嵌入后取质心（仍是一条向量/文档）。
+- **语义画像可选 `summary` / `window`**：工作台「检索设置」→「语义画像」下拉即可切换，
+  也可在 profile 配置 `semanticProfile`。默认 `summary`（标准号+标题+标签+摘要+首条款，600 字）；
+  `window` 会把全文按页切成 8 个窗口、分别嵌入后取质心（仍是一条向量/文档）。
   80 题纯 dense 审计：当前 600 字 Recall@10 54.2%，窗口质心 65.0%、多窗口 max 71.7%；
   质心 MRR 从 0.282 提到 0.440，索引仍 1.9MB，但建索引约 8 倍时间。
 - **默认 `semanticSearch=off`**：关闭时行为与 0.30 完全一致（golden 对比测试逐字段校验），

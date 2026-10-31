@@ -1390,6 +1390,13 @@ export function openSemanticModal({ notify = () => {} } = {}) {
       <h2>检索设置</h2>
       <label class="check-row"><input type="checkbox" name="semantic-enabled" /> <span>启用语义检索</span></label>
       <p class="muted">开启后，用不同说法（比如「灯一直闪」）也能找到写「闪变」的资料。组件和模型放在本机，只需准备一次（约 390MB）；关闭时只按关键词检索，行为和现在完全一样。</p>
+      <label class="field"><span>语义画像</span>
+        <select name="semantic-profile">
+          <option value="summary">摘要+首条款（快，约 600 字/篇）</option>
+          <option value="window">全文 8 窗口质心（覆盖后段；建索引约 8 倍，索引大小不变）</option>
+        </select>
+      </label>
+      <p class="muted">画像只影响语义检索的召回范围，不改变词法检索；切换后下次检索会重建索引。</p>
       <div class="semantic-status muted">读取状态中…</div>
       <label class="check-row" data-consent-row hidden><input type="checkbox" data-consent /> <span>我同意安装运行组件并下载模型（约 390MB，只做一次）</span></label>
       <p class="form-error" hidden></p>
@@ -1400,6 +1407,7 @@ export function openSemanticModal({ notify = () => {} } = {}) {
     </div>
   `);
   const enabled = node.querySelector("[name=semantic-enabled]");
+  const profile = node.querySelector("[name=semantic-profile]");
   const statusBox = node.querySelector(".semantic-status");
   const error = node.querySelector(".form-error");
   const consentRow = node.querySelector("[data-consent-row]");
@@ -1430,6 +1438,7 @@ export function openSemanticModal({ notify = () => {} } = {}) {
     };
     add(`运行组件：${status?.dependencies?.ok ? "已安装" : "未安装"}`);
     add(`模型：${status?.model?.ok ? "已下载" : "未下载"}`);
+    add(`语义画像：${status?.profile === "window" ? "全文 8 窗口质心" : "摘要+首条款"}`);
     add(indexLine(status));
     if (status?.preparing) {
       add("正在准备组件与模型…（进度会显示在这里）");
@@ -1448,6 +1457,10 @@ export function openSemanticModal({ notify = () => {} } = {}) {
 
   function paint(status) {
     enabled.checked = status?.enabled === true;
+    if (profile) {
+      profile.value = status?.profile === "window" ? "window" : "summary";
+      profile.disabled = status?.preparing === true;
+    }
     const ready = status?.ready === true;
     consentRow.hidden = ready;
     prepare.hidden = ready;
@@ -1463,6 +1476,20 @@ export function openSemanticModal({ notify = () => {} } = {}) {
       showError(errorText(failure));
     }
   }
+
+  profile.onchange = async () => {
+    showError("");
+    const next = profile.value === "window" ? "window" : "summary";
+    profile.disabled = true;
+    try {
+      const status = await api.setSemanticProfile(next);
+      paint(status);
+      notify(next === "window" ? "已切换为全文窗口画像，下次检索会重建索引" : "已切换为摘要画像");
+    } catch (failure) {
+      showError(errorText(failure));
+      profile.disabled = false;
+    }
+  };
 
   enabled.onchange = async () => {
     showError("");

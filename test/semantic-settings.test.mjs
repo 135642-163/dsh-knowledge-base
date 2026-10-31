@@ -9,8 +9,10 @@ import { join } from "node:path";
 import {
   SEMANTIC_SETTINGS_FILE,
   readSemanticEnabled,
+  readSemanticProfile,
   readSemanticSettings,
   writeSemanticEnabled,
+  writeSemanticProfile,
 } from "../lib/semantic-settings.js";
 
 test("没有设置文件时用配置默认值", async () => {
@@ -51,6 +53,23 @@ test("设置文件损坏时回退默认值，不抛错", async () => {
     assert.equal((await readSemanticSettings(root)).enabled, null);
     await writeFile(join(root, SEMANTIC_SETTINGS_FILE), JSON.stringify({ enabled: "on" }), "utf8");
     assert.equal(await readSemanticEnabled(root, false), false, "非布尔值按未设置处理");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("profile 可独立持久化，改 enabled 不丢 profile", async () => {
+  const root = await mkdtemp(join(tmpdir(), "kb-sem-settings-"));
+  try {
+    assert.equal(await readSemanticProfile(root, "summary"), "summary");
+    assert.equal(await writeSemanticProfile(root, "window"), "window");
+    assert.equal(await readSemanticProfile(root, "summary"), "window");
+    assert.equal(await writeSemanticEnabled(root, true), true);
+    const settings = await readSemanticSettings(root);
+    assert.equal(settings.enabled, true);
+    assert.equal(settings.profile, "window");
+    assert.equal(await writeSemanticProfile(root, "summary"), "summary");
+    assert.equal(await readSemanticEnabled(root, false), true);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

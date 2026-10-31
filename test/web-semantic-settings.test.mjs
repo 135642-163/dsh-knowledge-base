@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { handleApi } from "../lib/web/api.js";
 import { createJobRegistry } from "../lib/web/jobs.js";
-import { readSemanticEnabled } from "../lib/semantic-settings.js";
+import { readSemanticEnabled, readSemanticProfile } from "../lib/semantic-settings.js";
 import { probeSemanticDependencies } from "../lib/semantic-setup.js";
 
 function makeRes() {
@@ -53,6 +53,7 @@ async function setup() {
     semanticModelDir: modelDir,
     jobs,
     semanticEnabled: () => readSemanticEnabled(kbRoot, false),
+    getSemanticProfile: () => readSemanticProfile(kbRoot, "summary"),
     semanticStatus: async () => ({
       enabled: await readSemanticEnabled(kbRoot, false),
       indexReady: false,
@@ -98,6 +99,7 @@ test("GET /semantic：默认关闭、依赖/模型状态与索引状态都是只
     assert.equal(Array.isArray(json.model.missing), true);
     assert.equal(json.model.missing.includes("model.onnx"), true);
     assert.equal(json.preparing, false);
+    assert.equal(json.profile, "summary");
     assert.equal(json.index.enabled, false);
   });
 });
@@ -110,10 +112,28 @@ test("PUT /semantic：开关写入 <kbRoot>/.semantic.json，GET 立即反映", 
     assert.equal(await readSemanticEnabled(kbRoot, false), true);
     const file = JSON.parse(await readFile(join(kbRoot, ".semantic.json"), "utf8"));
     assert.equal(file.enabled, true);
+    assert.equal(file.profile, "summary");
 
     const off = await call(opts, makeReq({ method: "PUT", body: { enabled: false } }));
     assert.equal(off.json.enabled, false);
     assert.equal(await readSemanticEnabled(kbRoot, true), false);
+  });
+});
+
+test("PUT /semantic：profile 保存为 window，且不丢 enabled", async () => {
+  await withSetup(async ({ opts, kbRoot }) => {
+    await call(opts, makeReq({ method: "PUT", body: { enabled: true, profile: "window" } }));
+    const settings = JSON.parse(await readFile(join(kbRoot, ".semantic.json"), "utf8"));
+    assert.deepEqual({ enabled: settings.enabled, profile: settings.profile }, { enabled: true, profile: "window" });
+    const status = await call(opts, makeReq());
+    assert.equal(status.json.profile, "window");
+    assert.equal(status.json.enabled, true);
+    const back = await call(opts, makeReq({ method: "PUT", body: { profile: "summary" } }));
+    assert.equal(back.json.profile, "summary");
+    assert.equal(back.json.enabled, true);
+    const bad = await call(opts, makeReq({ method: "PUT", body: { profile: "full" } }));
+    assert.equal(bad.res.status, 400);
+    assert.equal(bad.json.error.code, "INVALID_ARGS");
   });
 });
 

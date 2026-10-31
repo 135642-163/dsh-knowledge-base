@@ -114,6 +114,7 @@ export const api = {
   status: () => request("GET", "/status"),
   semantic: () => request("GET", "/semantic"),
   setSemantic: (enabled) => request("PUT", "/semantic", { enabled: enabled === true }),
+  setSemanticProfile: (profile) => request("PUT", "/semantic", { profile }),
   prepareSemantic: () => request("POST", "/semantic/prepare", { confirm: true }),
   kbs: () => request("GET", "/kbs"),
   kb: (name) => request("GET", `/kbs/${encodeURIComponent(name)}`),
