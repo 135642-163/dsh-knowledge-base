@@ -287,8 +287,18 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
   （规定了/适用于/不适用于），来源为 `model`，不改变文档版本；FTS/语义索引按 manifest stamp
   增量刷新。详见 `docs/reports/2026-10-31-standard-summary-pilot.md`、
   `...-batch2.md`、`...-batch3.md`、`...-batch4.md`、`...-batch5.md`、`...-batch6.md` 与 `...-batch7.md`。
+- **标准数据只读审计（P0-2，2026-10-31）**：新增 `scripts/std-data-audit.mjs`，只读汇总清单、
+  `.std-check.json`、lint 与封面核对，按「可自动修正 / 需人工确认 / 仅报告」输出
+  `docs/reports/<date>-standard-data-audit.{md,json}`；扫描前后对 `kb.json`/`index.md`/`log.md`/`schema.md`
+  取 sha256，并拒绝把报告写进被检查的知识库。首轮真实库（722 组 / 913 篇）结果：4 项可自动修正
+  （7 篇 DL→DL/T、1 篇库内同号旧版未标 low、1 篇占位理由、31 组缓存滞后）、15 项需人工、7 项仅报告；
+  关键发现是 24 组「站点未收录」里 **8 组为查法误判**（`queryCandidates` 从不试「前缀+编号」/完整标准号，
+  短编号还会被站点拒绝），16 组疑似真缺口；另有 5 篇封面/内容疑点（含 1 篇整份是另一标准）。
+  报告：`docs/reports/2026-10-31-standard-data-audit.md`。
+- **封面核对补强**：`scripts/audit-cover-stdno.mjs` 把 OCR 的「一」也当连字符归一化，
+  能识别 `DL 5383-2007` ↔ 封面 `DL/T 5383-2007` 这类前缀差；脚本改为可安全 import（不再在导入时执行 main）。
 
-测试 **1255/1255**。详见 `docs/reports/2026-10-31-0.34.0.md`。
+测试 **1272/1272**。详见 `docs/reports/2026-10-31-0.34.0.md`。
 
 ## 0.33.0 知识库搬运闭环（kbpack）+ 快照恢复 + 水印净化
 

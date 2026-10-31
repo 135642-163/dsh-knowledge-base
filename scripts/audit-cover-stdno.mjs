@@ -12,7 +12,8 @@
  * 同步派生 markdown 的 H1（不动 stage/trust/正文）。写清单时带锁 + 原子写 + 刷新 index + 写 log。
  */
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { readManifest, updateDocsMetaLocked, withManifestLock, expandRoot, kbDirPath } from "../lib/store.js";
 import { appendLog } from "../lib/wiki.js";
 import { refreshKbIndex } from "../lib/import-job.js";
@@ -47,7 +48,7 @@ function parseArgs(argv) {
 
 const normPrefix = (p) => p.replace(/\s+/g, "").toUpperCase();
 
-/** 取封面区文本：前 700 字，修正 OCR 在编号里插空格与全角破折号。 */
+/** 取封面区文本：前 700 字，修正 OCR 在编号里插空格、全角破折号与「一」作连字符。 */
 export function coverText(kbDir, docId, n = 700) {
   const f = join(kbDir, "markdown", docId, `${docId}.md`);
   if (!existsSync(f)) return "";
@@ -56,6 +57,7 @@ export function coverText(kbDir, docId, n = 700) {
     .replace(/<!--[\s\S]*?-->/g, " ")
     .replace(/^#[^\n]*\n/, " ")
     .replace(/(\d)\s*[.．]\s*(\d)/g, "$1.$2")
+    .replace(/(\d)\s*[一]\s*(\d)/g, "$1-$2")
     .replace(/[—–－‐]/g, "-");
 }
 
@@ -250,4 +252,5 @@ async function main() {
   if (!args.apply) console.log("\n（dry-run：未写入。加 --apply --fix-prefix 才写清单）");
 }
 
-await main();
+const isMain = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMain) await main();
