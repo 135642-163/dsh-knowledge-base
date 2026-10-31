@@ -283,10 +283,10 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
 - **摘要候选（只读）**：`scripts/summary-candidates.mjs` 识别封面/OCR 噪声摘要，从正文提取
   “本标准规定了…”范围句；报告 `docs/reports/2026-10-31-standard-summary-candidates.md`
   列出噪声摘要与可自动提取候选（按完整「1 范围」小节提取），确认后再用 `kb_describe` 应用。
-- **摘要试点（真实库）**：已对五批共 50 篇高置信候选执行 `kb_describe`，摘要覆盖完整「1 范围」
+- **摘要试点（真实库）**：已对六批共 56 篇高置信候选执行 `kb_describe`，摘要覆盖完整「1 范围」
   （规定了/适用于/不适用于），来源为 `model`，不改变文档版本；FTS/语义索引按 manifest stamp
   增量刷新。详见 `docs/reports/2026-10-31-standard-summary-pilot.md`、
-  `...-batch2.md`、`...-batch3.md`、`...-batch4.md` 与 `...-batch5.md`。
+  `...-batch2.md`、`...-batch3.md`、`...-batch4.md`、`...-batch5.md` 与 `...-batch6.md`。
 
 测试 **1253/1253**。详见 `docs/reports/2026-10-31-0.34.0.md`。
 
