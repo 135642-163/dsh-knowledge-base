@@ -28,9 +28,24 @@ function errorText(error) {
 }
 
 const OPTIONS = [
-  { id: "zip", label: "正文包（.zip，不含原件）", detail: "最小、最快；换机后原件需另行准备", includeSources: false },
-  { id: "zip-sources", label: "完整包（.zip，含原件）", detail: "可完整迁移；库大时可能有数 GB", includeSources: true },
-  { id: "md", label: "单文件 Markdown", detail: "适合直接上传给对话产品阅读", includeSources: false },
+  {
+    id: "zip",
+    label: "正文包（.zip，不含原件）",
+    detail: "含解析后的完整 markdown、分块与清单；可再导入、检索、阅读、编辑，但不能看原始页面或重新 OCR/解析",
+    includeSources: false,
+  },
+  {
+    id: "zip-sources",
+    label: "完整包（.zip，含原件）",
+    detail: "正文包 + sources/ 原始 PDF/Word 等；可完整迁移、看原件、重新 OCR/解析；库大时可能有数 GB",
+    includeSources: true,
+  },
+  {
+    id: "md",
+    label: "单文件 Markdown",
+    detail: "把整库正文拼成一个 .md（带目录）；适合阅读或上传给对话产品，但不能作为知识库导入（会变成一篇资料）",
+    includeSources: false,
+  },
 ];
 
 export function exportOptionBody(option) {
@@ -80,6 +95,7 @@ export function openExportModal({ name, notify = () => {}, onFinished = () => {}
   function chooseHtml() {
     return `<div class="modal-form">
       <h2>导出「${escapeHtml(name)}」</h2>
+      <p class="muted">「正文」是插件解析/OCR 后的完整文字内容（不是摘要）；原始 PDF/图片只存在于「完整包」。</p>
       <p class="muted">导出在后台生成，完成后点下载；文件会保存在知识库 exports/ 目录。</p>
       <div class="package-modes">
         ${OPTIONS.map((option) => `<label class="package-mode">
