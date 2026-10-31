@@ -474,6 +474,9 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
   （仍是一条向量/文档）；`summary` 是 600 字快画像（标准号+标题+标签+摘要+首条款）。
   80 题纯 dense 审计：当前 600 字 Recall@10 54.2%，窗口质心 65.0%、多窗口 max 71.7%；
   质心 MRR 从 0.282 提到 0.440，索引仍 1.9MB，但建索引约 8 倍时间。
+  生产口径回归（B vs 语义）：window 的 Doc Recall 93.3%→95.0%、Doc MRR 0.627→0.643，
+  但 Page Recall 81.7%→80.0%、Page MRR 0.576→0.529；summary 全面更差。语义默认仍关闭，
+  强依赖引用页码时建议关闭，或等待 page-aware fusion。
 - **默认 `semanticSearch=off`**：关闭时行为与 0.30 完全一致（golden 对比测试逐字段校验），
   不加载模型、不读写向量索引。
 
