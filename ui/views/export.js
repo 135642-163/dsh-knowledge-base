@@ -69,6 +69,8 @@ export function openExportModal({ name, docIds = null, notify = () => {}, onFini
     jobId: "",
     error: "",
     docIds: Array.isArray(docIds) && docIds.length > 0 ? docIds : null,
+    title: "",
+    note: "",
     timer: null,
     closed: false,
   };
@@ -106,6 +108,12 @@ export function openExportModal({ name, docIds = null, notify = () => {}, onFini
           <span><strong>${escapeHtml(option.label)}</strong><br /><span class="muted">${escapeHtml(option.detail)}</span></span>
         </label>`).join("")}
       </div>
+      <label class="field"><span>交付标题（可选，写入 README）</span>
+        <input name="export-title" maxlength="120" value="${escapeHtml(state.title)}" placeholder="例如：某项目电压偏差标准清单" autocomplete="off" />
+      </label>
+      <label class="field"><span>交付说明（可选，写入 README）</span>
+        <textarea name="export-note" maxlength="2000" rows="3" placeholder="说明交付范围、用途或引用约定…">${escapeHtml(state.note)}</textarea>
+      </label>
       ${state.error ? `<p class="form-error">${escapeHtml(state.error)}</p>` : ""}
       <div class="modal-actions">
         <button type="button" class="btn primary" data-start>开始导出</button>
@@ -153,6 +161,12 @@ export function openExportModal({ name, docIds = null, notify = () => {}, onFini
     modal.querySelectorAll("input[name='export-choice']").forEach((input) => input.addEventListener("change", () => {
       state.choice = input.value;
     }));
+    modal.querySelector("[name='export-title']")?.addEventListener("input", (event) => {
+      state.title = event.target.value;
+    });
+    modal.querySelector("[name='export-note']")?.addEventListener("input", (event) => {
+      state.note = event.target.value;
+    });
     modal.querySelector("[data-start]")?.addEventListener("click", () => { void start(); });
   }
 
@@ -161,7 +175,11 @@ export function openExportModal({ name, docIds = null, notify = () => {}, onFini
     state.error = "";
     render();
     try {
-      const started = await api.exportKb(name, exportOptionBody(state.choice, state.docIds));
+      const started = await api.exportKb(name, {
+        ...exportOptionBody(state.choice, state.docIds),
+        ...(state.title.trim() ? { title: state.title.trim() } : {}),
+        ...(state.note.trim() ? { note: state.note.trim() } : {}),
+      });
       state.jobId = started?.jobId;
       if (!state.jobId) throw new Error("导出任务没有返回 jobId");
       await poll();

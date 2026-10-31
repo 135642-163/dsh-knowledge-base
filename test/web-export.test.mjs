@@ -169,3 +169,29 @@ test("导出可只包含选中的文档", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("导出可带交付标题与说明，写入 README", async () => {
+  const { root, dir, jobs, opts } = await setup();
+  try {
+    const manifest = await readManifest(dir);
+    const doc = manifest.docs.find((entry) => entry.type !== "note");
+    const started = await call(opts, makeReq({
+      method: "POST",
+      url: `${KB_API}/export`,
+      body: {
+        format: "zip",
+        docIds: [doc.id],
+        title: "客户交付：电压偏差",
+        note: "仅用于本次评审，引用时请标注标准号与页码。",
+      },
+    }));
+    const job = await waitJob(jobs, started.json.jobId);
+    const { default: JSZip } = await import("jszip");
+    const zip = await JSZip.loadAsync(await readFile(join(dir, "exports", job.result.fileName)));
+    const readme = await zip.file("README.md").async("string");
+    assert.match(readme, /^# 客户交付：电压偏差/);
+    assert.match(readme, /仅用于本次评审/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
