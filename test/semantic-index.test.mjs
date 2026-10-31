@@ -330,3 +330,42 @@ test("window 画像：多窗口取质心、meta.profile 可区分，切换画像
     assert.equal(status.profile, DOC_PROFILE_WINDOW);
   });
 });
+
+test("summary 画像摘要变化必须重算；window 画像不依赖摘要可复用", async () => {
+  await withRoot(async (dir) => {
+    const doc = makeDoc("s1", { summary: "旧摘要" });
+    await writeMarkdown(dir, doc, "正文内容");
+    const first = fakeEmbedder();
+    await ensureDocVectors({
+      dir,
+      manifest: makeManifest([doc]),
+      embedder: first.embedder,
+      profile: DOC_PROFILE_SUMMARY,
+    });
+    const next = { ...doc, summary: "新摘要" };
+    const second = fakeEmbedder();
+    const changed = await ensureDocVectors({
+      dir,
+      manifest: makeManifest([next]),
+      embedder: second.embedder,
+      profile: DOC_PROFILE_SUMMARY,
+    });
+    assert.equal(changed.embedded, 1, "summary changed -> must re-embed");
+
+    const firstWindow = fakeEmbedder();
+    await ensureDocVectors({
+      dir,
+      manifest: makeManifest([next]),
+      embedder: firstWindow.embedder,
+      profile: DOC_PROFILE_WINDOW,
+    });
+    const nextWindow = fakeEmbedder();
+    const unchanged = await ensureDocVectors({
+      dir,
+      manifest: makeManifest([{ ...next, summary: "又一个摘要" }]),
+      embedder: nextWindow.embedder,
+      profile: DOC_PROFILE_WINDOW,
+    });
+    assert.equal(unchanged.embedded, 0, "window profile must not re-embed for summary-only change");
+  });
+});
