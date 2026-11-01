@@ -300,8 +300,9 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
 - **条款页眉修复（2026-11-01）**：`Q / GDW 1168—2013` 等页眉不再被当成附录条款 `Q`；全库重算 FTS，`[Q]` 清零（补 3 个回归测试）。
 - **大 PDF 后台导入实测（2026-11-01）**：78 页 PDF 在临时库后台导入完成（78 页/88,214 字，job owner 正常），测试库已清理。
 - **ZIP64 导出（2026-11-01）**：`kb_export(format="zip")`、库快照、Obsidian vault 导出改为 `yazl` 流式写入并启用 ZIP64；已用 4.4GB 稀疏 PDF 实测单成员 ZIP64 通过（JSZip 无法写 ZIP64）。
+- **bzCookie 安全存储（2026-11-01）**：macOS Keychain / Linux Secret Service / Windows DPAPI；旧 profile 明文首次启动自动迁移，`scripts/set-bz-cookie.mjs` 设置/查看/清除；Web 与日志不回传 Cookie。
 
-测试 **1287**（1283 通过、4 跳过）。详见 `docs/reports/2026-10-31-0.34.0.md`。
+测试 **1292**（1288 通过、4 跳过）。详见 `docs/reports/2026-10-31-0.34.0.md`。
 
 ## 0.33.0 知识库搬运闭环（kbpack）+ 快照恢复 + 水印净化
 
@@ -1719,45 +1720,68 @@ npm install          # 安装依赖（生成 node_modules/）
 `force`（忽略 7 天缓存全查）、`limit`（分批）、`dryRun`（模拟）。
 
 - 增量缓存：`<kbDir>/.std-check.json`（中断后再次调用自动续查）
-- 下载凭据：config `bzCookie` —— 用户在浏览器登录 biaozhun.org 后提供的 Cookie 串
-  （站点仅微信扫码登录；未配置时工具只做检查报告）
+- 下载凭据：系统安全存储中的 bzCookie（旧 config `bzCookie` 会自动迁移；站点仅微信扫码登录；未配置时工具只做检查报告）
 - 请求限速：config `stdRateMs`（默认 1200ms/次），防站点封控
 - 站点每次下载消耗 6 金币（VIP 免金币），金币不足的标准在报告中列出失败原因
 
-### 配置标准网 Cookie（bzCookie）
+### 配置标准网 Cookie（bzCookie，系统安全存储）
 
-**Cookie 不会进仓库。** 它只保存在你自己的 DSH profile 配置
-（`~/.dsh/profiles/<profile>/cordis.patch.yml`），不在插件目录、不会被 `git` 跟踪；
-插件只会在状态里返回“已配置 / 未配置”，不会回传或写日志。每个用户必须配置**自己的** Cookie，
-不能共用（下载会消耗账号金币，站点也会按账号限次）。
+**Cookie 是账号凭据，推荐存进系统钥匙串，不写 profile 明文。** 插件只会在状态里返回“已配置 / 未配置”，
+不会回传、不会写日志。
+
+支持的后端：
+
+| 平台 | 存储 |
+|---|---|
+| macOS | Keychain（`security` 的 generic password，service `dsh-knowledge-wiki`，account `biaozhun.org`） |
+| Linux | Secret Service（`secret-tool`） |
+| Windows | DPAPI（CurrentUser）加密文件 `~/.dsh/knowledge-wiki/bzCookie.dpapi` |
+
+#### 推荐设置方式
 
 1. 在浏览器用微信扫码登录 <https://www.biaozhun.org>；
 2. 打开开发者工具 → Application/Storage → Cookies → `biaozhun.org`（或任意请求的
    `Cookie` 请求头），取这 6 个键：`DedeUserID`、`DedeUserID__ckMd5`、`DedeLoginTime`、
    `DedeLoginTime__ckMd5`、`dede_csrf_token`、`dede_csrf_token__ckMd5`；
-3. 拼成一行（分号+空格分隔），写进 profile 的插件配置：
+3. 拼成一行（分号+空格分隔），用下面任一方式写入安全存储：
 
-```yaml
-# ~/.dsh/profiles/web/cordis.patch.yml（市场/bundle 安装：按 loader id 覆盖）
-- id: knowledge-wiki
-  config:
-    bzCookie: 'DedeUserID=...; DedeUserID__ckMd5=...; DedeLoginTime=...; DedeLoginTime__ckMd5=...; dede_csrf_token=...; dede_csrf_token__ckMd5=...'
+```bash
+# macOS：从剪贴板读入，不回显
+pbpaste | node scripts/set-bz-cookie.mjs
+
+# 或环境变量方式（注意 shell history）
+BZ_COOKIE='DedeUserID=...; DedeUserID__ckMd5=...; ...' node scripts/set-bz-cookie.mjs
+
+# 查看是否已配置（不打印 Cookie）
+node scripts/set-bz-cookie.mjs --status
+
+# 清除
+node scripts/set-bz-cookie.mjs --clear
 ```
 
-源码/`install-to-machine.sh` 安装的 profile 用的是 `insert` 行（id `knowledge-base`），
-把 `bzCookie` 加在同一个 `config:` 下即可：
+脚本会写入系统安全存储，并创建标记 `~/.dsh/knowledge-wiki/bzCookie.enabled`，下次启动插件优先读取它。
+保存后 HMR 会热应用；不生效就重启 `dsh web`。工作台「标准更新」面板显示“已配置”即生效。
+
+#### 旧配置迁移
+
+旧版 profile 里的 `bzCookie` 仍然兼容：
 
 ```yaml
 - insert:
     - id: knowledge-base
       name: dsh-knowledge-wiki
       config:
-        kbRoot: /Users/你/知识库
         bzCookie: 'DedeUserID=...; ...'
 ```
 
-- 保存后 HMR 会热应用；不生效就重启 `dsh web`。工作台「标准更新」面板显示“已配置”即生效。
-- Cookie 是账号凭据：**不要提交到 git、不要贴到聊天/issue**。若怀疑泄露，在站点重新扫码登录
-  （旧 Cookie 失效）并更新配置；不想用时把 `bzCookie` 设为空字符串即可关闭下载。
-- `.std-check.json` 是检查缓存（站点编号/状态/金币），不包含 Cookie；删除它只会让下次检查变慢。
+- 首次启动时插件会把明文 Cookie 迁移到系统安全存储，并在 `.plugin-load.log` 记录“已迁移”（不记录 Cookie）；
+- 迁移后建议**手动删除** profile 中的 `bzCookie` 明文；
+- 想强制只用 profile 明文（调试/不支持钥匙串的环境）：加 `bzCookieStorage: config`；
+- 安全存储不可用时会回退到配置值并记录警告，不会把 Cookie 写成新的明文文件。
 
+#### 安全注意
+
+- **不要提交到 git、不要贴到聊天/issue**；Cookie 泄露后立即在站点重新扫码登录使旧 Cookie 失效；
+- `.std-check.json` 是检查缓存（站点编号/状态/金币），不包含 Cookie；
+- Linux 需要 `secret-tool`（`libsecret-tools`）；Windows 使用当前用户 DPAPI，换用户/换机后需重新设置；
+- 每个用户必须配置自己的 Cookie，不能共用（下载消耗账号金币，站点按账号限次）。

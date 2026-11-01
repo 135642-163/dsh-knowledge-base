@@ -9,7 +9,7 @@
  *   node scripts/std-check-daily.mjs --root ~/workspace/knowledge --kb 标准
  *   node scripts/std-check-daily.mjs --root ~/workspace/knowledge --kb 标准 --action check-download
  *
- * 凭证：--cookie、环境变量 BZ_COOKIE，或从 --profile 指向的 cordis.patch.yml 读 bzCookie。
+ * 凭证：--cookie、环境变量 BZ_COOKIE、系统安全存储，或从 --profile 指向的 cordis.patch.yml 读 bzCookie。
  */
 import { execFile } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
 import { runStdCheck } from "../lib/standards.js";
 import { dailyReportPath, notificationText, renderDailyReport, shouldNotify } from "../lib/std-daily.js";
 import { expandRoot, kbDirPath } from "../lib/store.js";
+import { hasSecureCookie, readSecureCookie } from "../lib/secure-cookie.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const pluginRoot = dirname(here);
@@ -56,7 +57,7 @@ function parseArgs(argv) {
       console.log(`用法: node scripts/std-check-daily.mjs --root <kbRoot> [选项]
   --kb <库名>           默认「标准」
   --action <动作>       check（默认）| check-download | download
-  --cookie <串>         标准网 Cookie；也可用 BZ_COOKIE 或 --profile 读取
+  --cookie <串>         标准网 Cookie；也可用 BZ_COOKIE、系统安全存储或 --profile 读取
   --profile <yml>       cordis.patch.yml（默认桌面 profile，读其中 bzCookie）
   --reports-dir <dir>   报告目录（默认 <插件>/docs/reports）
   --rate <ms>           请求间隔（默认 1500）
@@ -91,6 +92,9 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const kbDir = kbDirPath(expandRoot(args.root), args.kb);
   let cookie = String(args.cookie || process.env.BZ_COOKIE || "").trim();
+  if (!cookie && await hasSecureCookie()) {
+    cookie = String(await readSecureCookie() ?? "").trim();
+  }
   if (!cookie && args.profile) {
     try {
       cookie = cookieFromProfile(await readFile(args.profile, "utf8"));

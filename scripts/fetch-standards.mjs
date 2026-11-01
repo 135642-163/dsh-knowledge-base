@@ -22,6 +22,7 @@ import {
 } from "../lib/standards.js";
 import { readManifest, expandRoot, kbDirPath, isDeleted } from "../lib/store.js";
 import { successorsOf, libraryHolds } from "../lib/supersede.js";
+import { hasSecureCookie, readSecureCookie } from "../lib/secure-cookie.js";
 
 function parseArgs(argv) {
   const args = {
@@ -47,7 +48,7 @@ function parseArgs(argv) {
       console.log(`用法: node scripts/fetch-standards.mjs --root <kbRoot> --kb <库名> [选项]
   --std <标准号>        要抓的编号，可重复（如 "GB/T 4728.6-2022"）
   --from-superseded     从 .std-check.json 里「站点标注废止且写明被 X 代替、库内没有 X」推导目标
-  --cookie <串>          站点登录 Cookie（也可用环境变量 BZ_COOKIE）
+  --cookie <串>          站点登录 Cookie（也可用 BZ_COOKIE 或系统安全存储）
   --dry-run | --apply   默认 dry-run（只校验确认页、报金币）；--apply 才下载并导入
   --limit <n>           本轮最多处理多少个编号（默认 20）
   --rate <ms>           请求间隔（默认 1500，最小 500）
@@ -84,6 +85,9 @@ const sanitize = (s) => String(s ?? "").replace(/[\\/:*?"<>|]/g, "_");
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  if (!args.cookie && await hasSecureCookie()) {
+    args.cookie = String(await readSecureCookie() ?? "").trim();
+  }
   const kbDir = kbDirPath(expandRoot(args.root), args.kb);
   const manifest = await readManifest(kbDir);
 

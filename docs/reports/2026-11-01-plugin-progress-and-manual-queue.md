@@ -63,3 +63,13 @@
 - 改用 `yazl`，`exportZip` / `snapshotKb` / `exportVault` 全部流式写入 + `forceZip64Format`；
 - 4.4GB 稀疏 PDF 实测：ZIP64 extra=true、source file_size=4,400,000,000，Python zipfile 与内置 `openZipReader` 均通过；产物已清理。
 - 详见 `2026-11-01-zip64-4gb-test.md`。
+
+---
+
+## 六、bzCookie 安全存储（2026-11-01）
+
+- `lib/secure-cookie.js`：macOS Keychain / Linux Secret Service / Windows DPAPI；
+- 旧 `bzCookie` 配置首次启动自动迁移，标记文件控制是否读钥匙串；
+- `scripts/set-bz-cookie.mjs` 支持管道/env 写入、`--status`、`--clear`；
+- CLI 脚本（std-check-daily / fetch-standards）优先读安全存储；
+- 测试 **1292**（1288 通过、4 跳过，0 失败）；报告 `2026-11-01-secure-cookie.md`。
