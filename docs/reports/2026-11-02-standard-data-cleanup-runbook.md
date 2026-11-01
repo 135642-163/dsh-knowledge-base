@@ -482,6 +482,14 @@ npm run eval:retrieval
 
 若数据集不齐，改为人工抽 10 题（用本次涉及的文档出题），记录命中与失败原因。
 
+### 6.3 验收结论（2026-11-01，已执行）
+
+- 阶段 1–4 的核对/写入均完成，结果报告：`2026-11-02-standard-quality-cleanup-result.md`；
+- `kb_lint` 复核：929/891/7 不变；corrupted 48（有意保留）、content-incomplete 17、
+  summary-noise 0、warning 67、可操作 81；
+- 检索抽查：TB/T 2799-1997 修复后可检索、构网型变流器征求意见稿可检索；
+- 未解决：GB/T 528-2009 待补源、阶段 5 未执行、清理后快照未创建。
+
 ### 6.4 收尾
 
 1. `kb_snapshot kb="标准" label="post-quality-cleanup" includeSources=false`（需你确认）；
