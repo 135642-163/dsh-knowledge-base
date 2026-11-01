@@ -103,6 +103,25 @@ test("lintManifest reports a missing schema", () => {
   assert.ok(report.groups.some((g) => g.code === "schema-missing"));
 });
 
+test("0.36 适配：分组项补 docIds、多文档组可逐篇定位，明细截断有 truncated 标记", () => {
+  const report = lintManifest(makeManifest(), { kbName: "体检库", hasSchema: true, now, maxItems: 20 });
+  const dup = report.groups.find((g) => g.code === "duplicate-content");
+  assert.equal(dup.items[0].docId, "h1,h2", "docId 字符串保持原样（兼容 kb_lint/审计脚本）");
+  assert.deepEqual(dup.items[0].docIds.sort(), ["h1", "h2"], "docIds 供质量工作台逐篇选中");
+  assert.equal(dup.truncated, false);
+
+  const truncated = lintManifest(makeManifest(), { kbName: "体检库", hasSchema: true, now, maxItems: 1 });
+  const unlabeled = truncated.groups.find((g) => g.code === "unlabeled");
+  assert.equal(unlabeled.count, 2, "count 始终是总数");
+  assert.equal(unlabeled.items.length, 1, "明细只保留 maxItems 条");
+  assert.equal(unlabeled.truncated, true);
+
+  // 单篇组也带 docIds，长度恒为 1。
+  const failed = report.groups.find((g) => g.code === "failed");
+  assert.deepEqual(failed.items[0].docIds, ["f1"]);
+  assert.equal(failed.truncated, false);
+});
+
 test("kb_lint tool renders a grouped report", async () => {
   const root = await mkdtemp(join(tmpdir(), "kb-lint-tool-"));
   try {

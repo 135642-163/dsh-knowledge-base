@@ -215,6 +215,8 @@ test("lintManifest：temp-files 组只列临时/锁文件文档", () => {
       docId: "t1",
       title: "~$节 试验作用.docx",
       detail: "~$节 试验作用.docx",
+      // 0.36：分组项补 docIds（工作台逐篇选中/取证据），docId 字符串保持原样。
+      docIds: ["t1"],
     },
   ]);
   assert.match(group.hint, /kb_remove/);
