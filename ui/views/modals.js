@@ -1277,9 +1277,37 @@ export function openMergeModal({ kbs = [], notify = () => {}, onFinished } = {})
       }
       if (!job || job.status === "running") throw new Error("合并任务超时，请到任务列表查看");
       if (job.status !== "succeeded") throw new Error(job.detail || "合并失败");
+      await onFinished?.();
+      const journal = job.result?.journal;
+      previewBox.innerHTML = `<p>${escapeHtml(job.detail ?? "合并完成")}</p>
+        ${journal ? `<button type="button" class="btn" data-undo>撤销本次合并</button>` : ""}`;
+      previewBox.hidden = false;
+      const undoButton = previewBox.querySelector("[data-undo]");
+      if (undoButton) {
+        undoButton.addEventListener("click", async () => {
+          undoButton.disabled = true;
+          error.hidden = true;
+          try {
+            const targetName = plan?.target?.name ?? "";
+            const startedUndo = await api.mergeUndo({ target: targetName, journal, confirm: true });
+            let undoJob = null;
+            for (let i = 0; i < 900; i += 1) {
+              undoJob = await api.job(startedUndo.jobId);
+              if (undoJob && undoJob.status !== "running") break;
+              await new Promise((resolve) => setTimeout(resolve, 500));
+            }
+            if (!undoJob || undoJob.status !== "succeeded") throw new Error(undoJob?.detail || "撤销失败");
+            notify(`已撤销合并：${undoJob.detail ?? ""}`);
+            await onFinished?.();
+            closeOverlay(node);
+          } catch (failure) {
+            error.textContent = failure instanceof ApiError ? failure.message : String(failure?.message ?? failure);
+            error.hidden = false;
+            undoButton.disabled = false;
+          }
+        });
+      }
       notify(`合并完成：${job.detail ?? ""}`);
-      onFinished?.();
-      closeOverlay(node);
     } catch (failure) {
       error.textContent = failure instanceof ApiError ? failure.message : String(failure?.message ?? failure);
       error.hidden = false;

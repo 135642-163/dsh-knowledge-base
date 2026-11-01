@@ -71,6 +71,20 @@ test("merge API：preview 只读、execute 需确认并后台完成", async () =
     assert.equal(c.docs.length, 2);
     const a = await readManifest(kbDirPath(root, "A"));
     assert.equal(a.mergedInto, "C");
+
+    const undo = await call(opts, makeReq(
+      { target: "C", journal: done.result.journal, confirm: true },
+      "POST",
+      "/kb/api/merge/undo"
+    ));
+    assert.equal(undo.res.status, 202);
+    const undoDone = await waitJob(jobs, undo.json.jobId);
+    assert.equal(undoDone.status, "succeeded");
+    const afterUndoA = await readManifest(kbDirPath(root, "A"));
+    const afterUndoC = await readManifest(kbDirPath(root, "C"));
+    assert.equal(afterUndoA.docs.length, 1);
+    assert.equal(afterUndoA.mergedInto, null);
+    assert.equal(afterUndoC.docs.length, 0);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

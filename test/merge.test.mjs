@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createKb } from "../lib/kbmeta.js";
 import { kbDirPath, readManifest, writeManifestAtomic } from "../lib/store.js";
-import { executeMerge, planMerge, sweepMergedSources } from "../lib/merge.js";
+import { executeMerge, planMerge, sweepMergedSources, undoMerge } from "../lib/merge.js";
 
 async function withRoot(fn) {
   const root = await mkdtemp(join(tmpdir(), "kb-merge-"));
@@ -111,5 +111,52 @@ test("sweepMergedSources：到期后删大目录，保留墓碑清单", async ()
     const after = await readManifest(aDir);
     assert.ok(after.mergePurgedAt);
     await stat(join(aDir, "kb.json"));
+  });
+});
+
+test("undoMerge：按 journal 把目标文档移回源库并清 mergedInto", async () => {
+  await withRoot(async (root) => {
+    await createKb(root, { name: "A" });
+    await createKb(root, { name: "B" });
+    await addDoc(root, "A", { id: "a1", title: "GB/T 1-2020 甲标准" });
+    await addDoc(root, "B", { id: "b1", title: "GB/T 2-2020 乙标准" });
+    const merged = await executeMerge({
+      kbRoot: root,
+      sources: ["A", "B"],
+      target: { name: "C", create: true },
+      snapshot: false,
+    });
+    const undone = await undoMerge({ kbRoot: root, target: "C", journal: merged.journal });
+    assert.equal(undone.moved, 2);
+    const c = await readManifest(kbDirPath(root, "C"));
+    assert.equal(c.docs.length, 0);
+    const a = await readManifest(kbDirPath(root, "A"));
+    const b = await readManifest(kbDirPath(root, "B"));
+    assert.equal(a.docs.length, 1);
+    assert.equal(b.docs.length, 1);
+    assert.equal(a.mergedInto, null);
+    assert.equal(a.mergePurgeAfter, null);
+    await stat(join(kbDirPath(root, "A"), "sources", "a1.txt"));
+    const journal = JSON.parse(await readFile(join(kbDirPath(root, "C"), "snapshots", undone.journal), "utf8"));
+    assert.equal(journal.status, "undone");
+  });
+});
+
+test("undoMerge：部分合并也能移回，保留源库原有跳过文档", async () => {
+  await withRoot(async (root) => {
+    await createKb(root, { name: "C" });
+    await createKb(root, { name: "A" });
+    await addDoc(root, "C", { id: "c1", title: "GB/T 1-2020 甲标准", hash: "h1" });
+    await addDoc(root, "A", { id: "a1", title: "GB/T 1-2020 甲标准", hash: "h2" });
+    await addDoc(root, "A", { id: "a2", title: "GB/T 2-2020 乙标准", hash: "h3" });
+    const merged = await executeMerge({ kbRoot: root, sources: ["A"], target: { name: "C" }, snapshot: false });
+    const undone = await undoMerge({ kbRoot: root, target: "C", journal: merged.journal });
+    assert.equal(undone.moved, 1);
+    const a = await readManifest(kbDirPath(root, "A"));
+    assert.equal(a.docs.length, 2);
+    assert.equal(a.mergedInto, null);
+    const c = await readManifest(kbDirPath(root, "C"));
+    assert.equal(c.docs.length, 1);
+    assert.equal(c.docs[0].id, "c1");
   });
 });
