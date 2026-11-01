@@ -26,7 +26,7 @@
 | orphan-note / trust-unknown | 4 / 1 | **0 / 0** | 4 篇笔记补双链后 orphan 清零 |
 | warning（不含 deferred） | 99 | **64** | |
 | 可操作文档 | 108 | **79** | |
-| 可信度 high/medium/low/unknown | 703/66/121/1 | **700/66/124/0** | 519-1992/1981 + Q/GDW 10650.3-2018 → low |
+| 可信度 high/medium/low/unknown | 703/66/121/1 | **699/66/124/0** | 519-1992/1981、Q/GDW 10650.3-2018 → low；GB/T 528 删除后 high -1 |
 
 `kb_lint` 复核（2026-11-01）：分组与上表一致；无新增失败/损坏文档；`schema.md` 存在。
 
@@ -84,9 +84,9 @@
 | `3bbcfb8d6105` GB/T 528-2009 只有封面（1 页 67 字） | **已按指令软删除**（可恢复） | 无需补源 |
 | 阶段 5 | 已完成（2 项写入，见 `2026-11-02-standard-duplicates-stage5-check.md`） | — |
 | G5 系列标题规范化 | **已完成**（4 篇，按封面/期刊页信息） | — |
-| 0.37 待办：`looksNoisySummary` 对「IEEE Std」误报 | 已记录 | 修检测规则（如要求与 Copyright/Published by 同现） |
-| 0.37 待办：`kb_query` 不传 `kb` 时 `doc` 解析失败 | 已记录 | 交互修复或文档说明 |
-| 0.37 待办：清单缺结构化字段时 `same-number` 误判 | 已记录 | 回退标题解析或新增告警 |
+| 0.37：`looksNoisySummary` 对「IEEE Std」误报 | **已修复**（3903bc8） | 改为 Second Printing / Revision of IEEE Std 等版权页特征 |
+| 0.37：`kb_query`/`kb_reparse` 不传 `kb` 时 `doc` 解析失败 | **已修复**（3903bc8） | 复用 resolveDocTarget 按会话范围解析唯一文档，歧义报 KB_AMBIGUOUS |
+| 0.37：清单缺结构化字段时 `same-number` 分组误判 | **已修复**（3903bc8） | 只有 standardNo 时回退标题解析 |
 
 ## 五、结论
 
@@ -96,3 +96,17 @@
 - 阶段 5 与 GB/T 528 补源是剩余工作；`corrupted` 与 `stale` 的计数不会因清理下降，属预期。
 
 > 本报告为结果记录；所有写入均发生在用户逐批确认之后，且每次写入前都有库级快照。
+
+
+## 七、0.37 修复（代码层，2026-11-01）
+
+三项 0.37 待办已修复并带测试（commit `3903bc8`）：
+
+| 修复 | 文件 | 行为 |
+|---|---|---|
+| 噪声摘要误报 | `lib/summary-candidates.js` | 删除过宽的 `\bIEEE Std\b` 规则，改用 `Second Printing`、`Revision of IEEE Std` 等版权页特征；正常引用 IEEE 标准号的摘要不再误报 |
+| doc 缺 kb 解析 | `lib/index.js`（kb_query / kb_reparse） | 只给 doc 时用 `resolveDocTarget` 按会话范围解析唯一文档（全部库/多库已选均可）；跨库同名多命中报 `KB_AMBIGUOUS`；`kb="*"` + doc 仍拒绝 |
+| lint 同号回退 | `lib/lint.js` | 清单只有 `standardNo`、缺结构化字段时回退标题解析，避免空 base 把同号文档塞进同一个键 |
+
+验证：`npm test` 1355 用例（1351 通过 / 4 跳过 / 0 失败）、`npm run typecheck` 通过；
+新增 `test/doc-without-kb.test.mjs`，更新 `test/scope-tools.test.mjs` 两处旧断言。
