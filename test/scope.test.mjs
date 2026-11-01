@@ -707,3 +707,31 @@ test("scopeForSessionSync keeps an expired none entry (no silent all)", async ()
   assert.equal(scope.mode, "none");
   assert.deepEqual(scope.kbs, []);
 });
+
+test("resolveDocTarget: 全部范围跨库解析唯一文档，并给出 kb 提示", async () => {
+  const root = await tmpRoot();
+  await makeKb(root, "A", [{ id: "a1", title: "继电保护技术条件" }]);
+  await makeKb(root, "B", [{ id: "b1", title: "变压器验收规范" }]);
+  await writeScopes(root, { scopes: { s1: { mode: "all", updatedAt: new Date().toISOString() } } });
+  const config = { kbRoot: root, defaultKb: "A" };
+  const unique = await resolveDocTarget(execFor("s1"), undefined, "变压器", config);
+  assert.equal(unique.kb, "B");
+  assert.equal(unique.doc.id, "b1");
+
+  await assert.rejects(
+    () => resolveDocTarget(execFor("s1"), undefined, "不存在", config),
+    (error) => error.code === "KB_NOT_FOUND" && error.message.includes("全部知识库") && error.message.includes("A、B")
+  );
+});
+
+test("resolveDocTarget: 全部范围多命中要求指定 kb", async () => {
+  const root = await tmpRoot();
+  await makeKb(root, "A", [{ id: "a1", title: "交接试验规程" }]);
+  await makeKb(root, "B", [{ id: "b1", title: "交接试验规程" }]);
+  await writeScopes(root, { scopes: { s1: { mode: "all", updatedAt: new Date().toISOString() } } });
+  const config = { kbRoot: root, defaultKb: "A" };
+  await assert.rejects(
+    () => resolveDocTarget(execFor("s1"), undefined, "交接试验", config),
+    (error) => error.code === "KB_AMBIGUOUS" && error.message.includes("请用 kb 参数指定库") && error.message.includes("A/a1")
+  );
+});

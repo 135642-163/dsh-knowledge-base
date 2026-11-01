@@ -266,7 +266,7 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
 - 只清理插件管理的目录和已知扩展名；`args.out` 指定的外部路径不参与清理。
 - 手动预演/清理：`npm run prune:storage -- --root ~/workspace/knowledge --kb 标准`（默认 dry-run，加 `--apply` 才删除）。
 
-**当前「标准」库预演**：snapshots 24→20（删 4 份旧快照，约 333MB）；exports 0→0。下次创建快照会自动按 20 份清理。
+**当前「标准」库已执行**：snapshots 24→20（删 4 份旧快照，释放约 333MB）；exports 0→0。
 
 ### 已知限制（0.26.0）
 

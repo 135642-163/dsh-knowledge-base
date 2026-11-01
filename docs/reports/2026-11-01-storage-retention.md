@@ -19,7 +19,7 @@ node scripts/prune-kb-storage.mjs --root ~/workspace/knowledge --kb 标准
 # snapshots 24→20（删 4，333.3MB）；exports 0→0
 ```
 
-**默认 dry-run，未删除。** 下次创建快照时会按 20 份自动清理；也可手动：
+**已执行 --apply（2026-11-01）：snapshots 24→20，删除 4 份、释放 333.3MB；snapshots 现 1.7GB。** 也可手动：
 
 ```bash
 node scripts/prune-kb-storage.mjs --root ~/workspace/knowledge --kb 标准 --apply
