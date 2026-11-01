@@ -160,3 +160,31 @@ test("undoMerge：部分合并也能移回，保留源库原有跳过文档", as
     assert.equal(c.docs[0].id, "c1");
   });
 });
+
+test("merge/undo 自动改写笔记 sources/linksOut", async () => {
+  await withRoot(async (root) => {
+    await createKb(root, { name: "C" });
+    await createKb(root, { name: "A" });
+    await addDoc(root, "C", { id: "a1", title: "GB/T 1-2020 甲标准", hash: "target" });
+    await addDoc(root, "A", { id: "a1", title: "GB/T 1-2020 甲标准", hash: "source" });
+    const aDir = kbDirPath(root, "A");
+    const manifest = await readManifest(aDir);
+    manifest.docs.push({
+      id: "n1", title: "笔记：引用甲", type: "note", status: "ready", chars: 10, parts: 1, version: 1,
+      sources: ["a1#p3"], linksOut: ["a1"],
+    });
+    await writeManifestAtomic(aDir, manifest);
+    const merged = await executeMerge({ kbRoot: root, sources: ["A"], target: { name: "C" }, snapshot: false });
+    const renamed = merged.actions.find((action) => action.docId === "a1" && action.action === "rename");
+    assert.ok(renamed?.newId);
+    const c = await readManifest(kbDirPath(root, "C"));
+    const note = c.docs.find((doc) => doc.id === "n1");
+    assert.deepEqual(note.sources, [`${renamed.newId}#p3`]);
+    assert.deepEqual(note.linksOut, [renamed.newId]);
+    await undoMerge({ kbRoot: root, target: "C", journal: merged.journal });
+    const a = await readManifest(kbDirPath(root, "A"));
+    const restored = a.docs.find((doc) => doc.id === "n1");
+    assert.deepEqual(restored.sources, ["a1#p3"]);
+    assert.deepEqual(restored.linksOut, ["a1"]);
+  });
+});

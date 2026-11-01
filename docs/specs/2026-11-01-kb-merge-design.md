@@ -168,12 +168,13 @@ P2：撤销合并（journal 逆操作）、笔记引用自动改写、2–10 源
 - `undoMerge({kbRoot,target,journal})` 按 journal 把目标文档移回源库，恢复源 `mergedInto` 等字段；
 - API `POST /kb/api/merge/undo`（confirm 后后台 job `kb-merge-undo`）；
 - 工作台合并成功结果区提供「撤销本次合并」；
-- 只恢复合并动作，不恢复合并后对目标正文的修改；不自动改笔记引用。
+- 只恢复合并动作，不恢复合并后对目标正文的修改；
+- 改名动作会同步改写 `sources`/`linksOut`，undo 反向恢复。
 
 ## 10. 合并源清理（A 方案）
 
-> 实现状态（2026-11-01）：P0 后端 `lib/merge.js`（plan/execute/sweep）+ P1 API/工作台向导 + P2 撤销合并已落地；
-> `features.merge=true`。P2 仅剩笔记引用自动改写、外部 kbpack 策略统一。
+> 实现状态（2026-11-01）：P0 后端 `lib/merge.js`（plan/execute/sweep）+ P1 API/工作台向导 + P2 撤销合并、
+> 笔记引用自动改写已落地；`features.merge=true`。P2 仅剩外部 kbpack 策略统一。
 
 - 源 manifest 新增 `mergePurgeAfter` / `mergePurgedAt`；
 - 合并成功且源库为空时写 `mergedInto/mergedAt/mergePurgeAfter`；
