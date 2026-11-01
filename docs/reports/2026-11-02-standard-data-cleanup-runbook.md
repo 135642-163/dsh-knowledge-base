@@ -342,7 +342,11 @@ POST /kb/api/kbs/标准/quality/actions
 > + `94b0e57829d6` IEEE 519-1992 标 low（已被 2014 版代替）。
 > 快照 `2026-11-01-13-11-25-pre-summary-batch1.zip`；
 > summary-noise 31 → 26、warning 98 → 93、可操作 107 → 102。
-> 记录见 `2026-11-02-standard-summary-stage3-pilot.md`；剩余 26 篇按批继续。
+> 记录见 `2026-11-02-standard-summary-stage3-pilot.md`。
+>
+> **批次 2（2026-11-01）**：再 5 篇（IEC 解释单 ×2、Q/GDW 12051、NB/T 33012、IEEE 519-1981）
+> + `9a67cac05fd3` 标 low；快照 `2026-11-01-13-22-44-pre-summary-batch2.zip`；
+> summary-noise 26 → 21、warning 93 → 88。剩余 21 篇噪声摘要按批继续。
 
 ### 3.4 验收
 
