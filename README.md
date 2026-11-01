@@ -323,6 +323,16 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
 
 测试 **1292**（1288 通过、4 跳过）。详见 `docs/reports/2026-10-31-0.34.0.md`。
 
+## 0.35 本地知识库合并（P1，2026-11-01）
+
+- **后端**：`lib/merge.js` 的 `planMerge` / `executeMerge` / `sweepMergedSources`；
+- **API**：`POST /kb/api/merge/preview`（只读）、`POST /kb/api/merge`（confirm 后后台 job）；
+- **工作台**：总览页「合并库」→ 选 2+ 源库 → 目标库（已有/新建）→ 预览 → 确认；
+- **重复策略**：同号同版本默认跳过，`keep` 可保留两份；同号不同年/阶段保留并警告；
+- **源库归档**：全空才 `mergedInto`，`mergePurgeAfter=+7d`；插件启动时懒清理，离线不清理，下次上线到期才清；
+- **部分合并**：有跳过文档时源库保持可见，不进入清理；
+- **两种合并**：本文是本地库物理合并；外部 kbpack 的 `mode=merge` 是导入合并，仍独立。
+
 ## 0.33.0 知识库搬运闭环（kbpack）+ 快照恢复 + 水印净化
 
 - **kbpack 导出**：`kb_export(format="zip")` 新增 `manifest.json`（`format=kbpack/v1`、`kbName`、

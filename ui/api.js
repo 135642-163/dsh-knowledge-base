@@ -227,6 +227,8 @@ export const api = {
   uploadFile,
   uploadPackage,
   importPackage: (uploadId, body) => request("POST", `/packages/${encodeURIComponent(uploadId)}/import`, body),
+  mergePreview: (body) => request("POST", "/merge/preview", body),
+  merge: (body) => request("POST", "/merge", body),
   job: async (id) => (await request("GET", `/jobs/${encodeURIComponent(id)}`)).job,
   cancelJob: async (id) => (await request("POST", `/jobs/${encodeURIComponent(id)}/cancel`)).job,
   jobs: async (params = {}) => {

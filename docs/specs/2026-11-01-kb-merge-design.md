@@ -165,7 +165,8 @@ P2：撤销合并（journal 逆操作）、笔记引用自动改写、2–10 源
 
 ## 10. 合并源清理（A 方案）
 
-> 实现状态（2026-11-01）：P0 后端已落地 `lib/merge.js`，含 plan/execute/sweep；API/UI 尚未做。
+> 实现状态（2026-11-01）：P0 后端 `lib/merge.js`（plan/execute/sweep）+ P1 API/工作台向导已落地；
+> `features.merge=true`。P2 撤销合并、笔记引用自动改写未做。
 
 - 源 manifest 新增 `mergePurgeAfter` / `mergePurgedAt`；
 - 合并成功且源库为空时写 `mergedInto/mergedAt/mergePurgeAfter`；

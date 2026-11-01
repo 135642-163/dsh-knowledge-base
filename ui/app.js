@@ -13,7 +13,7 @@ import {
   trashPurgeTarget, trashRestoreTargets, trashSelectionToggleAll, trashSelectionToggleOne,
 } from "./views/trash.js";
 import {
-  deleteConfirmBody, openBulkTrustModal, openConfirmModal, openCreateModal, openDocModal, openKbPickerModal, openMoveModal,
+  deleteConfirmBody, openBulkTrustModal, openConfirmModal, openCreateModal, openDocModal, openKbPickerModal, openMergeModal, openMoveModal,
   openPreviewModal, openRenameModal, openRestoreModal, openSemanticModal, retryFailedDoc,
 } from "./views/modals.js";
 import { openUploadModal } from "./views/upload.js";
@@ -1232,6 +1232,18 @@ function bind() {
       }
     } else if (action === "import-package") {
       openPackageImportModal({
+        notify: showToast,
+        onFinished: async () => {
+          await loadKbs();
+          const current = route();
+          if (current.page === "detail") await loadDetail(current.name, current.tab);
+        },
+      });
+    } else if (action === "merge-kb") {
+      const candidates = state.kbs.filter((kb) => !kb.mergedInto);
+      if (candidates.length < 2) { showToast("至少需要 2 个可用知识库才能合并"); return; }
+      openMergeModal({
+        kbs: candidates,
         notify: showToast,
         onFinished: async () => {
           await loadKbs();

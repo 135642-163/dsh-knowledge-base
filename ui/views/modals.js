@@ -1181,6 +1181,113 @@ export function renderMoveForm({
  * 跨库移动弹窗：选目标库 → 预检（摘要 + 冲突分组）→ 确认移动 → 结果页（可撤销全部）。
  * onDone 在移动/撤销完成后调用，用于刷新资料列表与侧栏计数。
  */
+export function openMergeModal({ kbs = [], notify = () => {}, onFinished } = {}) {
+  const live = (Array.isArray(kbs) ? kbs : []).filter((kb) => !kb?.mergedInto);
+  const node = overlay(`
+    <form class="modal-form">
+      <h2>合并知识库</h2>
+      <p class="muted">选择 2 个以上源库，合并到一个已有库或新建目标库。预览不写数据；确认后后台执行。</p>
+      <div class="field"><span>源库（至少 2 个）</span>
+        <div class="uplist">
+          ${live.map((kb) => `<label class="check"><input type="checkbox" name="source" value="${escapeAttr(kb.name)}" /> ${escapeHtml(kb.name)} <span class="muted">${Number(kb?.docs?.ready ?? 0)} 篇</span></label>`).join("") || `<p class="muted">没有可用知识库</p>`}
+        </div>
+      </div>
+      <label class="field"><span>目标库</span>
+        <select name="targetMode">
+          <option value="new">新建目标库</option>
+          ${live.map((kb) => `<option value="existing:${escapeAttr(kb.name)}">合并到已有库：${escapeHtml(kb.name)}</option>`).join("")}
+        </select>
+      </label>
+      <label class="field" data-new-target><span>新库名称</span><input name="targetName" maxlength="64" placeholder="例如：电气" /></label>
+      <label class="field"><span>同号同版本重复</span>
+        <select name="duplicatePolicy">
+          <option value="skip">跳过（保留目标库已有版本，推荐）</option>
+          <option value="keep">保留两份（改名）</option>
+        </select>
+      </label>
+      <div class="confirm-body" data-preview hidden></div>
+      <p class="form-error" hidden></p>
+      <div class="modal-actions">
+        <button type="button" class="btn" data-close>取消</button>
+        <button type="button" class="btn" data-preview-btn>预览</button>
+        <button type="submit" class="btn primary" disabled>确认合并</button>
+      </div>
+    </form>
+  `);
+  const form = node.querySelector("form");
+  const error = node.querySelector(".form-error");
+  const previewBox = node.querySelector("[data-preview]");
+  const submit = form.querySelector("button[type=submit]");
+  const previewBtn = node.querySelector("[data-preview-btn]");
+  const newTarget = node.querySelector("[data-new-target]");
+  let plan = null;
+  const selected = () => [...form.querySelectorAll("input[name=source]:checked")].map((el) => el.value);
+  const target = () => {
+    const mode = form.querySelector("select[name=targetMode]").value;
+    if (mode.startsWith("existing:")) return { name: mode.slice("existing:".length) };
+    return { name: String(form.querySelector("input[name=targetName]").value ?? "").trim(), create: true };
+  };
+  const body = () => ({ sources: selected(), target: target(), duplicatePolicy: form.querySelector("select[name=duplicatePolicy]").value });
+  const invalidate = () => { plan = null; submit.disabled = true; previewBox.hidden = true; };
+  form.addEventListener("change", () => {
+    invalidate();
+    newTarget.hidden = form.querySelector("select[name=targetMode]").value !== "new";
+  });
+  newTarget.hidden = form.querySelector("select[name=targetMode]").value !== "new";
+
+  previewBtn.addEventListener("click", async () => {
+    error.hidden = true;
+    const payload = body();
+    if (payload.sources.length < 2) { error.textContent = "至少选择 2 个源库"; error.hidden = false; return; }
+    if (payload.target.create && !payload.target.name) { error.textContent = "请输入新库名称"; error.hidden = false; return; }
+    previewBtn.disabled = true;
+    try {
+      const r = await api.mergePreview(payload);
+      plan = r?.plan ?? null;
+      if (!plan) throw new Error("预览结果为空");
+      const s = plan.summary ?? {};
+      const conflicts = (plan.conflicts ?? []).slice(0, 8).map((c) => `<li>${escapeHtml(c.title)}：${escapeHtml(c.reason ?? c.action)}</li>`).join("");
+      previewBox.innerHTML = `<p>将移动 <strong>${s.move + s.rename}</strong> 篇、跳过 <strong>${s.skipSame + s.skipDuplicate}</strong> 篇（重复 ${s.skipDuplicate}、同内容 ${s.skipSame}）</p>
+        ${plan.warnings?.length ? `<p class="muted">多版本/提示：${plan.warnings.length} 条</p>` : ""}
+        ${conflicts ? `<ul class="muted">${conflicts}</ul>` : ""}
+        ${s.notesAffected ? `<p class="muted">有 ${s.notesAffected} 篇笔记引用可能受影响。</p>` : ""}`;
+      previewBox.hidden = false;
+      submit.disabled = (s.move + s.rename) === 0;
+    } catch (failure) {
+      error.textContent = failure instanceof ApiError ? failure.message : String(failure?.message ?? failure);
+      error.hidden = false;
+    } finally {
+      previewBtn.disabled = false;
+    }
+  });
+
+  form.onsubmit = async (event) => {
+    event.preventDefault();
+    if (!plan) return;
+    submit.disabled = true;
+    error.hidden = true;
+    try {
+      const started = await api.merge({ ...body(), confirm: true });
+      if (!started?.jobId) { notify("没有需要移动的文档"); onFinished?.(); closeOverlay(node); return; }
+      let job = null;
+      for (let i = 0; i < 900; i += 1) {
+        job = await api.job(started.jobId);
+        if (job && job.status !== "running") break;
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+      if (!job || job.status === "running") throw new Error("合并任务超时，请到任务列表查看");
+      if (job.status !== "succeeded") throw new Error(job.detail || "合并失败");
+      notify(`合并完成：${job.detail ?? ""}`);
+      onFinished?.();
+      closeOverlay(node);
+    } catch (failure) {
+      error.textContent = failure instanceof ApiError ? failure.message : String(failure?.message ?? failure);
+      error.hidden = false;
+      submit.disabled = false;
+    }
+  };
+}
+
 export function openMoveModal({ name, ids = [], kbs = [], notify = () => {}, onDone } = {}) {
   const sourceIds = (Array.isArray(ids) ? ids : []).filter(Boolean);
   const targets = (Array.isArray(kbs) ? kbs : [])
