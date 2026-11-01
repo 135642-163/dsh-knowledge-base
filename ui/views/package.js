@@ -66,6 +66,7 @@ export function openPackageImportModal({ onFinished = () => {}, notify = () => {
     result: null,
     target: "",
     mode: "merge",
+    duplicatePolicy: "skip",
     confirmedReplace: false,
     job: null,
     jobId: "",
@@ -139,6 +140,11 @@ export function openPackageImportModal({ onFinished = () => {}, notify = () => {
       <label class="field"><span>目标知识库名 <span class="muted">（留空 = 用包内库名；rename 冲突自动加后缀）</span></span>
         <input id="pkg-target" maxlength="64" value="${escapeAttr(state.target)}" placeholder="${escapeAttr(result.package?.kbName ?? result.kb ?? "")}" autocomplete="off" />
       </label>
+      ${state.mode === "merge" ? `<label class="field"><span>同号同版本重复</span>
+        <select id="pkg-duplicate-policy">
+          <option value="skip" ${state.duplicatePolicy === "skip" ? "selected" : ""}>跳过（保留目标库已有版本，推荐）</option>
+          <option value="keep" ${state.duplicatePolicy === "keep" ? "selected" : ""}>保留两份（改名）</option>
+        </select></label>` : ""}
       ${state.mode === "replace" ? `<label class="check"><input type="checkbox" id="pkg-confirm-replace" ${state.confirmedReplace ? "checked" : ""} /> 我确认：同 id 文档将被包内版本覆盖（旧版进 history，包外文档保留）</label>` : ""}
       ${state.error ? `<p class="form-error">${escapeHtml(state.error)}</p>` : ""}
       <div class="modal-actions">
@@ -193,6 +199,7 @@ export function openPackageImportModal({ onFinished = () => {}, notify = () => {
       render();
     }));
     modal.querySelector("#pkg-target")?.addEventListener("input", (event) => { state.target = event.target.value; });
+    modal.querySelector("#pkg-duplicate-policy")?.addEventListener("change", (event) => { state.duplicatePolicy = event.target.value; });
     modal.querySelector("#pkg-confirm-replace")?.addEventListener("change", (event) => {
       state.confirmedReplace = event.target.checked;
       render();
@@ -240,6 +247,7 @@ export function openPackageImportModal({ onFinished = () => {}, notify = () => {
       const target = String(state.target ?? "").trim();
       if (target) body.kb = target;
       if (state.mode === "replace") body.confirm = "replace";
+      if (state.mode === "merge") body.duplicatePolicy = state.duplicatePolicy;
       const started = await api.importPackage(result.uploadId, body);
       state.jobId = started?.jobId;
       if (!state.jobId) throw new Error("导入任务没有返回 jobId");

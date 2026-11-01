@@ -21,7 +21,7 @@
 | 类型 | 入口 | 数据形态 | 本设计是否覆盖 |
 |---|---|---|---|
 | **A. 本地库合并** | 工作台选 2 个本机库 → 合并 | 物理移动本机 A/B 的文档到 C；A/B 归档为 `mergedInto`；有 journal/快照/回滚 | **本设计 P0** |
-| **B. 外部库导入并合并** | `kb_import_package` / 工作台导入 `.zip`（kbpack） | 外部包是文件，不是本机库；包内文档逐篇导入目标库，不做源库归档 | 已有 `mode=merge`；不在本 P0 代码中重写 |
+| **B. 外部库导入并合并** | `kb_import_package` / 工作台导入 `.zip`（kbpack） | 外部包是文件，不是本机库；包内文档逐篇导入目标库，不做源库归档 | 已有 `mode=merge`；已统一 `duplicatePolicy=skip|keep` 与 `versionConflicts`，但无 journal/undo |
 
 - 两者共同点：都要处理“目标已有同号/同 id 文档”；
 - 差异：A 有本机源库目录、文件移动、`mergedInto`、purge；B 只有包文件，导入后包仍在外部，源没有可归档的本地库；

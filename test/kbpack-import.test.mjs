@@ -437,3 +437,33 @@ test("forceStream：流式解压也能恢复正文与原件", async () => {
     await rm(target.root, { recursive: true, force: true });
   }
 });
+
+test("同标准号不同 id：duplicatePolicy=keep 保留两份", async () => {
+  const source = await makeRoot("kb-pack-keep-src-");
+  const target = await makeRoot("kb-pack-keep-dst-");
+  try {
+    const src = await seedFile(source.root, "A.txt", "来源库标准正文。\n");
+    await source.tools.get("kb_import").execute(
+      { path: src, kb: "来源库", title: "GB/T 12326-2008 电压波动和闪变" },
+      source.exec
+    );
+    const pack = await exportPack(source.tools, source.exec, source.root, "来源库");
+    const local = await target.tools.get("kb_import").execute(
+      { path: await seedFile(target.root, "B.txt", "目标库标准正文。\n"), kb: "目标库", title: "GB/T 12326-2008 电压波动和闪变" },
+      target.exec
+    );
+    assert.ok(local.imported[0].docId);
+    const result = await target.tools.get("kb_import_package").execute(
+      { path: pack, kb: "目标库", mode: "merge", duplicatePolicy: "keep" },
+      target.exec
+    );
+    assert.equal(result.duplicatePolicy, "keep");
+    assert.equal(result.keptDuplicates, 1);
+    assert.ok(result.created + result.remapped >= 1);
+    const listed = await target.tools.get("kb_list").execute({ kb: "目标库" }, target.exec);
+    assert.equal(listed.total, 2);
+  } finally {
+    await rm(source.root, { recursive: true, force: true });
+    await rm(target.root, { recursive: true, force: true });
+  }
+});

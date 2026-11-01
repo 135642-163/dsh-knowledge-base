@@ -321,7 +321,7 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
 - **ZIP64 导出（2026-11-01）**：`kb_export(format="zip")`、库快照、Obsidian vault 导出改为 `yazl` 流式写入并启用 ZIP64；已用 4.4GB 稀疏 PDF 实测单成员 ZIP64 通过（JSZip 无法写 ZIP64）。
 - **bzCookie 安全存储（2026-11-01）**：macOS Keychain / Linux Secret Service / Windows DPAPI；旧 profile 明文首次启动自动迁移，`scripts/set-bz-cookie.mjs` 设置/查看/清除；Web 与日志不回传 Cookie。
 
-测试 **1305**（1301 通过、4 跳过）。详见 `docs/reports/2026-11-01-0.35.0.md`。
+测试 **1306**（1302 通过、4 跳过）。详见 `docs/reports/2026-11-01-0.35.0.md`。
 
 ## 0.35.0 合并知识库 + 导入质量闸门（2026-11-01）
 
@@ -333,7 +333,7 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
 - **源库归档**：全空才 `mergedInto`，`mergePurgeAfter=+7d`；启动时懒清理，离线不清理；
 - **部分合并**：有跳过文档时源库保持可见，不进入清理；
 - **笔记引用**：改名时自动改写 `sources/linksOut`，undo 反向恢复；
-- **两种合并**：本地物理合并；外部 kbpack `mode=merge` 仍是独立导入合并；
+- **两种合并**：本地物理合并；外部 kbpack `mode=merge` 仍是独立导入合并，但已统一 `duplicatePolicy=skip|keep` 与 `versionConflicts`；
 - 其他 0.35 内容：ZIP64（yazl 4.4GB 实测）、交付 README、存储保留、bzCookie 安全存储、
   80 题回归、矢量页 forceOcr、条款页眉修复、多库范围提示、水印 `--real`。
 
