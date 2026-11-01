@@ -112,6 +112,9 @@ function uploadPackage(file, { onProgress, signal } = {}) {
 
 export const api = {
   status: () => request("GET", "/status"),
+  /** 数据目录（知识库根目录）：只读查看与保存；保存后重启 DSH 生效。 */
+  settings: () => request("GET", "/settings"),
+  saveSettings: (kbRoot) => request("PUT", "/settings", { kbRoot }),
   semantic: () => request("GET", "/semantic"),
   setSemantic: (enabled) => request("PUT", "/semantic", { enabled: enabled === true }),
   setSemanticProfile: (profile) => request("PUT", "/semantic", { profile }),

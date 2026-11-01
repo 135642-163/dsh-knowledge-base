@@ -16,6 +16,9 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+
+// E2E 使用临时 kbRoot/DSH_HOME：忽略本机保存的「数据目录」设置。
+process.env.KB_SETTINGS_DISABLED = "1";
 import { startHost } from "./host.mjs";
 import { createApi } from "./api.mjs";
 import { seedFixtures } from "./seed.mjs";
@@ -33,6 +36,7 @@ import * as upload from "./tests/upload.mjs";
 import * as sources from "./tests/sources.mjs";
 import * as search from "./tests/search.mjs";
 import * as semanticSettings from "./tests/semantic-settings.mjs";
+import * as kbrootSettings from "./tests/kbroot-settings.mjs";
 import * as quality from "./tests/quality.mjs";
 import * as readonly from "./tests/readonly.mjs";
 import * as merge from "./tests/merge.mjs";
@@ -42,7 +46,7 @@ const root = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const runStartedAt = new Date();
 const stamp = runStartedAt.toISOString().replace(/[:.]/g, "-").slice(0, 19);
 const artifactsDir = join(root, "test", "e2e", ".artifacts", stamp);
-const allTests = [trashSearchSort, trash, move, retry, preview, previewOffice, metadata, upload, deepLink, search, sources, capsule, semanticSettings, quality, readonly, merge];
+const allTests = [trashSearchSort, trash, move, retry, preview, previewOffice, metadata, upload, deepLink, search, sources, capsule, semanticSettings, kbrootSettings, quality, readonly, merge];
 const only = String(process.env.DSH_E2E_ONLY ?? "").trim();
 const tests = only ? allTests.filter((test) => String(test.name ?? "").includes(only)) : allTests;
 

@@ -30,5 +30,7 @@ if (files.length === 0) {
 const result = spawnSync(process.execPath, ["--test", ...process.argv.slice(2), ...files], {
   cwd: root,
   stdio: "inherit",
+  // 隔离「数据目录」设置：测试不能读到开发者本机保存的 kbRoot。
+  env: { ...process.env, KB_SETTINGS_DISABLED: "1" },
 });
 process.exit(result.status ?? 1);

@@ -17,7 +17,7 @@ import {
 } from "./views/trash.js";
 import {
   deleteConfirmBody, openBulkTrustModal, openConfirmModal, openCreateModal, openDocModal, openKbPickerModal, openMergeModal, openMoveModal,
-  openPreviewModal, openQualityActionModal, openRenameModal, openRestoreModal, openSemanticModal, retryFailedDoc,
+  openKbRootModal, openPreviewModal, openQualityActionModal, openRenameModal, openRestoreModal, openSemanticModal, retryFailedDoc,
 } from "./views/modals.js";
 import { openUploadModal } from "./views/upload.js";
 import { openPackageImportModal } from "./views/package.js";
@@ -1336,6 +1336,7 @@ function render() {
           <button class="side-action" data-action="create-kb">${icons.plus}<span>新建知识库</span></button>
           <a class="side-action ${current.page === "search" ? "active" : ""}" href="${hrefForSearch({})}">${icons.search}<span>全文搜索</span></a>
           <button class="side-action" data-action="semantic-settings">${icons.search}<span>检索设置</span></button>
+          <button class="side-action" data-action="kbroot-settings">${icons.database}<span>数据目录</span></button>
           <a class="side-action" href="${hrefForTrash()}">${icons.archive}<span>回收站</span></a>
           <a class="side-action subtle" href="/kb/" target="_blank" rel="noreferrer">${icons.external}<span>在新标签打开</span></a>
         </div>
@@ -1416,6 +1417,8 @@ function bind() {
       });
     } else if (action === "semantic-settings") {
       openSemanticModal({ notify: showToast });
+    } else if (action === "kbroot-settings") {
+      openKbRootModal({ notify: showToast });
     } else if (action === "export-kb") {
       const name = target.dataset.name;
       if (name) {

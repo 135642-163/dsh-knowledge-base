@@ -531,3 +531,9 @@ body.embed .side-foot a[target="_blank"] { display: none; }
   .quality-actions { justify-content: flex-start; }
   .quality-group-actions { margin-left: 0; }
 }
+
+
+/* 0.38 数据目录：当前路径用等宽字体，保存提示弱化显示 */
+.kbroot-settings .kbroot-current { font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); font-size: 12px; line-height: 1.5; word-break: break-all; }
+.kbroot-settings .kbroot-note { margin: 6px 0 0; padding: 8px 10px; border-radius: 6px; background: var(--bg-soft, rgba(127,127,127,.08)); font-size: 12px; word-break: break-all; }
+.kbroot-settings .field input[name="kbroot"] { font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); }

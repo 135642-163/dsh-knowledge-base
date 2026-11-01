@@ -1815,3 +1815,88 @@ function escapeHtml(value) {
 function escapeAttr(value) {
   return escapeHtml(value).replace(/`/g, "&#96;");
 }
+
+/**
+ * 0.38 数据目录：查看/修改知识库根目录。
+ * 设置持久化在 DSH 家目录（~/.dsh/knowledge-wiki/settings.json），重启 DSH 后生效；
+ * 只切换根目录，不移动/删除旧目录里的资料。
+ */
+export function openKbRootModal({ notify = () => {} } = {}) {
+  const node = overlay(`
+    <div class="modal-form kbroot-settings">
+      <h2>数据目录</h2>
+      <p class="muted">知识库根目录：所有知识库都放在这个目录下。修改后需重启 DSH 生效；不会移动或删除旧目录里的资料。</p>
+      <div class="kbroot-current muted">读取中…</div>
+      <label class="field"><span>新目录（支持 ~ 开头，留空表示恢复默认）</span>
+        <input name="kbroot" autocomplete="off" spellcheck="false" placeholder="例如 ~/knowledge" />
+      </label>
+      <div class="kbroot-note" hidden></div>
+      <p class="form-error" hidden></p>
+      <div class="modal-actions">
+        <button type="button" class="btn" data-close>关闭</button>
+        <button type="button" class="btn" data-reset hidden>恢复默认</button>
+        <button type="button" class="btn primary" data-save>保存</button>
+      </div>
+    </div>
+  `);
+  const current = node.querySelector(".kbroot-current");
+  const input = node.querySelector("[name=kbroot]");
+  const note = node.querySelector(".kbroot-note");
+  const error = node.querySelector(".form-error");
+  const reset = node.querySelector("[data-reset]");
+  const save = node.querySelector("[data-save]");
+
+  function showError(text) {
+    error.textContent = text;
+    error.hidden = !text;
+  }
+  function showNote(text) {
+    note.textContent = text;
+    note.hidden = !text;
+  }
+  function renderInfo(info) {
+    const source = info.kbRootSource === "setting" ? "数据目录设置" : "插件配置";
+    current.textContent = `当前生效：${info.kbRoot}（来自${source}）`;
+    const saved = String(info.savedKbRoot ?? "");
+    if (saved && info.restartRequired) {
+      showNote(`已保存：${saved}。重启 DSH 后生效。`);
+    } else if (saved) {
+      showNote(`已保存：${saved}（与当前生效目录一致）。`);
+    } else {
+      showNote("");
+    }
+    reset.hidden = !saved;
+    if (document.activeElement !== input) input.value = saved;
+  }
+
+  async function refresh() {
+    try {
+      const info = await api.settings();
+      renderInfo(info);
+    } catch (failure) {
+      current.textContent = "读取失败";
+      showError(errorText(failure));
+    }
+  }
+
+  async function submit(value) {
+    save.disabled = true;
+    reset.disabled = true;
+    showError("");
+    try {
+      const info = await api.saveSettings(value);
+      renderInfo(info);
+      notify(String(info.savedKbRoot ?? "") ? "数据目录已保存，重启 DSH 后生效" : "已恢复默认数据目录，重启 DSH 后生效");
+    } catch (failure) {
+      showError(errorText(failure));
+    } finally {
+      save.disabled = false;
+      reset.disabled = false;
+    }
+  }
+
+  save.addEventListener("click", () => { void submit(input.value); });
+  reset.addEventListener("click", () => { void submit(""); });
+  void refresh();
+  return node;
+}
