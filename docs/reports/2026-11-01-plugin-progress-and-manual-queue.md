@@ -45,3 +45,12 @@
 5. **P2 kb_view/kb_read 多库范围错误提示**；
 6. P2 合并两个知识库设计、Windows/macOS E2E、水印真实页 A/B、交付 README、只读共享；
 7. 版本 0.34.1/changelog/tag（用户确认后，不 push）。
+
+---
+
+## 四、ZIP64 导出（2026-11-01 继续）
+
+- 新增 `lib/zip-options.js`，统一 `{ streamFiles: true, compression: "DEFLATE", zip64: true }`；
+- `kb_export(format="zip")`、`kb_snapshot`、Obsidian vault 导出都改用它；
+- JSZip 默认在 4GB 边界报错，ZIP64 打开后允许 >4GB 单成员/整包；读取端 `zip-reader` 与 JSZip 均支持 ZIP64；
+- 新增 `test/zip-options.test.mjs`；套件 **1285/1285**。
