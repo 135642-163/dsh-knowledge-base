@@ -5,7 +5,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildCatalogMarkdown, sanitizeCatalogText } from "../scripts/build-catalog-index.mjs";
+import { buildCatalogMarkdown, sanitizeCatalogText, stamp } from "../scripts/build-catalog-index.mjs";
 
 function doc(id, title, patch = {}) {
   return {
@@ -41,12 +41,11 @@ const manifest = {
 };
 
 test("buildCatalogMarkdown renders a clean table from the manifest", () => {
-  const md = buildCatalogMarkdown(manifest, {
-    kbName: "测试库",
-    now: new Date("2026-10-31T00:30:00+08:00"),
-  });
+  const now = new Date("2026-10-31T00:30:00+08:00");
+  const md = buildCatalogMarkdown(manifest, { kbName: "测试库", now });
   assert.match(md, /^# 测试库 书目索引（自动生成）$/m);
-  assert.match(md, /生成时间：2026\/10\/31 00:30:00｜共 3 部（不含本索引）/);
+  // 生成时间按本地时区渲染：用同一个 stamp() 计算期望值，避免 UTC runner 上误报。
+  assert.ok(md.includes(`生成时间：${stamp(now)}｜共 3 部（不含本索引）`));
   assert.equal((md.match(/^\| \d+ \|/gm) ?? []).length, 3, "排除索引自身与软删除文档");
   assert.doesNotMatch(md, /书目索引（自动生成） \|/m, "索引不能把自己列进表格");
   assert.match(md, /\| 2 \| 一条笔记 \| 笔记 \| 0 \| 20 \|  \|/, "笔记照旧列出");

@@ -74,7 +74,7 @@ function outlineOf(doc, { limit = 3, itemChars = 30 } = {}) {
   return items.join("；");
 }
 
-function stamp(date) {
+export function stamp(date) {
   const pad = (n) => String(n).padStart(2, "0");
   return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()} ` +
     `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
