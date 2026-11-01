@@ -8,7 +8,7 @@
 
 | 工具 | 作用 |
 | --- | --- |
-| `kb_import` | 导入文件或目录（.docx / .doc 自动转换 / .pptx / .xlsx / .xlsm / .pdf / .md / .txt / .epub / .mobi / .azw3，扫描版 PDF 自动逐页 OCR 中文，自动识别文字层损坏页并只对问题页 OCR，文字层双栏页自动重排；Word OMML 公式转 LaTeX；Excel 按工作表转 Markdown 表格；.txt 自动识别 UTF-8/UTF-16/GBK；MOBI/AZW3 自动经 Calibre 转 EPUB）。旧版 .doc/.ppt 与 MOBI/AZW3 一律在后台任务中转换；正在导入中的同名文档自动跳过。**导入前自动查重**：同库重合跳过、跨库重合默认跳过并报告（见下文）；标准/书籍正文/封面优先，其他资料只用文件名；扫描页 OCR 前默认做水印净化（`watermark=auto/off/strong`）；`path` 是 kbpack 包（.zip）时自动路由到 `kb_import_package` |
+| `kb_import` | 导入文件或目录（.docx / .doc 自动转换 / .pptx / .xlsx / .xlsm / .pdf / .md / .txt / .epub / .mobi / .azw3，扫描版 PDF 自动逐页 OCR 中文，自动识别文字层损坏页并只对问题页 OCR，文字层双栏页自动重排；Word OMML 公式转 LaTeX；Excel 按工作表转 Markdown 表格；.txt 自动识别 UTF-8/UTF-16/GBK；MOBI/AZW3 自动经 Calibre 转 EPUB）。旧版 .doc/.ppt 与 MOBI/AZW3 一律在后台任务中转换；正在导入中的同名文档自动跳过。**导入前自动查重**：同库重合跳过、跨库重合默认跳过并报告；同库同标准号不同年份/阶段（多版本）默认暂停并提示，加 `allowSameNumber: true` 确认后仍可入库（见下文）；标准/书籍正文/封面优先，其他资料只用文件名；扫描页 OCR 前默认做水印净化（`watermark=auto/off/strong`）；`path` 是 kbpack 包（.zip）时自动路由到 `kb_import_package` |
 | `kb_import_package` | 导入 kbpack 知识库包（`kb_export format=zip` 产出的 `.zip`，带 `manifest.json`）：安全校验（坏包/路径穿越/符号链接/版本过高拒绝）、同 id 相同内容幂等跳过、同 id 不同内容另存新 id、同标准号不同 id 走导入查重；同名库**不静默写入**，返回 `merge` / `rename` / `replace` 三选一（replace 需 `confirm:"replace"`），`dryRun=true` 只预演；包内 `*Source=manual` 字段不覆盖目标库人工值 |
 | `kb_reparse` | 从库内 `sources/` 重新解析文档（无需重新上传），用于 OCR/解析器升级后刷新旧管线产物；`doc` 单个、`all=true` 批量，支持 `forceOcr`、`forceOcrPages`/`skipOcrPages`、后台任务 |
 | `kb_list` | 列出知识库 / 知识库内文档与状态（旧管线/已修订/文字层损坏/OCR 低置信会标注），每条带一行摘要与标签；省略 `kb` 时只列本会话范围内的库；默认最多 50 条，支持 `limit/offset/query/status/kind` 分页过滤（`kind=note` 只看笔记、`kind=source` 只看资料）；本库有维护规范时会提示 |
@@ -301,7 +301,7 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
 - **大 PDF 后台导入实测（2026-11-01）**：78 页 PDF 在临时库后台导入完成（78 页/88,214 字，job owner 正常），测试库已清理。
 - **ZIP64 导出（2026-11-01）**：`kb_export(format="zip")`、库快照、Obsidian vault 导出统一启用 `zip64: true`，支持 >4GB 单成员/整包；小包仍按普通 zip 写，读取端兼容 ZIP64。
 
-测试 **1285/1285**。详见 `docs/reports/2026-10-31-0.34.0.md`。
+测试 **1288/1288**。详见 `docs/reports/2026-10-31-0.34.0.md`。
 
 ## 0.33.0 知识库搬运闭环（kbpack）+ 快照恢复 + 水印净化
 
@@ -1373,7 +1373,10 @@ kb_export({
 
 - **重合（exact）**：标准号/年份/版本桶一致，或标题规范化后完全相同 → 按规则跳过；
   - 同库重合 → 始终跳过（同路径同名文件例外：按原位更新，版本号 +1）；
-  - 跨库重合 → 默认跳过并在结果中列出；确认需要时加 `allowCrossDuplicates: true` 重新执行。
+  - 跨库重合 → 默认跳过并在结果中列出；确认需要时加 `allowCrossDuplicates: true` 重新执行；
+  - 同库同号不同年份/阶段 → 结果返回 `versionConflicts`，该文件先暂停（不写入）；
+    确认要保留多版本后加 `allowSameNumber: true` 重新执行，结果 `versionConfirmed: true`；
+    跨库同号多版本只提示，不阻断。
 - **相似（similar）**：短标题是长标题的完整前缀等低置信匹配（如「XX导则」vs「XX导则（试行）」）
   → **照常导入**，并在结果里列出候选，提示人工确认。相似不自动跳过，是为了避免把
   「国网浙江省电力有限公司电能质量管理规定」和以同一单位名开头的另一份通知误当成重复丢掉。

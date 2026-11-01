@@ -157,3 +157,27 @@ test("titleKeys extracts part markers", () => {
   assert.equal(titleKeys("国家电网公司变电检测管理规定（试行） 第36分册 主回路电阻测量细则").part, "分册:36");
   assert.equal(titleKeys("GB/T 12325-2008 电能质量 供电电压偏差").part, "");
 });
+
+test("同号不同年份不是重复，而是 versionConflicts", async () => {
+  await withRoot(async (root) => {
+    await makeKb(root, "标准", ["GB/T 12325-2008 电能质量 供电电压偏差"]);
+    const files = [{ sourcePath: "/tmp/v2019.txt", relKey: "v2019.txt", title: "GB/T 12325-2019 电能质量 供电电压偏差" }];
+    const r = await scanDuplicates({ root, targetKb: "标准", files });
+    assert.equal(r.kept.length, 1);
+    assert.equal(r.duplicates.length, 0);
+    assert.equal(r.versionConflicts.length, 1);
+    assert.equal(r.versionConflicts[0].reason, "different-year");
+    assert.equal(r.versionConflicts[0].scope, "same-kb");
+  });
+});
+
+test("同号同年不同阶段（发布稿 vs 报批稿）进入 versionConflicts", async () => {
+  await withRoot(async (root) => {
+    await makeKb(root, "标准", ["GB/T 12325-2008 电能质量 供电电压偏差"]);
+    const files = [{ sourcePath: "/tmp/draft.txt", relKey: "draft.txt", title: "GB/T 12325-2008 电能质量 供电电压偏差（报批稿）" }];
+    const r = await scanDuplicates({ root, targetKb: "标准", files });
+    assert.equal(r.duplicates.length, 0);
+    assert.equal(r.versionConflicts.length, 1);
+    assert.equal(r.versionConflicts[0].reason, "different-stage");
+  });
+});

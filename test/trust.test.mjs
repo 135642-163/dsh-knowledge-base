@@ -49,7 +49,7 @@ async function setup() {
   ]) {
     const src = join(root, file);
     await writeFile(src, `# 概述\n\n${body}\n`, "utf8");
-    const r = await tools.get("kb_import").execute({ path: src, kb: "测试库", title }, exec);
+    const r = await tools.get("kb_import").execute({ path: src, kb: "测试库", title, allowSameNumber: true }, exec);
     ids[key] = r.imported[0].docId;
   }
   return { root, kbDir: join(kbRoot, "测试库"), tools, exec, ids };
