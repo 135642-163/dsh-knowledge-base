@@ -54,7 +54,7 @@ test("explicit page sets override the heuristic", () => {
   assert.equal(shouldOcrPage(page, { threshold: 50, forceOcr: true, pageNo: 3 }), true);
   assert.equal(
     shouldOcrPage({ chars: 0, images: 0 }, { threshold: 50, forceOcr: true, pageNo: 3 }),
-    false
+    true
   );
 });
 
@@ -64,5 +64,16 @@ test("page list formatting does not duplicate the unit", () => {
   assert.equal(
     formatPageList(Array.from({ length: 12 }, (_, i) => i + 1)),
     "第 1、2、3、4、5、6、7、8、9、10 等 12 页"
+  );
+});
+
+test("forceOcr 对 chars/images 都为 0 的矢量页也强制 OCR", () => {
+  assert.equal(
+    shouldOcrPage({ chars: 0, images: 0 }, { forceOcr: true, pageNo: 2 }),
+    true
+  );
+  assert.equal(
+    shouldOcrPage({ chars: 0, images: 0 }, { threshold: 50, pageNo: 2 }),
+    false
   );
 });

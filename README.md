@@ -298,7 +298,7 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
 - **封面核对补强**：`scripts/audit-cover-stdno.mjs` 把 OCR 的「一」也当连字符归一化，
   能识别 `DL 5383-2007` ↔ 封面 `DL/T 5383-2007` 这类前缀差；脚本改为可安全 import（不再在导入时执行 main）。
 
-测试 **1280/1280**。详见 `docs/reports/2026-10-31-0.34.0.md`。
+测试 **1281/1281**。详见 `docs/reports/2026-10-31-0.34.0.md`。
 
 ## 0.33.0 知识库搬运闭环（kbpack）+ 快照恢复 + 水印净化
 
@@ -1312,7 +1312,7 @@ bundle 只依赖宿主提供的 React，不打包第二份 React；`package.json
 - **UI 告警**：`kb_list` 标注 `[文字层损坏 N页]` / `[OCR低置信 N页]`；
   `kb_read` 返回页码范围与 OCR 平均置信度，并在正文后提示问题页，建议 `kb_view` 核对。
 - **精细控制**：`kb_import` / `kb_reparse` 支持 `forceOcrPages="12,48"` 与
-  `skipOcrPages="1,2"`；`forceOcr` 仍可强制全部页面。
+  `skipOcrPages="1,2"`；`forceOcr` 仍可强制全部页面（包括 chars/images 均为 0 的矢量描边页，真空白页 OCR 结果为空）。
 
 ## 检索体验（0.4.1）
 
