@@ -132,13 +132,16 @@ test("kb_query omitted in all mode keeps defaultKb behavior", async () => {
   assert.deepEqual(result.searchedKbs, undefined);
 });
 
-test("kb_query rejects doc together with cross-kb search", async () => {
+test("kb_query resolves doc without kb across scoped kbs, but still rejects doc with kb=*", async () => {
   const { tools, scoped, importDoc, scope } = await setup();
   await importDoc("a.md", "# A\n\n甲。\n", "甲库", "甲文档");
   await importDoc("b.md", "# B\n\n乙。\n", "乙库", "乙文档");
   await scope("s1", ["甲库", "乙库"]);
+  // 0.37：多库范围内 doc 未给 kb 时按唯一命中自动路由
+  const routed = await tools.get("kb_query").execute({ pattern: "甲", doc: "甲文档" }, scoped("s1"));
+  assert.equal(routed.kb, "甲库");
   await assert.rejects(
-    () => tools.get("kb_query").execute({ pattern: "甲", doc: "甲文档" }, scoped("s1")),
+    () => tools.get("kb_query").execute({ pattern: "甲", doc: "甲文档", kb: "*" }, scoped("s1")),
     /doc 只能用于单个知识库/
   );
 });
@@ -228,10 +231,9 @@ test("kb_query routes doc to a single scoped kb and rejects multi-kb doc search"
   assert.deepEqual(single.scope, { mode: "selected", kbs: ["甲库"] });
 
   await scope("s2", ["甲库", "乙库"]);
-  await assert.rejects(
-    () => tools.get("kb_query").execute({ pattern: "继电保护", doc: "甲文档" }, scoped("s2")),
-    (error) => error.code === "KB_REQUIRED" && /doc 只能用于单个知识库/.test(error.message)
-  );
+  // 0.37：多库范围内 doc 未给 kb 时按唯一命中自动路由（不再直接拒绝）
+  const multi = await tools.get("kb_query").execute({ pattern: "继电保护", doc: "甲文档" }, scoped("s2"));
+  assert.equal(multi.kb, "甲库");
   await assert.rejects(
     () => tools.get("kb_query").execute({ pattern: "继电保护", doc: "甲文档", kb: "*" }, scoped("s2")),
     (error) => error.code === "KB_REQUIRED" && /doc 只能用于单个知识库/.test(error.message)

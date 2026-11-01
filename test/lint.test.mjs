@@ -168,3 +168,17 @@ test("redline / errata / companion material are distinct stages, not duplicates"
   assert.equal(report.counts.sameNumberDuplicateGroups, 0, "must not flag variants as duplicates");
   assert.equal(report.counts.sameNumberStageGroups, 4, "each pair is a same-number different-stage info item");
 });
+
+test("0.37：只有 standardNo、没有结构化字段时同号分组回退标题解析", () => {
+  const manifest = {
+    schemaVersion: 3,
+    name: "无结构库",
+    docs: [
+      baseDoc("a1", "GB/T 12325-2008 电能质量 供电电压偏差", { standardNo: "GB/T 12325-2008" }),
+      baseDoc("a2", "GB/T 12325-2018 电能质量 供电电压偏差", { standardNo: "GB/T 12325-2018" }),
+    ],
+  };
+  const report = lintManifest(manifest, { kbName: "无结构库", hasSchema: true, now, maxItems: 20 });
+  assert.equal(report.counts.sameNumberDuplicateGroups, 0, "不同年份不应被当成同号重复");
+  assert.equal(report.counts.sameNumberMultiYearGroups, 1, "应按标题解析出同一编号的多版本");
+});

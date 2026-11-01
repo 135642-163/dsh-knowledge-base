@@ -43,3 +43,15 @@ test("带编号的 1.2 规范性引用文件 也截断范围", () => {
   const md = `本标准适用于高压开关设备。\n本标准包括户内和户外设备。\n1.2 规范性引用文件\n下列文件...`;
   assert.equal(extractScopeSummary(md), "本标准适用于高压开关设备。 本标准包括户内和户外设备。");
 });
+
+test("0.37：摘要里提到 IEEE Std 不算噪声，版权/印刷页才算", () => {
+  assert.equal(
+    looksNoisySummary("IEEE Std 1668-2017 的 Redline 版（Techstreet 生成）：正文与 2017 版一致，用红/蓝标记相对上一版（2014）的删除与修改。"),
+    false
+  );
+  assert.equal(
+    looksNoisySummary("IEEE Std 519-1992 (Revision of IEEE Std 519-1981) Second Printing 15 June 2004"),
+    true
+  );
+  assert.equal(looksNoisySummary("Published by The Institute of Electrical and Electronics Engineers"), true);
+});
