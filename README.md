@@ -323,7 +323,7 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
 - **ZIP64 导出（2026-11-01）**：`kb_export(format="zip")`、库快照、Obsidian vault 导出改为 `yazl` 流式写入并启用 ZIP64；已用 4.4GB 稀疏 PDF 实测单成员 ZIP64 通过（JSZip 无法写 ZIP64）。
 - **bzCookie 安全存储（2026-11-01）**：macOS Keychain / Linux Secret Service / Windows DPAPI；旧 profile 明文首次启动自动迁移，`scripts/set-bz-cookie.mjs` 设置/查看/清除；Web 与日志不回传 Cookie。
 
-测试 **1306**（1302 通过、4 跳过）。详见 `docs/reports/2026-11-01-0.35.0.md`。
+测试 **1309**（1305 通过、4 跳过）。详见 `docs/reports/2026-11-01-0.35.0.md`。
 
 ## 0.35.0 合并知识库 + 导入质量闸门（2026-11-01）
 
@@ -335,10 +335,11 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
 - **源库归档**：全空才 `mergedInto`，`mergePurgeAfter=+7d`；启动时懒清理，离线不清理；
 - **部分合并**：有跳过文档时源库保持可见，不进入清理；
 - **笔记引用**：改名时自动改写 `sources/linksOut`，undo 反向恢复；
+- **只读共享**：库设置可开 `readOnly`；查询/阅读/导出可用，导入/编辑/删除/合并等写入返回 409；通过复制/同步目录或 kbpack 分发；
 - **两种合并**：本地物理合并；外部 kbpack `mode=merge` 仍是独立导入合并，但已统一 `duplicatePolicy=skip|keep` 与 `versionConflicts`；
 - 其他 0.35 内容：ZIP64（yazl 4.4GB 实测）、交付 README、存储保留、bzCookie 安全存储、
   80 题回归、矢量页 forceOcr、条款页眉修复、多库范围提示、水印 `--real`；
-- E2E：macOS WebKit 13 passed / 1 skipped（含合并用例）；Windows 自托管 job 已接入，未实跑。
+- E2E：macOS WebKit 14 passed / 1 skipped（含只读/合并用例）；Windows 自托管 job 已接入，未实跑。
 
 ## 0.33.0 知识库搬运闭环（kbpack）+ 快照恢复 + 水印净化
 
@@ -1666,7 +1667,7 @@ npm run test:e2e      # 自托管临时 DSH web 宿主并跑完整流程
   - 为什么不在 GitHub 托管 runner 上自动跑：全新 `DSH_HOME` 首次启动会要求一次性
     token，浏览器/同源 API 的认证链路在托管 runner 上不稳定，且没有历史会话/模型凭据
     （胶囊无法挂载）。自托管 runner 复用已配置 profile，结果与本地一致（当前 10/10 + 1 skip）。
-  - 本地有凭据 profile 当前 **13 passed / 0 failed / 1 skipped**（skip = CLI 0.1.x
+  - 本地有凭据 profile 当前 **14 passed / 0 failed / 1 skipped**（skip = CLI 0.1.x
     未投影 tool result meta），E2E 中的回收站用例会真实执行一次**跨库批量彻底删除**。
 - Windows 说明：本地 PowerShell 设 `$env:DSH_E2E_BROWSER="chromium"`、
   `$env:DSH_E2E_DSH_BIN="dsh.cmd"` 后 `npm run test:e2e`；本仓库已补 Windows 自托管 job，

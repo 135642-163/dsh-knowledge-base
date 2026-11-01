@@ -161,17 +161,18 @@ export function renderDetail(state, current, { icons, fmtNumber }) {
           <div class="detail-title">
             <h1>${escapeHtml(kb.name)}</h1>
             ${kb.status === "empty" ? `<span class="badge">空库</span>` : ""}
+            ${kb.readOnly ? `<span class="badge warn" title="查询/阅读/导出可用，内容不可修改">只读共享</span>` : ""}
             ${statusBadges(kb, { interactiveFailed: true })}
             ${kbTagChips(kb.tags)}
           </div>
           <p class="muted">${kb.description ? escapeHtml(kb.description) : "未填写简介"}</p>
         </div>
         <div class="detail-actions">
-          <button class="btn primary" data-action="upload" data-kb="${escapeAttr(kb.name)}">${icons.upload}<span>上传资料</span></button>
-          <button class="btn" data-action="import-package">导入知识库包</button>
+          <button class="btn primary" data-action="upload" data-kb="${escapeAttr(kb.name)}" ${kb.readOnly ? "disabled" : ""} title="${kb.readOnly ? "只读库不可上传" : ""}">${icons.upload}<span>上传资料</span></button>
+          <button class="btn" data-action="import-package" ${kb.readOnly ? "disabled" : ""}>导入知识库包</button>
           <button class="btn" data-action="export-kb" data-name="${escapeAttr(kb.name)}">导出知识库</button>
-          <button class="btn" data-action="rename-kb-modal" data-name="${escapeAttr(kb.name)}">重命名</button>
-          <button class="btn" data-action="archive-kb" data-name="${escapeAttr(kb.name)}">${icons.archive}<span>归档</span></button>
+          <button class="btn" data-action="rename-kb-modal" data-name="${escapeAttr(kb.name)}" ${kb.readOnly ? "disabled" : ""}>重命名</button>
+          <button class="btn" data-action="archive-kb" data-name="${escapeAttr(kb.name)}" ${kb.readOnly ? "disabled" : ""}>${icons.archive}<span>归档</span></button>
         </div>
       </div>
       <nav class="tabs">
@@ -502,17 +503,19 @@ function settings(kb) {
       <h3>库信息</h3>
       <label class="field"><span>简介</span><textarea id="kb-description" rows="3">${escapeHtml(kb.description)}</textarea></label>
       <label class="field"><span>标签（逗号分隔）</span><input id="kb-tags" value="${escapeAttr((kb.tags ?? []).join(", "))}" /></label>
-      <button class="btn primary" data-action="save-meta" data-name="${escapeAttr(kb.name)}">保存简介与标签</button>
+      <label class="check"><input type="checkbox" id="kb-readonly" ${kb.readOnly ? "checked" : ""} /> 只读共享（查询/阅读/导出可用，禁止导入、编辑、删除、合并）</label>
+      <button class="btn primary" data-action="save-meta" data-name="${escapeAttr(kb.name)}">保存设置</button>
     </div>
     <div class="panel">
       <h3>重命名</h3>
-      <label class="field"><span>新名称</span><input id="kb-rename" value="${escapeAttr(kb.name)}" /></label>
-      <button class="btn" data-action="rename-kb" data-name="${escapeAttr(kb.name)}">重命名</button>
+      <label class="field"><span>新名称</span><input id="kb-rename" value="${escapeAttr(kb.name)}" ${kb.readOnly ? "disabled" : ""} /></label>
+      <button class="btn" data-action="rename-kb" data-name="${escapeAttr(kb.name)}" ${kb.readOnly ? "disabled" : ""}>重命名</button>
+      ${kb.readOnly ? `<p class="muted">请先关闭只读再重命名/归档。</p>` : ""}
     </div>
     <div class="panel danger-zone">
       <h3>归档</h3>
       <p class="muted">移动到 <code>.trash/</code>，不会删除文件；可在侧栏“回收站”恢复。</p>
-      <button class="btn danger" data-action="archive-kb" data-name="${escapeAttr(kb.name)}">归档这个库</button>
+      <button class="btn danger" data-action="archive-kb" data-name="${escapeAttr(kb.name)}" ${kb.readOnly ? "disabled" : ""}>归档这个库</button>
     </div>
   `;
 }

@@ -1480,9 +1480,10 @@ function bind() {
     } else if (action === "save-meta") {
       const description = app.querySelector("#kb-description")?.value ?? "";
       const tags = String(app.querySelector("#kb-tags")?.value ?? "").split(/[,，]/).map((tag) => tag.trim()).filter(Boolean);
+      const readOnly = app.querySelector("#kb-readonly")?.checked === true;
       try {
-        await api.patchKb(target.dataset.name, { description, tags });
-        showToast("简介与标签已保存");
+        await api.patchKb(target.dataset.name, { description, tags, readOnly });
+        showToast("知识库设置已保存");
         const current = route();
         await loadDetail(current.name, current.tab);
       } catch (error) {

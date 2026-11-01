@@ -74,6 +74,7 @@ function card(kb, { icons, fmtNumber }) {
         <h2>${escapeHtml(kb.name)}</h2>
         ${kb.status === "empty" ? `<span class="badge">空库</span>` : ""}
         ${statusBadges(kb)}
+        ${kb.readOnly ? `<span class="badge warn">只读</span>` : ""}
         ${kb.mergedInto ? `<span class="badge">已合并至 ${escapeHtml(kb.mergedInto)}</span>` : ""}
         <span class="card-more">${icons.chevron}</span>
       </div>
