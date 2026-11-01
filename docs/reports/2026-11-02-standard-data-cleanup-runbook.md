@@ -447,6 +447,13 @@ POST /kb/api/kbs/标准/quality/actions
 
 ### 5.4 验收
 
+> **已完成（2026-11-01）**：67 对同号多版本配对全部核对（66 对已 low，本次补 1 对
+> `d2983214a82c` Q/GDW 10650.3-2018）、24 组同期不同阶段确认正常不处理、
+> 笔记「续」页 `7dc9d9260fe5` 软删除（内容已在主线 `6f47571bbc3f`）。
+> 快照 `2026-11-01-13-32-30-pre-stage5-notes.zip`；0 删除正文文档。
+> 计数：ready 891→890、软删除 38→39、笔记 7→6、unlabeled 1→0、supersede-hint 1→0、
+> trust-unknown 1→0、warning 67→65。记录见 `2026-11-02-standard-duplicates-stage5-check.md`。
+
 - 重复组计数与基线一致或下降，且每次下降都有记录；
 - 多版本没有未经确认的删除；
 - 笔记合并后 `orphan-note`/`supersede-hint` 计数下降，且没有丢失结论。
