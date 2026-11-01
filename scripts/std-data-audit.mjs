@@ -139,15 +139,17 @@ export function detectStdNoAnomalies(docs) {
     if (!no) continue;
     const prefix = compact(d.standardPrefix).toUpperCase();
     const number = compact(d.standardNumber);
-    const expectedPrefix = (no.match(/^([A-Z/]+?)(?=\d)/) ?? [])[1] ?? "";
+    const noUpper = compact(no).toUpperCase();
     if (!number) {
       out.push({ code: "stdno-number-empty", docId: d.id, title: docTitle(d), evidence: `standardNo=${d.standardNo}，standardNumber 为空`, action: "重跑 parseDocMeta 或手工重填标准号" });
       continue;
     }
-    if (expectedPrefix && prefix && prefix !== expectedPrefix) {
+    // 不再用「标准号开头连续字母」猜前缀：IEEE C37.111 这类字母开头的编号
+    // 会把前缀猜成 "IEEE C"。以写入的 standardPrefix 为准做前缀/编号自洽校验。
+    if (prefix && !noUpper.startsWith(prefix)) {
       out.push({ code: "stdno-prefix-inconsistent", docId: d.id, title: docTitle(d), evidence: `standardNo=${d.standardNo}，standardPrefix=${d.standardPrefix}`, action: "按封面纠正前缀后重建标准字段" });
     }
-    if (!no.startsWith(expectedPrefix + number)) {
+    if (!noUpper.startsWith(compact(prefix + number).toUpperCase())) {
       out.push({ code: "stdno-number-inconsistent", docId: d.id, title: docTitle(d), evidence: `standardNo=${d.standardNo}，standardNumber=${d.standardNumber}`, action: "按封面/文件名重建标准号" });
     }
     // 标题开头的标准编号必须与元数据一致（英文标题通常没有编号，此时 extractStdRef 返回空）
@@ -155,7 +157,10 @@ export function detectStdNoAnomalies(docs) {
     if (titleRef?.compareNumber) {
       const titleNumber = compact(titleRef.compareNumber);
       const titleYear = titleRef.year ?? null;
-      const sameNumber = titleNumber === number;
+      // IEEE C37.111 这类字母开头的编号，extractStdRef 只留 37.111；
+      // 比较时去掉两边开头的字母，避免误报标题冲突。
+      const stripLeadingLetters = (v) => compact(v).replace(/^[A-Z]+/i, "");
+      const sameNumber = titleNumber === number || stripLeadingLetters(titleNumber) === stripLeadingLetters(number);
       const sameYear = titleYear == null || d.standardYear == null || titleYear === d.standardYear;
       if (!sameNumber || !sameYear) {
         out.push({

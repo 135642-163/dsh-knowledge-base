@@ -296,3 +296,15 @@ test("runAudit 拒绝把报告写进被检查的知识库", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("标准号：IEEE C37.111 字母编号不误报前缀/编号/标题冲突", () => {
+  const issues = detectStdNoAnomalies([
+    doc("ieee", "IEEE Std C37.111-1999 电力系统暂态数据交换通用格式（COMTRADE）", {
+      standardNo: "IEEE C37.111-1999",
+      standardPrefix: "IEEE",
+      standardNumber: "C37.111",
+      standardYear: 1999,
+    }),
+  ]);
+  assert.deepEqual(issues, []);
+});
