@@ -74,6 +74,7 @@ function card(kb, { icons, fmtNumber }) {
         <h2>${escapeHtml(kb.name)}</h2>
         ${kb.status === "empty" ? `<span class="badge">空库</span>` : ""}
         ${statusBadges(kb)}
+        ${qualityBadge(kb)}
         ${kb.readOnly ? `<span class="badge warn">只读</span>` : ""}
         ${kb.mergedInto ? `<span class="badge">已合并至 ${escapeHtml(kb.mergedInto)}</span>` : ""}
         <span class="card-more">${icons.chevron}</span>
@@ -94,6 +95,17 @@ function card(kb, { icons, fmtNumber }) {
       </div>
     </article>
   `;
+}
+
+/** 质量徽标（总览卡片）：只展示机械问题计数，点击卡片仍进库详情。 */
+function qualityBadge(kb) {
+  const quality = kb?.quality ?? {};
+  const total = (Number(quality.corruptedDocs) || 0)
+    + (Number(quality.contentIncomplete) || 0)
+    + (Number(quality.summaryNoise) || 0)
+    + (Number(quality.unlabeled) || 0);
+  if (total <= 0) return "";
+  return `<span class="badge warn" title="质量队列：坏页 ${Number(quality.corruptedDocs) || 0} · 不完整 ${Number(quality.contentIncomplete) || 0} · 摘要噪声 ${Number(quality.summaryNoise) || 0} · 未编目 ${Number(quality.unlabeled) || 0}">质量 ${total}</span>`;
 }
 
 const TRUST_COLORS = { high: "#22c55e", medium: "#f5a524", low: "#f05252", unknown: "#6b9fff" };

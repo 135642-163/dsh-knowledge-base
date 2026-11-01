@@ -1,6 +1,7 @@
 import { hrefForKb } from "../router.js";
 import { statusBadges } from "./badges.js";
 import { renderStdPanel } from "./std.js";
+import { renderQualityPanel } from "./quality.js";
 import { DOC_TRUST_LEVELS } from "./doc-meta.js";
 
 /** 工作台允许的每页条数；服务端仍按 1–200 兜底。 */
@@ -163,6 +164,7 @@ export function renderDetail(state, current, { icons, fmtNumber }) {
             ${kb.status === "empty" ? `<span class="badge">空库</span>` : ""}
             ${kb.readOnly ? `<span class="badge warn" title="查询/阅读/导出可用，内容不可修改">只读共享</span>` : ""}
             ${statusBadges(kb, { interactiveFailed: true })}
+            ${qualityBadge(kb)}
             ${kbTagChips(kb.tags)}
           </div>
           <p class="muted">${kb.description ? escapeHtml(kb.description) : "未填写简介"}</p>
@@ -178,6 +180,7 @@ export function renderDetail(state, current, { icons, fmtNumber }) {
       <nav class="tabs">
         ${tabLink(kb.name, "overview", "概览", tab)}
         ${tabLink(kb.name, "docs", "资料", tab)}
+        ${tabLink(kb.name, "quality", "质量", tab)}
         ${tabLink(kb.name, "notes", "笔记", tab)}
         ${tabLink(kb.name, "log", "日志", tab)}
         ${tabLink(kb.name, "std", "标准更新", tab)}
@@ -185,12 +188,28 @@ export function renderDetail(state, current, { icons, fmtNumber }) {
       </nav>
       ${tab === "overview" ? overview(kb, detail, { fmtNumber }) : ""}
       ${tab === "docs" ? docs(kb, state, { fmtNumber, icons }) : ""}
+      ${tab === "quality" ? renderQualityPanel(state, detail, { fmtNumber }) : ""}
       ${tab === "notes" ? notes(state, { fmtNumber }) : ""}
       ${tab === "log" ? log(detail.logTail) : ""}
       ${tab === "std" ? renderStdPanel(state, kb.name, { escapeHtml }) : ""}
       ${tab === "settings" ? settings(kb) : ""}
     </section>
   `;
+}
+
+/** 质量徽标：只在有机械问题时出现，点击进入质量 tab（不阻塞打开库）。 */
+function qualityBadge(kb) {
+  const quality = kb?.quality ?? {};
+  const parts = [
+    [Number(quality.corruptedDocs) || 0, "坏页"],
+    [Number(quality.contentIncomplete) || 0, "不完整"],
+    [Number(quality.summaryNoise) || 0, "摘要噪声"],
+    [Number(quality.unlabeled) || 0, "未编目"],
+  ].filter(([count]) => count > 0);
+  if (parts.length === 0) return "";
+  const total = parts.reduce((sum, [count]) => sum + count, 0);
+  const detail = parts.map(([count, label]) => `${label} ${count}`).join(" · ");
+  return `<a class="badge warn" href="${hrefForKb(kb.name, "quality")}" title="质量队列：${escapeAttr(detail)}">质量 ${total}</a>`;
 }
 
 /** 知识库标签：显示在库名右侧（最多 5 个，其余 +N）。 */

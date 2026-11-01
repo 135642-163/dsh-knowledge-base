@@ -2,6 +2,7 @@ import { api, ApiError } from "../api.js";
 import { formatBytes } from "../upload-core.js";
 import { DOC_TRUST_LEVELS, docMetaUnchanged, parseDocTagsInput, summarySourceLabel, trustLevelLabel } from "./doc-meta.js";
 import { clampPage, withPageFragment } from "../deep-link.js";
+import { renderQualityPreviewBody } from "./quality.js";
 
 // 弹窗关闭统一走 closeOverlay：同时摘掉 Esc 监听并从栈里移除。
 // 预览弹窗叠在资料详情弹窗上时，只有最上层响应 Esc。
@@ -1548,6 +1549,74 @@ export function openBulkTrustModal({ count = 0, onConfirm } = {}) {
       error.textContent = failure instanceof ApiError ? failure.message : String(failure?.message ?? failure);
       error.hidden = false;
       button.disabled = false;
+    }
+  };
+  return node;
+}
+
+/**
+ * 0.36 质量动作预览弹窗：先展示 dry-run 结果（零写入），确认后才真正执行。
+ *
+ * options:
+ *  - allowForceOcr：重解析时允许勾选「整篇 OCR」（文档没有坏页时用）；
+ *  - allowKeepNote：标记保留时填写理由（写进 dedupNote）；
+ *  - requireCheckbox：需要勾选「我已核对」才能执行（软删除等）；
+ *  - snapshotHint：执行前快照说明（默认关闭，按计划「不自动快照」）。
+ * onConfirm({ forceOcr, note, snapshot })：真正执行；抛错时错误内联显示、弹窗不关闭。
+ */
+export function openQualityActionModal({
+  action = "",
+  actionLabel = "",
+  groupLabel = "",
+  preview = null,
+  options = {},
+  onConfirm,
+} = {}) {
+  const allowForceOcr = options.allowForceOcr === true;
+  const allowKeepNote = options.allowKeepNote === true;
+  const requireCheckbox = options.requireCheckbox === true;
+  const snapshotHint = options.snapshotHint === true;
+  const node = overlay(`
+    <form class="modal-form quality-modal">
+      <h2>执行质量动作：${escapeHtml(actionLabel || action)}</h2>
+      <p class="muted">${escapeHtml(groupLabel)}${snapshotHint ? " · 建议先执行 kb_snapshot 留快照" : ""}</p>
+      ${renderQualityPreviewBody(preview)}
+      ${allowForceOcr ? `<label class="check"><input type="checkbox" name="forceOcr" /> 整篇 OCR（文档没有坏页时用；耗时更长）</label>` : ""}
+      ${allowKeepNote ? `<label class="field"><span>保留理由（可选，写进 dedupNote）</span><input name="note" autocomplete="off" /></label>` : ""}
+      ${requireCheckbox ? `<label class="check"><input type="checkbox" name="ack" /> 我已核对逐篇预览，确认写入</label>` : ""}
+      <label class="check"><input type="checkbox" name="snapshot" /> 执行前先留库级快照（推荐；会写入 snapshots/）</label>
+      <p class="form-error" hidden></p>
+      <div class="modal-actions">
+        <button type="button" class="btn" data-close>取消</button>
+        <button type="submit" class="btn primary">确认执行（写入）</button>
+      </div>
+    </form>
+  `);
+  const form = node.querySelector("form");
+  const error = node.querySelector(".form-error");
+  const button = form.querySelector("button[type=submit]");
+  form.onsubmit = async (event) => {
+    event.preventDefault();
+    error.hidden = true;
+    if (requireCheckbox && form.querySelector("input[name='ack']")?.checked !== true) {
+      error.textContent = "请先勾选「我已核对逐篇预览」";
+      error.hidden = false;
+      return;
+    }
+    const forceOcr = allowForceOcr ? form.querySelector("input[name='forceOcr']")?.checked === true : undefined;
+    const note = allowKeepNote ? String(form.querySelector("input[name='note']")?.value ?? "").trim() : undefined;
+    const snapshot = form.querySelector("input[name='snapshot']")?.checked === true;
+    button.disabled = true;
+    const original = button.textContent;
+    button.textContent = "执行中…";
+    try {
+      await onConfirm?.({ forceOcr, note, snapshot });
+      closeOverlay(node);
+    } catch (failure) {
+      error.textContent = failure instanceof ApiError ? failure.message : String(failure?.message ?? failure);
+      error.hidden = false;
+      button.disabled = false;
+      button.textContent = original;
     }
   };
   return node;

@@ -33,6 +33,7 @@ import * as upload from "./tests/upload.mjs";
 import * as sources from "./tests/sources.mjs";
 import * as search from "./tests/search.mjs";
 import * as semanticSettings from "./tests/semantic-settings.mjs";
+import * as quality from "./tests/quality.mjs";
 import * as readonly from "./tests/readonly.mjs";
 import * as merge from "./tests/merge.mjs";
 import { attachSessionToWorkspace, detachSessionFromWorkspace, writeSourcesSession } from "./session-fixture.mjs";
@@ -41,7 +42,7 @@ const root = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const runStartedAt = new Date();
 const stamp = runStartedAt.toISOString().replace(/[:.]/g, "-").slice(0, 19);
 const artifactsDir = join(root, "test", "e2e", ".artifacts", stamp);
-const allTests = [trashSearchSort, trash, move, retry, preview, previewOffice, metadata, upload, deepLink, search, sources, capsule, semanticSettings, readonly, merge];
+const allTests = [trashSearchSort, trash, move, retry, preview, previewOffice, metadata, upload, deepLink, search, sources, capsule, semanticSettings, quality, readonly, merge];
 const only = String(process.env.DSH_E2E_ONLY ?? "").trim();
 const tests = only ? allTests.filter((test) => String(test.name ?? "").includes(only)) : allTests;
 
@@ -127,6 +128,7 @@ async function main() {
         baseUrl: host.baseUrl,
         token: host.token,
         api,
+        kbRoot: host.kbRoot,
         artifactsDir,
         slug: test.name,
         log,

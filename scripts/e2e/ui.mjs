@@ -133,11 +133,12 @@ function sanitizeSlug(value) {
  * 一个测试的浏览器上下文：懒创建 page，失败时统一落盘。
  */
 export class TestContext {
-  constructor({ browser, baseUrl, token = "", api, artifactsDir, slug, log = () => {} }) {
+  constructor({ browser, baseUrl, token = "", api, kbRoot = "", artifactsDir, slug, log = () => {} }) {
     this.browser = browser;
     this.baseUrl = baseUrl;
     this.token = token;
     this.api = api;
+    this.kbRoot = kbRoot;
     this.artifactsDir = artifactsDir;
     this.slug = sanitizeSlug(slug);
     this.log = log;

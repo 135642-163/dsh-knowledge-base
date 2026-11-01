@@ -3,6 +3,9 @@ import { icons } from "./icons.js";
 import { hrefForKb, hrefForOverview, hrefForSearch, hrefForTrash, parseHash } from "./router.js";
 import { renderOverview } from "./views/overview.js";
 import { docsPageSize, docsStatus, renderDetail, selectionIds, selectionToggle, selectionToggleOne } from "./views/detail.js";
+import {
+  qualityActionLabel, qualityFilter, qualityFilterParams, qualitySelectionAll, qualitySelectionToggle,
+} from "./views/quality.js";
 import { attachDocsControls, createRequestGate } from "./docs-controls.js";
 import { parsePreviewDeepLink } from "./deep-link.js";
 import { applyHighlights, mergeResults, searchParamsOf, searchStateFromQuery } from "./search-core.js";
@@ -14,7 +17,7 @@ import {
 } from "./views/trash.js";
 import {
   deleteConfirmBody, openBulkTrustModal, openConfirmModal, openCreateModal, openDocModal, openKbPickerModal, openMergeModal, openMoveModal,
-  openPreviewModal, openRenameModal, openRestoreModal, openSemanticModal, retryFailedDoc,
+  openPreviewModal, openQualityActionModal, openRenameModal, openRestoreModal, openSemanticModal, retryFailedDoc,
 } from "./views/modals.js";
 import { openUploadModal } from "./views/upload.js";
 import { openPackageImportModal } from "./views/package.js";
@@ -40,6 +43,11 @@ const state = {
     tag: "", facets: { tags: [] }, selected: [], busy: false, retrying: [],
   },
   notes: { items: [], total: 0, loading: false, error: "" },
+  quality: {
+    loading: false, error: "", data: null,
+    filter: "", group: "", offset: 0, limit: 50, query: "",
+    selected: [], selectionGroup: "", busy: false, lastResult: null,
+  },
   trash: {
     items: [],
     docs: { items: [], total: 0, truncated: false, error: "" },
@@ -140,6 +148,15 @@ async function refreshKbsQuiet() {
  * 或路由切换调了 invalidate）就不再写 state，避免旧响应覆盖新页面。
  * 返回 { stale } 供资料工具栏判断是否记录 appliedQuery / 恢复焦点。
  */
+/** 质量 tab 的默认状态（切库/重新进入时重置；执行结果也随之清空）。 */
+function qualityDefaults() {
+  return {
+    loading: false, error: "", data: null,
+    filter: "", group: "", offset: 0, limit: 50, query: "",
+    selected: [], selectionGroup: "", busy: false, lastResult: null,
+  };
+}
+
 async function loadDetail(name, tab) {
   const token = detailGate.begin();
   if (state.detail?.kb?.name !== name) {
@@ -149,9 +166,15 @@ async function loadDetail(name, tab) {
       tag: "", facets: { tags: [] }, selected: [], busy: false, retrying: [],
     };
     state.notes = { items: [], total: 0, loading: false, error: "" };
+    state.quality = qualityDefaults();
   }
   // 离开资料 tab 时清空勾选；跨页/同页刷新时保留（loadCurrentDocs 只在搜索变化时清）。
   if (tab !== "docs") state.docs.selected = [];
+  // 离开质量 tab 时清掉质量勾选（动作只能在同一组内批量执行）。
+  if (tab !== "quality") {
+    state.quality.selected = [];
+    state.quality.selectionGroup = "";
+  }
   // 笔记 tab 先亮加载态再等列表：同库切 tab 时不会闪一下「还没有笔记」。
   if (tab === "notes") state.notes = { ...state.notes, loading: true, error: "" };
   state.detailLoading = true;
@@ -209,6 +232,9 @@ async function loadDetail(name, tab) {
           error: error instanceof ApiError ? error.message : String(error?.message ?? error),
         };
       }
+    } else if (tab === "quality") {
+      await loadQuality(name, token);
+      if (!detailGate.isCurrent(token)) return { stale: true };
     }
     return { stale: false };
   } catch (error) {
@@ -231,6 +257,164 @@ function loadCurrentDocs(request = {}) {
   // 搜索词变化时先清空勾选；翻页/改每页条数（query 未变）保留跨页选择。
   if (String(request?.query ?? "") !== String(state.docs.appliedQuery ?? "")) state.docs.selected = [];
   return loadDetail(current.name, "docs");
+}
+
+// ---------------------------------------------------------------------------
+// 质量 tab（#/kb/<name>/quality，0.36）
+// 读模型 GET /quality；动作 POST /quality/actions（dryRun 缺省 true）。
+// ---------------------------------------------------------------------------
+
+function qualityResetSelection() {
+  state.quality.selected = [];
+  state.quality.selectionGroup = "";
+}
+
+/** 质量请求参数：快捷筛选 + 聚焦组（组内分页）+ 搜索词。 */
+function qualityQueryParams() {
+  const quality = state.quality;
+  const params = { maxItems: quality.limit || 50 };
+  Object.assign(params, qualityFilterParams(quality.filter));
+  const group = String(quality.group ?? "");
+  if (group) {
+    params.group = group;
+    params.offset = Math.max(0, Math.round(Number(quality.offset) || 0));
+    params.limit = quality.limit || 50;
+  }
+  const query = String(quality.query ?? "").trim();
+  if (query) params.q = query;
+  return params;
+}
+
+async function loadQuality(name, token = null) {
+  const stillHere = () => {
+    const current = route();
+    return current.page === "detail"
+      && current.name === name
+      && (current.tab || "overview") === "quality"
+      && (token === null || detailGate.isCurrent(token));
+  };
+  if (!stillHere()) return;
+  state.quality.loading = true;
+  state.quality.error = "";
+  render();
+  try {
+    const report = await api.quality(name, qualityQueryParams());
+    if (!stillHere()) return;
+    state.quality.data = report;
+  } catch (error) {
+    if (!stillHere()) return;
+    state.quality.error = errorText(error);
+  } finally {
+    if (stillHere()) {
+      state.quality.loading = false;
+      render();
+    }
+  }
+}
+
+/** 当前返回的分组（聚焦时只有一组）。 */
+function qualityGroupByCode(code) {
+  const groups = Array.isArray(state.quality.data?.groups) ? state.quality.data.groups : [];
+  return groups.find((group) => group.code === String(code ?? "")) ?? null;
+}
+
+/** 轮询后台质量任务（重解析）：约 15 分钟超时。 */
+async function waitQualityJob(jobId) {
+  for (let attempt = 0; attempt < 900; attempt += 1) {
+    const job = await api.job(jobId);
+    if (job?.status && job.status !== "running") return job;
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  throw new Error("质量任务超时，请稍后在任务列表查看");
+}
+
+/**
+ * 预览后执行：先 dry-run 拿零写入预览，弹窗里确认才真正写库。
+ * 重解析走后台 job（202 + jobId），轮询结算后把逐项结果写进 lastResult。
+ */
+async function previewQualityAction({ name, group, action, ids, extraParams = {} }) {
+  if (state.quality.busy) return;
+  state.quality.busy = true;
+  render();
+  let preview = null;
+  try {
+    preview = await api.qualityAction(name, { action, ids, params: { ...extraParams } });
+  } catch (error) {
+    state.quality.busy = false;
+    render();
+    showToast(errorText(error), "error");
+    return;
+  }
+  state.quality.busy = false;
+  render();
+  if (!preview || preview.dryRun !== true) {
+    showToast("预览失败，请重试", "error");
+    return;
+  }
+  openQualityActionModal({
+    action,
+    actionLabel: qualityActionLabel(action),
+    groupLabel: String(group?.label ?? ""),
+    preview,
+    options: {
+      allowForceOcr: action === "reparse-pages",
+      allowKeepNote: action === "keep",
+      requireCheckbox: action === "remove",
+      snapshotHint: true,
+    },
+    onConfirm: async ({ forceOcr, note, snapshot } = {}) => {
+      const params = { ...extraParams };
+      if (action === "reparse-pages" && forceOcr === true) params.forceOcr = true;
+      if (action === "keep" && note) params.note = note;
+      if (snapshot === true) params.snapshot = true;
+      const response = await api.qualityAction(name, { action, ids, params, dryRun: false });
+      let result = response;
+      let jobId = "";
+      if (response?.jobId) {
+        jobId = String(response.jobId);
+        const job = await waitQualityJob(jobId);
+        result = job?.result ?? null;
+        if (!result) throw new Error(job?.detail || "质量任务失败（没有结果）");
+      }
+      state.quality.lastResult = {
+        action,
+        ok: Math.max(0, Math.round(Number(result?.ok) || 0)),
+        failed: Math.max(0, Math.round(Number(result?.failed) || 0)),
+        results: Array.isArray(result?.results) ? result.results : [],
+        jobId,
+      };
+      qualityResetSelection();
+      await loadQuality(name);
+      await refreshKbsQuiet();
+      const ok = state.quality.lastResult.ok;
+      const failed = state.quality.lastResult.failed;
+      showToast(
+        failed > 0 ? `${qualityActionLabel(action)}：${ok} 篇成功，${failed} 篇失败` : `${qualityActionLabel(action)}：${ok} 篇完成`,
+        failed > 0 ? "error" : "ok"
+      );
+    },
+  });
+}
+
+/** 批量标可信度：先选级别（复用资料 tab 的弹窗），再走质量动作接口。 */
+function openQualityBulkTrust(name, ids) {
+  openBulkTrustModal({
+    count: ids.length,
+    onConfirm: async (trust) => {
+      const response = await api.qualityAction(name, { action: "trust", ids, params: { level: trust }, dryRun: false });
+      state.quality.lastResult = {
+        action: "trust",
+        ok: Math.max(0, Math.round(Number(response?.ok) || 0)),
+        failed: Math.max(0, Math.round(Number(response?.failed) || 0)),
+        results: Array.isArray(response?.results) ? response.results : [],
+        jobId: "",
+      };
+      qualityResetSelection();
+      await loadQuality(name);
+      await refreshKbsQuiet();
+      showToast(`已更新 ${state.quality.lastResult.ok} 篇可信度`);
+    },
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1195,6 +1379,20 @@ function bind() {
     }
   };
 
+  // 质量搜索框回车：与点「搜索」等价（输入框按 Enter 不会触发 click 委托）。
+  app.onkeydown = (event) => {
+    if (event.key !== "Enter") return;
+    const input = event.target?.closest?.("[data-quality-query]");
+    if (!input) return;
+    event.preventDefault();
+    const current = route();
+    if (current.page !== "detail") return;
+    state.quality.query = String(input.value ?? "").trim();
+    state.quality.offset = 0;
+    qualityResetSelection();
+    loadQuality(current.name);
+  };
+
   // 全局点击委托
   app.onclick = async (event) => {
     const target = event.target.closest("[data-action]");
@@ -1427,6 +1625,93 @@ function bind() {
     } else if (action === "docs-undo-move") {
       const doc = pageDocById(target.dataset.id);
       if (doc) undoMoveDoc(doc);
+    } else if (action === "quality-reload") {
+      const current = route();
+      if (current.page === "detail") await loadQuality(current.name);
+    } else if (action === "quality-filter") {
+      const current = route();
+      if (current.page !== "detail") return;
+      state.quality.filter = qualityFilter(target.dataset.filter);
+      state.quality.group = "";
+      state.quality.offset = 0;
+      qualityResetSelection();
+      await loadQuality(current.name);
+    } else if (action === "quality-group") {
+      const current = route();
+      if (current.page !== "detail") return;
+      state.quality.group = String(target.dataset.code ?? "");
+      state.quality.offset = 0;
+      qualityResetSelection();
+      await loadQuality(current.name);
+    } else if (action === "quality-page") {
+      const current = route();
+      if (current.page !== "detail") return;
+      state.quality.offset = Math.max(0, Math.round(Number(target.dataset.offset) || 0));
+      qualityResetSelection();
+      await loadQuality(current.name);
+    } else if (action === "quality-search") {
+      const current = route();
+      if (current.page !== "detail") return;
+      state.quality.query = String(app.querySelector("[data-quality-query]")?.value ?? "").trim();
+      state.quality.offset = 0;
+      qualityResetSelection();
+      await loadQuality(current.name);
+    } else if (action === "quality-select") {
+      const ids = String(target.dataset.ids ?? "").split(",").map((id) => id.trim()).filter(Boolean);
+      if (ids.length === 0) return;
+      const code = String(target.dataset.code ?? "");
+      if (state.quality.selectionGroup && state.quality.selectionGroup !== code) state.quality.selected = [];
+      state.quality.selectionGroup = code;
+      state.quality.selected = qualitySelectionToggle(state.quality.selected, ids, target.checked);
+      render();
+    } else if (action === "quality-select-all" || action === "quality-select-group") {
+      const group = qualityGroupByCode(target.dataset.code);
+      if (!group) return;
+      const ids = qualitySelectionAll(group.items ?? []);
+      state.quality.selectionGroup = group.code;
+      if (action === "quality-select-group") {
+        state.quality.selected = ids;
+      } else {
+        const allSelected = ids.length > 0 && ids.every((id) => state.quality.selected.includes(id));
+        state.quality.selected = allSelected ? [] : ids;
+      }
+      render();
+    } else if (action === "quality-select-clear") {
+      qualityResetSelection();
+      render();
+    } else if (action === "quality-preview") {
+      const current = route();
+      const group = qualityGroupByCode(target.dataset.code);
+      const act = String(target.dataset.act ?? "");
+      const ids = Array.isArray(state.quality.selected) ? [...state.quality.selected] : [];
+      if (current.page !== "detail" || !group || ids.length === 0) return;
+      if (act === "trust") {
+        openQualityBulkTrust(current.name, ids);
+        return;
+      }
+      await previewQualityAction({ name: current.name, group, action: act, ids });
+    } else if (action === "quality-act") {
+      const current = route();
+      const group = qualityGroupByCode(target.dataset.code);
+      const act = String(target.dataset.act ?? "");
+      const ids = String(target.dataset.ids ?? "").split(",").map((id) => id.trim()).filter(Boolean);
+      if (current.page !== "detail" || !group || ids.length === 0) return;
+      if (act === "trust") {
+        openQualityBulkTrust(current.name, ids);
+        return;
+      }
+      await previewQualityAction({ name: current.name, group, action: act, ids });
+    } else if (action === "quality-open") {
+      const current = route();
+      const id = String(target.dataset.id ?? "");
+      const page = Math.max(0, Math.round(Number(target.dataset.page) || 0)) || null;
+      if (current.page !== "detail" || id === "") return;
+      try {
+        const doc = await api.doc(current.name, id);
+        openPreviewModal({ name: current.name, doc, icons, initialPage: page });
+      } catch (error) {
+        showToast(errorText(error), "error");
+      }
     } else if (action === "trash-doc-select") {
       if (state.trash.busy) return;
       const doc = trashDocByKey(target.dataset.kb, target.dataset.id);

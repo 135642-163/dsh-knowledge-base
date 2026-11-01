@@ -66,6 +66,15 @@ export function createApi(baseUrl, token = "") {
       return request("GET", `/kbs/${encodeURIComponent(name)}/docs?${query.toString()}`);
     },
     doc: (name, id) => request("GET", `/kbs/${encodeURIComponent(name)}/docs/${encodeURIComponent(id)}`),
+    quality: (name, params = {}) => {
+      const query = new URLSearchParams();
+      for (const [key, value] of Object.entries(params)) {
+        if (value !== undefined && value !== null && value !== "") query.set(key, String(value));
+      }
+      const search = query.toString();
+      return request("GET", `/kbs/${encodeURIComponent(name)}/quality${search ? `?${search}` : ""}`);
+    },
+    qualityAction: (name, body) => request("POST", `/kbs/${encodeURIComponent(name)}/quality/actions`, body),
     createKb: (name, extra = {}) => request("POST", "/kbs", { name, ...extra }),
     archiveKb: (name) => request("POST", `/kbs/${encodeURIComponent(name)}/archive`, { confirm: name }),
     trash: () => request("GET", "/trash"),

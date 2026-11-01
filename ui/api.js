@@ -126,6 +126,24 @@ export const api = {
     return request("GET", `/kbs/${encodeURIComponent(name)}/docs?${query.toString()}`);
   },
   doc: (name, id) => request("GET", `/kbs/${encodeURIComponent(name)}/docs/${encodeURIComponent(id)}`),
+  /** 质量读模型（只读）：分组/证据/筛选/组内分页。 */
+  quality: (name, params = {}) => {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== null && value !== "") query.set(key, String(value));
+    }
+    const search = query.toString();
+    return request("GET", `/kbs/${encodeURIComponent(name)}/quality${search ? `?${search}` : ""}`);
+  },
+  /**
+   * 质量动作：body.dryRun 缺省 true（服务端也按缺省 true 处理）。
+   * 预览传 {action, ids, params}；执行传 {..., dryRun:false}。
+   */
+  qualityAction: (name, body) => request(
+    "POST",
+    `/kbs/${encodeURIComponent(name)}/quality/actions`,
+    body,
+  ),
   /** 全文检索（跨库）：q 必须有值；其余条件是 manifest 过滤。 */
   search: (params = {}) => {
     const query = new URLSearchParams();
