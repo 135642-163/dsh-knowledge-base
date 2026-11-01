@@ -43,5 +43,5 @@
 
 ## 待办
 
-- 建议以 **0.35.1** 发布（GitHub tag + push），Windows 用同一 fixture 复测；
+- 0.35.1 已在 Windows 实机复测通过（见 `2026-11-02-windows-followup.md`）；
 - 宿主 fatal 升级问题需要 DSH 宿主侧修复，不是本插件能完全兜住的。
