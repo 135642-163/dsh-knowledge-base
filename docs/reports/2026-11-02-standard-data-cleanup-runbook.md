@@ -355,7 +355,11 @@ POST /kb/api/kbs/标准/quality/actions
 > **批次 4（2026-11-01）**：GB/T 17626.18、GB/T 4728.3/2、GB/T 14598.19 摘要 +
 > `bb4e3f4df861` 标题修正（工频磁场→**工频频率变化**抗扰度试验，封面证据）；
 > 快照 `2026-11-01-13-24-47-pre-summary-batch4.zip`；
-> summary-noise 16 → 11、warning 83 → 78。剩余 11 篇噪声摘要按批继续。
+> summary-noise 16 → 11、warning 83 → 78。
+>
+> **批次 5（2026-11-01）**：GB/T 4728.13/6/7、GB/T 14598.13、IEEE C37.111 COMTRADE 摘要；
+> 快照 `2026-11-01-13-25-53-pre-summary-batch5.zip`；
+> summary-noise 11 → 6、warning 78 → 73。剩余 6 篇噪声摘要。
 
 ### 3.4 验收
 
