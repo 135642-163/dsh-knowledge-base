@@ -325,6 +325,21 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
 
 测试 **1309**（1305 通过、4 跳过）。详见 `docs/reports/2026-11-01-0.35.0.md`。
 
+## 0.38.0 数据目录可配置（2026-11-02）
+
+- **工作台「数据目录」**：侧栏新增入口，查看当前知识库根目录（kbRoot）、填写新目录或恢复默认；
+  支持 `~` 开头路径，保存前校验绝对路径与可写性。只切换目录，**不移动、不删除**旧目录里的资料。
+- **持久化**：保存到 `$DSH_HOME/knowledge-wiki/settings.json`（无 `DSH_HOME` 时 `~/.dsh/...`），
+  启动时优先于插件配置 `kbRoot`；保存值损坏/缺失时自动回退配置。
+- **生效方式**：保存后需**重启 DSH**（不做运行中热切换，避免半切换导致读写不一致）；
+  界面会提示「重启 DSH 后生效」。
+- **API**：`GET/PUT /kb/api/settings`（保存 / 清空 / `restartRequired`，非法路径 400 `INVALID_KBROOT`）；
+  `GET /kb/api/status` 增加 `kbRootSource` 与 `configKbRoot`。
+- **测试隔离**：`KB_SETTINGS_DISABLED=1` 时启动忽略保存值（单测/E2E 入口默认设置），
+  避免测试读到本机保存的目录。
+- 测试 **1362**（1358 通过、4 跳过）；`npm run typecheck` 通过；E2E 16 passed / 1 skipped
+  （新增「数据目录」用例）。
+
 ## 0.37.0 数据质量工作台 + 检索/体检修复（2026-11-02）
 
 - **质量读模型 API**：`GET /kb/api/kbs/:name/quality` 按组返回机械体检结果
