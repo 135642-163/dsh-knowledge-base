@@ -54,3 +54,12 @@
 - `kb_export(format="zip")`、`kb_snapshot`、Obsidian vault 导出都改用它；
 - JSZip 默认在 4GB 边界报错，ZIP64 打开后允许 >4GB 单成员/整包；读取端 `zip-reader` 与 JSZip 均支持 ZIP64；
 - 新增 `test/zip-options.test.mjs`；套件 **1285/1285**。
+
+---
+
+## 五、ZIP64 4GB 实测（2026-11-01）
+
+- JSZip 写 ZIP64 实测失败：4.4GB 包中央目录长度回绕成 105MB、无 ZIP64 extra；
+- 改用 `yazl`，`exportZip` / `snapshotKb` / `exportVault` 全部流式写入 + `forceZip64Format`；
+- 4.4GB 稀疏 PDF 实测：ZIP64 extra=true、source file_size=4,400,000,000，Python zipfile 与内置 `openZipReader` 均通过；产物已清理。
+- 详见 `2026-11-01-zip64-4gb-test.md`。
