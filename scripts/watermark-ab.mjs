@@ -26,6 +26,8 @@ function parseArgs(argv) {
     root: "",
     kb: "标准",
     docs: 3,
+    docFilters: [],
+    real: false,
     page: 0,
     dpi: 200,
     alpha: 0.4,
@@ -40,6 +42,8 @@ function parseArgs(argv) {
     if (arg === "--root") args.root = argv[++i] ?? "";
     else if (arg === "--kb") args.kb = argv[++i] ?? "标准";
     else if (arg === "--docs") args.docs = Math.max(1, Number(argv[++i]) || 3);
+    else if (arg === "--doc") args.docFilters.push(String(argv[++i] ?? "").trim());
+    else if (arg === "--real") args.real = true;
     else if (arg === "--page") args.page = Math.max(0, Number(argv[++i]) || 0);
     else if (arg === "--alpha") args.alpha = Math.min(0.9, Math.max(0.05, Number(argv[++i]) || 0.4));
     else if (arg === "--dpi") args.dpi = Math.max(120, Number(argv[++i]) || 200);
@@ -49,7 +53,9 @@ function parseArgs(argv) {
     else if (arg === "--report") args.report = argv[++i] ?? "";
     else if (arg === "--json") args.json = argv[++i] ?? "";
     else if (arg === "--help" || arg === "-h") {
-      console.log("用法: node scripts/watermark-ab.mjs --root <kbRoot> [--kb 标准] [--docs 3] [--page 0=自动选正文页] [--dpi 200] [--alpha 0.4] [--mode auto|strong] [--engine rapidocr] [--report out.json]");
+      console.log(`用法: node scripts/watermark-ab.mjs --root <kbRoot> [--kb 标准] [--docs 3] [--doc <id/标题>] [--real] [--page 0=自动选正文页] [--dpi 200] [--alpha 0.4] [--mode auto|strong] [--engine rapidocr] [--report out.md] [--json out.json]
+  --real：不叠加合成水印，直接比较真实页“原页 OCR vs 净化 OCR”；
+  --doc：只选包含该 id/标题的文档，可重复。`);
       process.exit(0);
     } else throw new Error(`未知参数: ${arg}`);
   }
@@ -144,13 +150,15 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const dir = kbDirPath(expandRoot(args.root), args.kb);
   const manifest = await readManifest(dir);
+  const filters = args.docFilters.filter(Boolean);
   const candidates = manifest.docs
     .filter((doc) =>
       doc.status === "ready" &&
       !doc.deletedAt &&
       doc.type === "pdf-text" &&
       doc.sourceFile &&
-      Number(doc.pages) >= Math.max(args.page, 2)
+      Number(doc.pages) >= Math.max(args.page, 2) &&
+      (filters.length === 0 || filters.some((f) => doc.id.includes(f) || String(doc.title ?? "").includes(f)))
     )
     .sort((a, b) => Number(b.chars) - Number(a.chars))
     .slice(0, args.docs);
@@ -170,54 +178,93 @@ async function main() {
     const pageIndex = picked.index;
     const truth = picked.truth;
 
-    const clean = renderPage(pdf, pageIndex, args.dpi);
-    const cleanPng = clean.pixmap.asPNG();
-    clean.pixmap.destroy();
-    clean.page.destroy();
-
-    const wm = renderPage(pdf, pageIndex, args.dpi);
-    drawSyntheticWatermark(wm.pixmap, { alpha: args.alpha });
-    const wmPng = wm.pixmap.asPNG();
-    const prepared = preprocessPixmap(wm.pixmap, { mode: args.mode });
-    const cleanedPng = wm.pixmap.asPNG();
-    wm.pixmap.destroy();
-    wm.page.destroy();
-    pdf.destroy();
-
     const ocrOptions = {
       engine: args.engine,
       pythonBin: args.python,
       workers: 1,
       lang: "chi_sim+eng",
     };
-    const started = Date.now();
-    const [cleanOcr, wmOcr, cleanedOcr] = await ocrImageBatch(
-      [
-        { png: cleanPng, page: 1 },
-        { png: wmPng, page: 2 },
-        { png: cleanedPng, page: 3 },
-      ],
-      ocrOptions
-    );
-    const row = {
-      docId: doc.id,
-      title: doc.title,
-      page: pageIndex + 1,
-      truthChars: normalizeText(truth).length,
-      ocrMs: Date.now() - started,
-      watermark: { changed: prepared.changed, ratio: +(prepared.ratio * 100).toFixed(2), removed: prepared.removed, paper: prepared.paper, ink: prepared.ink, threshold: prepared.threshold },
-      cer: {
-        clean: +charErrorRate(truth, cleanOcr?.text ?? "").toFixed(4),
-        watermark: +charErrorRate(truth, wmOcr?.text ?? "").toFixed(4),
-        cleaned: +charErrorRate(truth, cleanedOcr?.text ?? "").toFixed(4),
-      },
-      confidence: {
-        clean: cleanOcr?.confidence ?? null,
-        watermark: wmOcr?.confidence ?? null,
-        cleaned: cleanedOcr?.confidence ?? null,
-      },
-      errors: [cleanOcr?.error, wmOcr?.error, cleanedOcr?.error].filter(Boolean),
-    };
+    let row;
+    if (args.real) {
+      // 真实页 A/B：不叠加合成水印，直接比较原页 OCR 与净化后 OCR。
+      const page = renderPage(pdf, pageIndex, args.dpi);
+      const originalPng = page.pixmap.asPNG();
+      const prepared = preprocessPixmap(page.pixmap, { mode: args.mode });
+      const cleanedPng = page.pixmap.asPNG();
+      page.pixmap.destroy();
+      page.page.destroy();
+      pdf.destroy();
+      const started = Date.now();
+      const [originalOcr, cleanedOcr] = await ocrImageBatch(
+        [{ png: originalPng, page: 1 }, { png: cleanedPng, page: 2 }],
+        ocrOptions
+      );
+      const cerOriginal = +charErrorRate(truth, originalOcr?.text ?? "").toFixed(4);
+      row = {
+        docId: doc.id,
+        title: doc.title,
+        page: pageIndex + 1,
+        real: true,
+        truthChars: normalizeText(truth).length,
+        ocrMs: Date.now() - started,
+        watermark: { changed: prepared.changed, ratio: +(prepared.ratio * 100).toFixed(2), removed: prepared.removed, paper: prepared.paper, ink: prepared.ink, threshold: prepared.threshold },
+        cer: {
+          clean: cerOriginal,
+          watermark: cerOriginal,
+          cleaned: +charErrorRate(truth, cleanedOcr?.text ?? "").toFixed(4),
+        },
+        confidence: {
+          clean: originalOcr?.confidence ?? null,
+          watermark: originalOcr?.confidence ?? null,
+          cleaned: cleanedOcr?.confidence ?? null,
+        },
+        errors: [originalOcr?.error, cleanedOcr?.error].filter(Boolean),
+      };
+    } else {
+      const clean = renderPage(pdf, pageIndex, args.dpi);
+      const cleanPng = clean.pixmap.asPNG();
+      clean.pixmap.destroy();
+      clean.page.destroy();
+
+      const wm = renderPage(pdf, pageIndex, args.dpi);
+      drawSyntheticWatermark(wm.pixmap, { alpha: args.alpha });
+      const wmPng = wm.pixmap.asPNG();
+      const prepared = preprocessPixmap(wm.pixmap, { mode: args.mode });
+      const cleanedPng = wm.pixmap.asPNG();
+      wm.pixmap.destroy();
+      wm.page.destroy();
+      pdf.destroy();
+
+      const started = Date.now();
+      const [cleanOcr, wmOcr, cleanedOcr] = await ocrImageBatch(
+        [
+          { png: cleanPng, page: 1 },
+          { png: wmPng, page: 2 },
+          { png: cleanedPng, page: 3 },
+        ],
+        ocrOptions
+      );
+      row = {
+        docId: doc.id,
+        title: doc.title,
+        page: pageIndex + 1,
+        real: false,
+        truthChars: normalizeText(truth).length,
+        ocrMs: Date.now() - started,
+        watermark: { changed: prepared.changed, ratio: +(prepared.ratio * 100).toFixed(2), removed: prepared.removed, paper: prepared.paper, ink: prepared.ink, threshold: prepared.threshold },
+        cer: {
+          clean: +charErrorRate(truth, cleanOcr?.text ?? "").toFixed(4),
+          watermark: +charErrorRate(truth, wmOcr?.text ?? "").toFixed(4),
+          cleaned: +charErrorRate(truth, cleanedOcr?.text ?? "").toFixed(4),
+        },
+        confidence: {
+          clean: cleanOcr?.confidence ?? null,
+          watermark: wmOcr?.confidence ?? null,
+          cleaned: cleanedOcr?.confidence ?? null,
+        },
+        errors: [cleanOcr?.error, wmOcr?.error, cleanedOcr?.error].filter(Boolean),
+      };
+    }
     results.push(row);
     console.log(`${doc.id} ${doc.title.slice(0, 40)} p${row.page}: CER clean=${row.cer.clean} wm=${row.cer.watermark} cleaned=${row.cer.cleaned}`);
   }
@@ -236,9 +283,9 @@ async function main() {
     `# 水印净化 A/B（${new Date().toISOString()}）`,
     "",
     `- 知识库：${args.kb}`,
-    `- 样本：${results.length} 篇文字层 PDF 的自动选正文页（${args.dpi} DPI 渲染 + 半透明斜向浅灰水印）`,
+    `- 样本：${results.length} 篇文字层 PDF 的自动选正文页（${args.dpi} DPI）${args.real ? "，真实页原样（不叠加合成水印）" : " + 半透明斜向浅灰水印"}`,
     `- 净化模式：watermark=${args.mode}`,
-    `- 平均 CER：干净 ${summary.average.clean} · 有水印 ${summary.average.watermark} · 水印+净化 ${summary.average.cleaned}`,
+    `- 平均 CER：${args.real ? "原页" : "干净"} ${summary.average.clean} · ${args.real ? "原页(水印)" : "有水印"} ${summary.average.watermark} · 净化 ${summary.average.cleaned}`,
     "",
     "| 文档 | 页 | 真值字数 | CER 干净 | CER 水印 | CER 净化 | 净化像素% | 置信度(净/水/清) |",
     "|---|---|---|---|---|---|---|---|",
@@ -250,7 +297,7 @@ async function main() {
     "",
     `- 平均 CER：干净 **${summary.average.clean}** → 加水印 **${summary.average.watermark}** → 净化后 **${summary.average.cleaned}**。`,
     `- 若 watermarked > clean：合成水印确实干扰 OCR；若 cleaned < watermarked：净化回补了部分损失。`,
-    `- 本样本为 **半透明斜向灰线**，不等同于真实水印的字形/颜色/密度；真实库的水印样本仍建议人工标注后再跑。`,
+    `- ${args.real ? "本样本是真实页原样；CER 真值来自该页文字层，若文字层本身含 OCR 噪声，会抬高所有变体。" : "本样本为 **半透明斜向灰线**，不等同于真实水印的字形/颜色/密度；真实库的水印样本仍建议人工标注后再跑。"}`,
     "",
     "> CER 用去空白/标点的编辑距离 ÷ 真值长度；越小越好。",
   ].join("\n");

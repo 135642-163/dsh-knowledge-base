@@ -66,6 +66,7 @@ test("kb_export zip 带 kbpack manifest（格式/计数/字段/幂等键）", as
     assert.equal(doc.title, "GB/T 12326-2008 电能质量 电压波动和闪变");
     assert.equal(doc.standardNo, "GB/T 12326-2008");
     assert.equal(doc.trust, "high");
+    assert.equal(doc.summary, "人工摘要");
     assert.equal(doc.hasSource, false);
     assert.equal(doc.hasMarkdown, true);
     assert.ok(doc.sourceHash, "source hash is the idempotency key");
@@ -74,6 +75,13 @@ test("kb_export zip 带 kbpack manifest（格式/计数/字段/幂等键）", as
     const note = manifest.docs.find((item) => item.type === "note");
     assert.ok(note);
     assert.equal(note.kind, "note");
+
+    const readme = await zip.file("README.md").async("string");
+    assert.match(readme, /知识库交付包说明|交付子集说明/);
+    assert.match(readme, /交付统计/);
+    assert.match(readme, /文档清单/);
+    assert.match(readme, /人工摘要/, "README must include document summaries");
+    assert.match(readme, /docId#页码/, "README must explain citation keys");
 
     // kb.json 不泄漏本机路径与 history
     const kbJson = JSON.parse(await zip.file("kb.json").async("string"));

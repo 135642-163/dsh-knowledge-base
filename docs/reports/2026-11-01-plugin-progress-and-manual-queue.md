@@ -73,3 +73,12 @@
 - `scripts/set-bz-cookie.mjs` 支持管道/env 写入、`--status`、`--clear`；
 - CLI 脚本（std-check-daily / fetch-standards）优先读安全存储；
 - 测试 **1292**（1288 通过、4 跳过，0 失败）；报告 `2026-11-01-secure-cookie.md`。
+
+---
+
+## 七、交付 README / 水印 A/B（2026-11-01）
+
+- 交付 README：manifest 补 summary/tags/trustReason；README 统计/结构/引用/清单/限制；测试断言。
+- 水印 A/B：`watermark-ab.mjs --real` 支持真实页；真实水印页 CER 0.3810→0.2623，
+  无真实水印页 0.1367→0.1713；合成水印平均 0.1168→0.1801→0.1579。
+- 结论：只在检测到水印时净化；干净 PDF 用 `watermark=off`。
