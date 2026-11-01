@@ -254,6 +254,11 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
 `kb_query`：纯文本查询优先 FTS5，正则/索引不可用/无命中回退 ripgrep。当前真实「标准」库
 索引 911 篇、14.95 万条款、224MB；增量同步、后台构建和 60 条机制评测已完成：Doc/Page Recall@10 95%，MRR 0.761，p95 47.5ms；见 `docs/specs/2026-10-25-retrieval-eval.md`。
 
+**80 题回归命令（P1，2026-11-01）**：`npm run eval:retrieval`（`node scripts/eval-retrieval-80.mjs`）跑
+60 主集 + 20 条独立同义题，生产 `searchAll` + FTS 排序，输出 Doc/Page Recall@10、MRR、p95；
+默认阈值 Doc≥85%、Page≥62%、Doc MRR≥0.52、Page MRR≥0.40、p95≤250ms，任一不达标 exit 1。
+当前基线：Doc 88.8%、Page 67.5%、Doc MRR 0.574、Page MRR 0.455、p95 50.8ms。
+
 ### 已知限制（0.26.0）
 
 - **PDF viewer/关键词高亮**：`viewer.html` 只服务聊天来源面板，工作台预览仍是原生 PDF iframe

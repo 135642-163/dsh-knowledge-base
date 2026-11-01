@@ -35,7 +35,8 @@
     "check:client": "node scripts/build-client.mjs --check",
     "typecheck": "tsc --noEmit",
     "semantic:install": "npm i --no-save --save-peer onnxruntime-node@^1.31.1 @huggingface/tokenizers@^0.2.0",
-    "semantic:setup": "node scripts/semantic-setup.mjs"
+    "semantic:setup": "node scripts/semantic-setup.mjs",
+    "eval:retrieval": "node scripts/eval-retrieval-80.mjs"
   },
   "files": [
     "lib",
