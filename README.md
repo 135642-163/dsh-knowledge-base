@@ -366,6 +366,9 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
   （人工判断步骤、逐批确认协议、回滚点）；真实库清理记录见 `docs/reports/`。
 - 测试 **1355**（1351 通过、4 跳过）；`npm run typecheck` 通过；E2E 15 通过 / 1 跳过
   （`来源面板` 为既有 skip）。
+- **双端验收通过（Mac / Windows，2026-11-01，commit `f9ce9c2`）**：Desktop 与 Web 均 23 个工具注册，
+  `kb_list` / `kb_query` / `kb_read` / `kb_lint` 实测通过；详见
+  `docs/reports/2026-11-02-0.37-acceptance-record.md`。
 
 ## 0.35.2 导入报告文案修复（2026-11-02）
 
