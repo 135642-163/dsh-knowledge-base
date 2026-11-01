@@ -10,6 +10,10 @@ on:
         description: "Run the full Playwright suite on the self-hosted macOS runner (needs DSH + a configured profile)"
         type: boolean
         default: false
+      run_e2e_windows:
+        description: "Run the full Playwright suite on the self-hosted Windows runner (needs DSH + a configured profile)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -61,4 +65,35 @@ jobs:
           path: test/e2e/.artifacts
           if-no-files-found: ignore
           # 目录名以 . 开头：upload-artifact 默认不收集隐藏文件，必须显式开启。
+          include-hidden-files: true
+
+  # Windows counterpart for the merge/UI paths. Requires a self-hosted runner
+  # with labels [self-hosted, Windows, dsh-profile], dsh.cmd on PATH and a
+  # working web profile. Trigger via workflow_dispatch + run_e2e_windows=true.
+  e2e-windows:
+    name: Playwright E2E (self-hosted Windows, configured DSH profile)
+    if: github.event_name == 'workflow_dispatch' && inputs.run_e2e_windows
+    runs-on: [self-hosted, Windows, dsh-profile]
+    timeout-minutes: 30
+    env:
+      DSH_E2E_BROWSER: chromium
+      DSH_E2E_DSH_BIN: dsh.cmd
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Install Playwright Chromium
+        run: npx playwright install chromium
+      - name: Run the full E2E suite (Windows)
+        run: npm run test:e2e
+      - name: Upload E2E artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts-windows
+          path: test/e2e/.artifacts
+          if-no-files-found: ignore
           include-hidden-files: true

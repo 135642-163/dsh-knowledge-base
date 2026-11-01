@@ -169,9 +169,11 @@ exports/                   导出产物
 
 - `.github/workflows/ci.yml` 两个 job：
   - `unit`（ubuntu-latest）：`npm ci` → `npm run typecheck` → `npm test`。
-  - `e2e`（macos-14）：安装 `@deepseek-ai/dsh@0.2.1-rc.2` → 用临时 `DSH_HOME` 首次启动 `dsh web` 生成 profile →
+  - `e2e`（macos-14，手动）：安装 `@deepseek-ai/dsh@0.2.1-rc.2` → 用临时 `DSH_HOME` 首次启动 `dsh web` 生成 profile →
     用 `install-to-machine.sh` 注册本仓库 → 安装 Playwright WebKit → 跑 `npm run test:e2e`；失败时上传
     `test/e2e/.artifacts`（目录以 `.` 开头，workflow 用 `include-hidden-files: true` 才会收集）。
+  - `e2e-windows`（自托管 Windows，手动 `run_e2e_windows=true`）：`dsh.cmd` + Chromium，
+    跑同一套件；需 runner 有可用 profile。
 - 全新 CI profile 没有历史会话/模型凭据：胶囊用例自动 **skip** 并说明原因；工作台/回收站/搜索排序/移动/重试/预览用例
   照常执行，其余失败仍会让 job 红。
 - 本地有真实 profile 与凭据时跑完整套件（当前 12 项；来源面板在 CLI 0.1.x 会 skip）；CI 为核心用例通过 + 胶囊/来源面板按宿主 skip（Office 可选预览在无转换引擎时也会 skip）。
@@ -335,7 +337,8 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
 - **笔记引用**：改名时自动改写 `sources/linksOut`，undo 反向恢复；
 - **两种合并**：本地物理合并；外部 kbpack `mode=merge` 仍是独立导入合并，但已统一 `duplicatePolicy=skip|keep` 与 `versionConflicts`；
 - 其他 0.35 内容：ZIP64（yazl 4.4GB 实测）、交付 README、存储保留、bzCookie 安全存储、
-  80 题回归、矢量页 forceOcr、条款页眉修复、多库范围提示、水印 `--real`。
+  80 题回归、矢量页 forceOcr、条款页眉修复、多库范围提示、水印 `--real`；
+- E2E：macOS WebKit 13 passed / 1 skipped（含合并用例）；Windows 自托管 job 已接入，未实跑。
 
 ## 0.33.0 知识库搬运闭环（kbpack）+ 快照恢复 + 水印净化
 
@@ -1636,14 +1639,14 @@ npm run test:e2e      # 自托管临时 DSH web 宿主并跑完整流程
   覆盖 ready / deleted / failed / note / PDF / docx。
 - 覆盖流程：已删除资料的搜索（库名/标题/类型/来源文件）、六种排序、筛选空态与清除搜索、跨库多选；
   回收站两个页签（恢复、逐字输入库名彻底删除、批量删除、清空本库）、
-  跨库移动 → 撤销 → 再次移动 → 目标副本删除后的墓碑恢复、失败资料重试、
+  跨库移动 → 撤销 → 再次移动 → 目标副本删除后的墓碑恢复、本地合并预览/执行/撤销、失败资料重试、
   PDF/笔记/Office 原件预览、资料编目（摘要/标签保存 + 标签筛选）、上传解析状态与重复跳过、
   `?doc=&page=` 深链预览/缺资料 toast、输入框胶囊（清空/全选/应用/外部点击关闭）。
   来源面板用例会写一个合成 session 并挂到临时 workspace；CLI 0.1.x 的历史投影不把
   `tool/result` 关联到工具行（工具行停在 running），该用例会 **skip** 并说明原因；
   桌面/支持 tool result meta 的宿主会继续断言工具行来源、本轮来源与深链跳转。
   工具行/面板渲染与降级本身由 `test/sources-client.test.mjs` 覆盖。
-- 浏览器优先 WebKit（DSH 桌面端引擎），失败回退 Chromium；失败产物写到
+- 浏览器优先 WebKit（DSH 桌面端引擎），失败回退 Chromium；Windows 用 Chromium（`dsh.cmd`）；失败产物写到
   `test/e2e/.artifacts/<timestamp>/`（截图、URL、console 错误、宿主日志），
   正常也会打印本次产物目录。
 - 可选环境变量：`DSH_E2E_URL` 复用已启动宿主（要求其 `kbRoot` 在临时目录，或显式
@@ -1663,8 +1666,11 @@ npm run test:e2e      # 自托管临时 DSH web 宿主并跑完整流程
   - 为什么不在 GitHub 托管 runner 上自动跑：全新 `DSH_HOME` 首次启动会要求一次性
     token，浏览器/同源 API 的认证链路在托管 runner 上不稳定，且没有历史会话/模型凭据
     （胶囊无法挂载）。自托管 runner 复用已配置 profile，结果与本地一致（当前 10/10 + 1 skip）。
-  - 本地有凭据 profile 当前 **11 passed / 0 failed / 1 skipped**（skip = CLI 0.1.x
+  - 本地有凭据 profile 当前 **13 passed / 0 failed / 1 skipped**（skip = CLI 0.1.x
     未投影 tool result meta），E2E 中的回收站用例会真实执行一次**跨库批量彻底删除**。
+- Windows 说明：本地 PowerShell 设 `$env:DSH_E2E_BROWSER="chromium"`、
+  `$env:DSH_E2E_DSH_BIN="dsh.cmd"` 后 `npm run test:e2e`；本仓库已补 Windows 自托管 job，
+  但本轮没有 Windows 实机，结果以 macOS WebKit 为准。
 
 ## 使用示例（对 harness 直接说）
 

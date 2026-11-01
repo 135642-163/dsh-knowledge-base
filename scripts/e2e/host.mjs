@@ -317,7 +317,8 @@ export async function startHost({
   }
   const port = await findFreePort();
   const baseUrl = `http://127.0.0.1:${port}`;
-  const bin = String(env?.DSH_E2E_DSH_BIN ?? "dsh");
+  // Windows 的 npm 全局命令是 dsh.cmd；spawn 需要 shell 才能解析 .cmd。
+  const bin = String(env?.DSH_E2E_DSH_BIN ?? (process.platform === "win32" ? "dsh.cmd" : "dsh"));
   const args = ["--profile", temp.profileName, "--port", String(port), "--no-open"];
   log(`starting ${bin} ${args.join(" ")}`);
   const child = spawn(bin, args, {
@@ -330,6 +331,7 @@ export async function startHost({
       FORCE_COLOR: "0",
     },
     stdio: ["ignore", "pipe", "pipe"],
+    shell: process.platform === "win32",
     windowsHide: true,
   });
   let spawnError = null;
