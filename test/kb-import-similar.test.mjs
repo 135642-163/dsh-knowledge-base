@@ -44,7 +44,9 @@ test("similar title is imported and surfaced to the model", async () => {
     assert.equal(r.imported.length, 1, "similar file must still be imported");
     const rendered = tools.get("kb_import").output.render(args, r)[0].text;
     assert.match(rendered, /相似/);
-    assert.match(rendered, /已照常导入/);
+    assert.match(rendered, /实际结果以下方列表为准/);
+    assert.match(rendered, /已导入/);
+    assert.doesNotMatch(rendered, /已照常导入/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

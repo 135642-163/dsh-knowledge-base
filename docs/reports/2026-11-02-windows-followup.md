@@ -37,5 +37,5 @@
 
 ## 版本
 
-- 计划 **0.35.2**（GitHub-only）：文案修复，无数据/API 变更；
-- 待确认后打 tag + push；npm 仍未发布。
+- 版本号 `package.json` / `package-lock.json` / `lib/version.js` = **0.35.2**；
+- 计划 GitHub-only tag `v0.35.2` + push；npm 仍未发布。
