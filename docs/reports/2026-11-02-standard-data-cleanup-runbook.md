@@ -264,11 +264,14 @@ POST /kb/api/kbs/标准/quality/actions
 | 只有封面（1 页 67 字） | 1 | `3bbcfb8d6105` GB/T 528-2009 | **补完整 PDF 后同名重导**，不硬造正文 |
 | 文字层乱码（5 页） | 1 | `8cb7398b94c7` TB/T 2799-1997 | **`forceOcr=true` 重解析**（原页清晰，文字层是 GBK 被当 Latin-1 解码） |
 
-> **已完成（2026-11-01，只读）**：18 篇逐篇核对 → **16 篇本来就短不动**、
-> 1 篇只有封面（GB/T 528-2009，待补源）、1 篇文字层乱码（TB/T 2799-1997，待 OCR）。
+> **已完成（2026-11-01）**：18 篇逐篇核对 → **16 篇本来就短不动**、
+> 1 篇只有封面（GB/T 528-2009，待补源）、1 篇文字层乱码（TB/T 2799-1997，已 OCR 修复）。
 > 全库 884 篇扫描确认该乱码形态**仅此 1 篇**，不是系统性问题。
-> 记录见 `2026-11-02-standard-incomplete-stage2-check.md`。本轮未写库。
-> 两处待办（OCR / 补源）都需要先确认：OCR 要先 `kb_snapshot` + dry-run。
+> `TB/T 2799-1997` 已按协议执行：快照 `2026-11-01-13-07-10-pre-tbt-ocr.zip`
+> → `kb_reparse forceOcr=true`（5 页，v4，OCR 92.8%，contentIntegrity partial→full）；
+> content-incomplete 18 → 17、warning 99 → 98。记录见
+> `2026-11-02-standard-incomplete-stage2-check.md`。
+> 剩余待办：`GB/T 528-2009` 补完整 PDF（补源后重导需再确认）。
 
 > 口径说明：lint 统计 18 篇；原始 `contentIntegrity != full` 有 19 篇，
 > 差的是 `d57184dadb5a`（国网印发通知，3 页、无标准号），它是通知不是标准正文，**不动**。
