@@ -359,7 +359,12 @@ POST /kb/api/kbs/标准/quality/actions
 >
 > **批次 5（2026-11-01）**：GB/T 4728.13/6/7、GB/T 14598.13、IEEE C37.111 COMTRADE 摘要；
 > 快照 `2026-11-01-13-25-53-pre-summary-batch5.zip`；
-> summary-noise 11 → 6、warning 78 → 73。剩余 6 篇噪声摘要。
+> summary-noise 11 → 6、warning 78 → 73。
+>
+> **批次 6（2026-11-01，收尾）**：G5 5-2020、IEC TR 61000-4-40 草案、61000-4-37（+标题修正）、
+> IEC 61869-103 SASO、IEEE 1668-2017 与 Redline；快照 `2026-11-01-13-26-58-pre-summary-batch6.zip`；
+> **summary-noise 31 → 0（阶段 3 完成）**、warning 73 → 67、可操作 85 → 81。
+> 4 个标题修正 + 2 个可信度调整都附封面/版本证据。剩余 unlabeled 1 篇是笔记，归阶段 5。
 
 ### 3.4 验收
 
