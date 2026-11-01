@@ -488,7 +488,8 @@ npm run eval:retrieval
 - `kb_lint` 复核：929/891/7 不变；corrupted 48（有意保留）、content-incomplete 17、
   summary-noise 0、warning 67、可操作 81；
 - 检索抽查：TB/T 2799-1997 修复后可检索、构网型变流器征求意见稿可检索；
-- 未解决：GB/T 528-2009 待补源、阶段 5 未执行、清理后快照未创建。
+- 未解决：GB/T 528-2009 待补源、阶段 5 未执行；
+- 清理后快照：`2026-11-01-13-29-21-post-quality-cleanup.zip`（86,984 KB）。
 
 ### 6.4 收尾
 
