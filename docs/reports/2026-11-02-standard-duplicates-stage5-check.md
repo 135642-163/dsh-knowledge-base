@@ -77,3 +77,16 @@
 - `same-number-multi-year` 的 78 组不删除——多版本并存是特性，不是缺陷。
 
 > 本阶段写入 2 项（1 个 trust、1 个软删除），均可用 `kb_restore` / 快照回滚。
+
+
+## 补充处理（2026-11-01 21:36，用户指令）
+
+| 动作 | 明细 |
+|---|---|
+| 软删除 `3bbcfb8d6105` GB/T 528-2009 | 用户确认「不需要补源，直接删除」；仅 1 页封面（67 字），软删除可恢复 |
+| 4 篇无入链笔记补双链 | `fb8293d9e5d2`、`c04a8c3ed5a5`、`6f47571bbc3f`、`8ee7d812a710` 互相引用（+各自来源），`backlinksFor` 各 3 条；`orphan-note` 清零（日志 `note-links` 4 条） |
+| G5 系列标题规范化 | `cfd57c0f0bde` → ENA EREC G5/5 工程建议草案（2015-01 DRAFT）；`cc59ffcea4a5` → ENA EREC G5 Issue 5（2020）谐波电压畸变与谐波源/谐振装置接入（英国）；`531e15ad9fd9` → ENA EREC G5/4-1 Issue 4 Amendment 1（2005）谐波电压畸变规划水平；`ccc7d07e1bbe` → 英国电气协会 G5/5 工程导则评述（电网技术 2022，宋晓庆等） |
+| 阶段 5 后快照 | `2026-11-01-13-36-37-post-stage5.zip`（889 篇，86,988 KB） |
+
+计数（最终）：ready **889**、软删除 **40**、笔记 **6**、warning **64**、可操作 **79**、
+corrupted 48、content-incomplete **16**、orphan-note **0**。
