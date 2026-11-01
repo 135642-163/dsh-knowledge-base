@@ -325,6 +325,13 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
 
 测试 **1309**（1305 通过、4 跳过）。详见 `docs/reports/2026-11-01-0.35.0.md`。
 
+## 0.35.1 Windows 修复（2026-11-01）
+
+- `kb_export` 自动创建 `out` 父目录，避免 ENOENT 冒到宿主；
+- Windows rename 对 `EPERM/EBUSY/EACCES` 自动短重试（3 次，25/50ms）；
+- 导入跳过按原因显示（重复/完整版本/双方残缺/导入中），不再一律显示“正在导入中”；
+- 知识库卡片彩色条更明亮。
+
 ## 0.35.0 合并知识库 + 导入质量闸门（2026-11-01）
 
 - **导入闸门**：同库同号不同年份/阶段默认暂停，`allowSameNumber:true` 确认后入库；
