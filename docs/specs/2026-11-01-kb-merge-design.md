@@ -16,6 +16,17 @@
 - transfer 是单篇软删除语义，合并需要“批量物理移动 + 源库归档标记”；
 - 没有按标准号/年份/阶段的重复处理，只按 id 判冲突会制造重复。
 
+## 1.5 两种“合并”的边界（重要）
+
+| 类型 | 入口 | 数据形态 | 本设计是否覆盖 |
+|---|---|---|---|
+| **A. 本地库合并** | 工作台选 2 个本机库 → 合并 | 物理移动本机 A/B 的文档到 C；A/B 归档为 `mergedInto`；有 journal/快照/回滚 | **本设计 P0** |
+| **B. 外部库导入并合并** | `kb_import_package` / 工作台导入 `.zip`（kbpack） | 外部包是文件，不是本机库；包内文档逐篇导入目标库，不做源库归档 | 已有 `mode=merge`；不在本 P0 代码中重写 |
+
+- 两者共同点：都要处理“目标已有同号/同 id 文档”；
+- 差异：A 有本机源库目录、文件移动、`mergedInto`、purge；B 只有包文件，导入后包仍在外部，源没有可归档的本地库；
+- 后续 P1 可让 B 复用 A 的 `duplicatePolicy`/preview 语义，但 **P0 不改 `kb_import_package`**。
+
 ## 2. 目标与非目标
 
 目标：
@@ -141,10 +152,26 @@ P0 后端：
 P1：API + 工作台向导 + E2E（preview→execute→列表/检索）。
 P2：撤销合并（journal 逆操作）、笔记引用自动改写、2–10 源库、选择性合并。
 
-## 9. 开放决策（需确认）
+## 9. 已确认默认值（2026-11-01）
 
-1. **默认重复策略**：建议 `skip`（同号同版本跳过，保留目标），多版本保留；`keep` 作为显式选项；
-2. **源库文件处理**：P0 直接移除（journal 可恢复），不保留软删除墓碑；若希望保留墓碑，改为软删除（目标文档照常复制）；
-3. **部分合并**：有跳过文档时源库不标 `mergedInto`，避免“已合并但仍有活文档”的矛盾；
-4. **笔记引用**：P0 仅警告，P1 才自动改写；
-5. **快照是否含 sources**：默认否（与现有 snapshot 一致），可通过配置 `mergeSnapshotSources` 打开。
+1. **重复策略**：默认 `skip`（同号同版本跳过，保留目标）；同号不同年/阶段保留；`keep` 为显式选项；
+2. **源库保留**：**A 方案，懒清理 7 天**。合并成功后源文件保留，源清单标 `mergedInto` +
+   `mergePurgeAfter = mergedAt + 7d`；下次插件启动/工作台打开时检查，到期才删除 `sources/`、
+   `markdown/`、`history/` 大文件，保留 `kb.json`/schema/index/log 作为墓碑；用户一直不上线则不清，
+   第 8 天上线时在启动检查中清理。**不使用 `trashRetentionDays`**（它跳过 merged 库）。
+3. **部分合并**：有跳过文档时源库不标 `mergedInto`，继续可见；不进入 purge；
+4. **笔记引用**：P0 只警告，P1 自动改写；
+5. **合并快照**：默认不含 sources；配置 `mergeSnapshotSources=true` 可含。
+
+## 10. 合并源清理（A 方案）
+
+> 实现状态（2026-11-01）：P0 后端已落地 `lib/merge.js`，含 plan/execute/sweep；API/UI 尚未做。
+
+- 源 manifest 新增 `mergePurgeAfter` / `mergePurgedAt`；
+- 合并成功且源库为空时写 `mergedInto/mergedAt/mergePurgeAfter`；
+- `lib/merge.js` 提供 `sweepMergedSources({ kbRoot, now })`：
+  - 只处理 `mergedInto != null && mergePurgeAfter <= now && !mergePurgedAt` 的源库；
+  - 删除 `sources/`、`markdown/`、`history/`、`import-tmp/`，保留 `snapshots/`、`kb.json`、`schema.md`、`index.md`、`log.md`；
+  - 写 `mergePurgedAt` 与 log；失败不阻塞启动，下次再试；
+- 插件启动（`apply`）时 best-effort 调用一次；工作台打开时也可调用（P1）；
+- 不依赖系统 cron/launchd，也不在用户离线时后台运行。
