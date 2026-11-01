@@ -12,7 +12,7 @@ const icons = {
   database: '<svg data-icon="database"></svg>',
 };
 const fmtNumber = (value) => new Intl.NumberFormat("zh-CN").format(Number(value) || 0);
-const TRUST_COLORS = ["#4f9d69", "#c9a36a", "#b96a6a", "#93a3b8"];
+const TRUST_COLORS = ["#22c55e", "#f5a524", "#f05252", "#6b9fff"];
 
 function makeKb(patch = {}) {
   return {

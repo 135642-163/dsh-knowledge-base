@@ -188,3 +188,15 @@ test("kb_export docIds 只导出选中文档（zip manifest/计数同步）", as
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("kb_export out 父目录不存在时自动创建", async () => {
+  const { root, tools, exec } = await setup();
+  try {
+    const out = join(root, "不存在", "更深一层", "导出.md");
+    const result = await tools.get("kb_export").execute({ kb: "导出库", format: "md", out }, exec);
+    assert.equal(result.path, out);
+    assert.ok((await readFile(out, "utf8")).includes("知识库「导出库」导出"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

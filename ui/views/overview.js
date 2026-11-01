@@ -96,7 +96,7 @@ function card(kb, { icons, fmtNumber }) {
   `;
 }
 
-const TRUST_COLORS = { high: "#4f9d69", medium: "#c9a36a", low: "#b96a6a", unknown: "#93a3b8" };
+const TRUST_COLORS = { high: "#22c55e", medium: "#f5a524", low: "#f05252", unknown: "#6b9fff" };
 const TRUST_LABELS = { high: "高", medium: "中", low: "低", unknown: "未知" };
 const TRUST_LEVELS = ["high", "medium", "low", "unknown"];
 
@@ -138,7 +138,7 @@ function emptyState(icons) {
 function colorFor(name) {
   let hash = 0;
   for (const char of String(name)) hash = (hash * 31 + char.codePointAt(0)) >>> 0;
-  return `hsl(${hash % 360} 55% 52%)`;
+  return `hsl(${hash % 360} 82% 56%)`;
 }
 
 function formatDate(value) {
