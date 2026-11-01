@@ -112,6 +112,8 @@ function makeManifest(extra = {}) {
         type: "pdf-text",
         standardNo: "",
       }),
+      // 标准号字段为空但标题能解析：属于「元数据缺失」（可回填），不是「无标准号」
+      baseDoc("titleonly1", "GB/T 5000-2020 只有标题带标准号", { standardNo: "" }),
       baseDoc("idx1", "标准索引（自动生成）", {
         type: "markdown",
         standardNo: "",
@@ -143,7 +145,7 @@ test("分组计数与 kb_lint 逐组一致（判定逻辑只有 lintManifest 一
   const extraCodes = new Set(report.groups.map((g) => g.code).filter((code) => !lint.groups.some((g) => g.code === code)));
   assert.deepEqual([...extraCodes].sort(), ["no-standard-no", "summary-noise"]);
   assert.equal(report.summary.totalDocs, manifest.docs.length);
-  assert.equal(report.summary.readyDocs, 14, "15 篇里 1 篇 failed 不算 ready");
+  assert.equal(report.summary.readyDocs, 15, "16 篇里 1 篇 failed 不算 ready");
 });
 
 test("旧管线组 deferred：默认不返回明细，显式请求才加载", () => {
@@ -272,6 +274,7 @@ test("补充检查：摘要噪声排除空摘要，无标准号排除笔记与�
   assert.ok(noStd);
   const noStdIds = noStd.items.flatMap((item) => item.docIds);
   assert.ok(noStdIds.includes("nostd1"));
+  assert.ok(!noStdIds.includes("titleonly1"), "标题能解析出标准号 = 元数据缺失，不是无标准号");
   assert.ok(!noStdIds.includes("idx1"), "自动生成索引页不是标准资料");
   assert.ok(!noStdIds.includes("n1"), "笔记不在身份层检查里");
   assert.equal(noStd.actionable, false, "补号必须人工判断，不提供自动动作");
@@ -347,7 +350,7 @@ test("总览徽标：summarizeKb 带轻量质量计数", async () => {
     assert.equal(summary.quality.corruptedDocs, 2);
     assert.equal(summary.quality.contentIncomplete, 2);
     assert.equal(summary.quality.summaryNoise, 1);
-    assert.equal(summary.docs.ready, 14);
+    assert.equal(summary.docs.ready, 15);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
