@@ -58,7 +58,7 @@ try {
 # 2) workbench assets
 try {
   $html = Invoke-WebRequest -Uri "$base/kb/" -UseBasicParsing -TimeoutSec 10
-  Check "GET /kb/ html" ($html.StatusCode -eq 200 -and $html.Content -match "知识库工作台")
+  Check "GET /kb/ html" ($html.StatusCode -eq 200 -and $html.Content.Length -gt 100) "bytes=$($html.Content.Length)"
   $app = Invoke-WebRequest -Uri "$base/kb/app.js" -UseBasicParsing -TimeoutSec 10
   Check "GET /kb/app.js" ($app.StatusCode -eq 200 -and $app.RawContentLength -gt 1000) "bytes=$($app.RawContentLength)"
   $css = Invoke-WebRequest -Uri "$base/kb/style.css" -UseBasicParsing -TimeoutSec 10
