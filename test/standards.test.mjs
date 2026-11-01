@@ -523,3 +523,32 @@ test("runStdCheck: onlyKeys 只复查指定组（即使缓存新鲜），不动�
   assert.equal(report.currents.length, 1);
   assert.equal(cache.items["GB:2.2"].checkedAt, 1, "未指定组不能被顺手刷新");
 });
+
+test("runStdCheck: 详情页编号变成分册时按 partial 判 ambiguous，不误判 update", async () => {
+  const dir = await makeKb([
+    doc({ id: "a", title: "GB/T 31517-2015 海上风力发电机组 设计要求", standardNo: "GB/T 31517-2015", standardNumber: "31517", standardYear: 2015 }),
+  ]);
+  const routes = {
+    // 搜索条目仍是旧号（hit.kind=exact），但详情页实际是新分册 31517.1-2022
+    "POST /plus/search.php": pageRes(searchPage([resultBlock({ href: "/guojia/1.html", stdNo: "GB/T 31517-2015", title: "GB/T 31517-2015 海上风力发电机组 设计要求" })])),
+    "GET /guojia/1.html": pageRes(detailPage({ title: "GB/T 31517.1-2022 固定式海上风力发电机组 设计要求", stdNo: "GB/T 31517.1-2022", downloadAid: 1, pub: "2022-10-12", impl: "2022-10-12", replaced: "代替GB/T 31517-2015" })),
+  };
+  const { report } = await runStdCheck({ kbDir: dir, baseUrl: BASE, cookie: "x", rateMs: 0, action: "check", fetchImpl: fakeFetch(routes) });
+  assert.equal(report.ambiguous.length, 1);
+  assert.equal(report.updates.length, 0, "分册不能当成本号的新版");
+});
+
+test("runStdCheck: 继任版本是新分册（31517 → 31517.1）时判 ambiguous，不误判 update", async () => {
+  const dir = await makeKb([
+    doc({ id: "a", title: "GB/T 31517-2015 海上风力发电机组 设计要求", standardNo: "GB/T 31517-2015", standardNumber: "31517", standardYear: 2015 }),
+  ]);
+  const routes = {
+    "POST /plus/search.php?q=31517-2015": pageRes(searchPage([resultBlock({ href: "/html/28436.html", stdNo: "GB/T 31517-2015", title: "GB/T 31517-2015 海上风力发电机组 设计要求" })])),
+    "GET /html/28436.html": pageRes(detailPage({ title: "GB/T 31517-2015 海上风力发电机组 设计要求", stdNo: "GB/T 31517-2015", downloadAid: 21296, status: "废止", replaced: "被GB/T 31517.1-2022代替", pub: "2015-07-01", impl: "2016-02-01" })),
+    "POST /plus/search.php?q=31517.1-2022": pageRes(searchPage([resultBlock({ href: "/html/246480.html", stdNo: "GB/T 31517.1-2022", title: "GB/T 31517.1-2022 固定式海上风力发电机组 设计要求" })])),
+    "GET /html/246480.html": pageRes(detailPage({ title: "GB/T 31517.1-2022 固定式海上风力发电机组 设计要求", stdNo: "GB/T 31517.1-2022", downloadAid: 68959, pub: "2022-10-12", impl: "2022-10-12", replaced: "代替GB/T 31517-2015" })),
+  };
+  const { report } = await runStdCheck({ kbDir: dir, baseUrl: BASE, cookie: "x", rateMs: 0, action: "check", fetchImpl: fakeFetch(routes) });
+  assert.equal(report.ambiguous.length, 1);
+  assert.equal(report.updates.length, 0, "新分册不能当成本号的新版");
+});
