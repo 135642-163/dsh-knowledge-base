@@ -325,6 +325,33 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
 
 测试 **1309**（1305 通过、4 跳过）。详见 `docs/reports/2026-11-01-0.35.0.md`。
 
+## 0.37.0 数据质量工作台 + 检索/体检修复（2026-11-02）
+
+- **质量读模型 API**：`GET /kb/api/kbs/:name/quality` 按组返回机械体检结果
+  （坏页 / 正文不完整 / 摘要噪声 / 无标准号 / 同号多版本 / 笔记等），每组带
+  `severity/section/actionable/count/items/docs` 证据与分组分页（`group/matched/offset/limit`）；
+  旧管线 `stale` 组标为 deferred，默认不返回明细。
+- **质量动作 API**：`POST /kb/api/kbs/:name/quality/actions`，白名单
+  `retry-import / reparse-pages / describe / trust / keep / remove`；`dryRun` 默认 true
+  （显式 false 才写）、单批 ≤50（413）、只读库 409、重解析转后台任务（202 + jobId）、
+  可选快照；`describe` 只收 summary/tags，`remove` 仅软删除。
+- **工作台「质量」tab**：组列表 + 证据展开 + 组内多选 + 动作 dry-run 预览 + 执行结果，
+  组内分页；总览库卡片加轻量质量徽标；只读库禁用写动作；`describe/trust` 行按钮走
+  既有文档弹窗（人工判断）。
+- **lintManifest 适配**：分组项补 `docIds`（多文档组可逐篇定位）与 `truncated`；
+  新增 `summary-noise`（排除空摘要）与 `no-standard-no`（排除标题可解析资料与自动生成索引页）。
+- **0.37 修复**：
+  - 噪声摘要误报：摘要中正常引用 `IEEE Std` 不再被判 OCR/版权页噪声，
+    改用 `Second Printing`、`Revision of IEEE Std` 等特征；
+  - `kb_query` / `kb_reparse` 只给 `doc`、不给 `kb` 时按会话范围解析唯一文档
+    （全部库 / 多库已选均可），跨库同名多命中报 `KB_AMBIGUOUS`；`kb="*"` + `doc` 仍拒绝；
+  - lint 同号分组：清单只有 `standardNo`、缺结构化字段时回退标题解析，
+    不同年份不再被误判为同号重复（此类库的同号分组数会变化，属修正）。
+- **文档**：0.36「数据质量工作台 + 清理 Runbook」计划与 `标准` 库清理 Runbook
+  （人工判断步骤、逐批确认协议、回滚点）；真实库清理记录见 `docs/reports/`。
+- 测试 **1355**（1351 通过、4 跳过）；`npm run typecheck` 通过；E2E 15 通过 / 1 跳过
+  （`来源面板` 为既有 skip）。
+
 ## 0.35.2 导入报告文案修复（2026-11-02）
 
 - `similar` 不再一律说“已照常导入”，按实际结果显示已导入/已跳过/待导入；
