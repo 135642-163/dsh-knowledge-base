@@ -4,6 +4,9 @@
 >
 > **安全边界**：只读检查和 `导入回归-20261101` 测试库写入；不要动真实资料库
 > （变电试验/标准/历史/电能质量/电气一次/电气二次/电气工程教材/ima 等）。
+>
+> 2026-11-01 已在 Windows 0.35.2 复测通过（14/14 自检 + A–E 全 PASS）；
+> 仓库脚本：`scripts/windows-selfcheck.ps1`，与本文档内脚本等价。
 
 ## 1. 版本确认
 
@@ -108,7 +111,15 @@ if (Test-Path $logPath) {
 # 5) optional marketplace update state (does not fail acceptance)
 try {
   $updates = Invoke-RestMethod -Uri "$base/dsh-market/updates" -TimeoutSec 10
-  $row = @($updates.packages | Where-Object { $_.name -eq "dsh-knowledge-wiki" })[0]
+  $row = $null
+  if ($updates.packages) {
+    $row = @($updates.packages | Where-Object { $_.name -eq "dsh-knowledge-wiki" })[0]
+  } elseif ($updates.updates) {
+    $entry = $updates.updates.'dsh-knowledge-wiki'
+    if ($entry) {
+      $row = [pscustomobject]@{ current = $entry.current; updateAvailable = $entry.updateAvailable }
+    }
+  }
   if ($row) {
     Write-Host "[INFO] dsh-market: current=$($row.current) updateAvailable=$($row.updateAvailable)"
     if ($row.updateAvailable -eq $true) { Write-Host "[WARN] marketplace still reports an update; refresh/update before testing." -ForegroundColor Yellow }
