@@ -321,17 +321,20 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
 - **ZIP64 导出（2026-11-01）**：`kb_export(format="zip")`、库快照、Obsidian vault 导出改为 `yazl` 流式写入并启用 ZIP64；已用 4.4GB 稀疏 PDF 实测单成员 ZIP64 通过（JSZip 无法写 ZIP64）。
 - **bzCookie 安全存储（2026-11-01）**：macOS Keychain / Linux Secret Service / Windows DPAPI；旧 profile 明文首次启动自动迁移，`scripts/set-bz-cookie.mjs` 设置/查看/清除；Web 与日志不回传 Cookie。
 
-测试 **1292**（1288 通过、4 跳过）。详见 `docs/reports/2026-10-31-0.34.0.md`。
+测试 **1304**（1300 通过、4 跳过）。详见 `docs/reports/2026-11-01-0.35.0.md`。
 
-## 0.35 本地知识库合并（P1，2026-11-01）
+## 0.35.0 合并知识库 + 导入质量闸门（2026-11-01）
 
-- **后端**：`lib/merge.js` 的 `planMerge` / `executeMerge` / `sweepMergedSources`；
-- **API**：`POST /kb/api/merge/preview`（只读）、`POST /kb/api/merge`（confirm 后后台 job）；
-- **工作台**：总览页「合并库」→ 选 2+ 源库 → 目标库（已有/新建）→ 预览 → 确认；
-- **重复策略**：同号同版本默认跳过，`keep` 可保留两份；同号不同年/阶段保留并警告；
-- **源库归档**：全空才 `mergedInto`，`mergePurgeAfter=+7d`；插件启动时懒清理，离线不清理，下次上线到期才清；
+- **导入闸门**：同库同号不同年份/阶段默认暂停，`allowSameNumber:true` 确认后入库；
+- **本地合并**：`lib/merge.js` 的 `planMerge` / `executeMerge` / `undoMerge` / `sweepMergedSources`；
+- **API**：`/kb/api/merge/preview`、`/merge`、`/merge/undo`；`features.merge=true`；
+- **工作台**：总览「合并库」→ 选 2+ 源库 → 目标库 → 预览 → 后台任务 → 撤销入口；
+- **重复策略**：同号同版本默认跳过，`keep` 保留两份；同号不同年/阶段保留并警告；
+- **源库归档**：全空才 `mergedInto`，`mergePurgeAfter=+7d`；启动时懒清理，离线不清理；
 - **部分合并**：有跳过文档时源库保持可见，不进入清理；
-- **两种合并**：本文是本地库物理合并；外部 kbpack 的 `mode=merge` 是导入合并，仍独立。
+- **两种合并**：本地物理合并；外部 kbpack `mode=merge` 仍是独立导入合并；
+- 其他 0.35 内容：ZIP64（yazl 4.4GB 实测）、交付 README、存储保留、bzCookie 安全存储、
+  80 题回归、矢量页 forceOcr、条款页眉修复、多库范围提示、水印 `--real`。
 
 ## 0.33.0 知识库搬运闭环（kbpack）+ 快照恢复 + 水印净化
 
