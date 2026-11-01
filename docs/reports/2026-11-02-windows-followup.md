@@ -38,4 +38,4 @@
 ## 版本
 
 - 版本号 `package.json` / `package-lock.json` / `lib/version.js` = **0.35.2**；
-- 计划 GitHub-only tag `v0.35.2` + push；npm 仍未发布。
+- **GitHub-only**：tag `v0.35.2` + push `main`/tag；npm 仍未发布。
