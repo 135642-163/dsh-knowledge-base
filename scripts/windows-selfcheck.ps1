@@ -1,6 +1,6 @@
 param(
   [Parameter(Mandatory = $true)][int]$Port,
-  [string]$ExpectedVersion = "0.35.2",
+  [string]$ExpectedVersion = "0.37.0",
   [int]$ExpectedToolCount = 23,
   [string]$OutFile = ""
 )
