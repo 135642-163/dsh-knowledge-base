@@ -259,6 +259,15 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
 默认阈值 Doc≥85%、Page≥62%、Doc MRR≥0.52、Page MRR≥0.40、p95≤250ms，任一不达标 exit 1。
 当前基线：Doc 88.8%、Page 67.5%、Doc MRR 0.574、Page MRR 0.455、p95 50.8ms。
 
+### 存储保留策略（快照 / 导出）
+
+- `snapshotKeep`（默认 **20**）：每次创建库快照后，`snapshots/` 只保留最近 N 份，旧 `.zip` 与 `.zip.json` 自动清理；`0`=不限制。
+- `exportKeep`（默认 **20**）：`kb_export` 写到知识库 `exports/` 时，只保留最近 N 份 `.md/.jsonl/.zip`；`0`=不限制。
+- 只清理插件管理的目录和已知扩展名；`args.out` 指定的外部路径不参与清理。
+- 手动预演/清理：`npm run prune:storage -- --root ~/workspace/knowledge --kb 标准`（默认 dry-run，加 `--apply` 才删除）。
+
+**当前「标准」库预演**：snapshots 24→20（删 4 份旧快照，约 333MB）；exports 0→0。下次创建快照会自动按 20 份清理。
+
 ### 已知限制（0.26.0）
 
 - **PDF viewer/关键词高亮**：`viewer.html` 只服务聊天来源面板，工作台预览仍是原生 PDF iframe
