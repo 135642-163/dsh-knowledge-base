@@ -1,6 +1,6 @@
 # dsh-knowledge-wiki — DeepSeek Harness 知识库插件
 
-把 Word / PPT / Excel / PDF（文字版与扫描版）等资料整理成**适合大模型阅读、学习的形式**，
+把 Word / PPT / Excel / PDF（文字版与扫描版）/ OFD 版式文档等资料整理成**适合大模型阅读、学习的形式**，
 存放在**固定、可命名、可导出、可持续修订**的知识库中；deepseek 通过一组 `kb_*` 工具
 随时调用知识库内容进行问答、推理、整理、课件与文档制作等工作。
 
@@ -8,13 +8,13 @@
 
 | 工具 | 作用 |
 | --- | --- |
-| `kb_import` | 导入文件或目录（.docx / .doc 自动转换 / .pptx / .xlsx / .xlsm / .pdf / .md / .txt / .epub / .mobi / .azw3，扫描版 PDF 自动逐页 OCR 中文，自动识别文字层损坏页并只对问题页 OCR，文字层只剩水印/无文字层的图片页也会自动补 OCR，文字层双栏页自动重排；Word OMML 公式转 LaTeX；Excel 按工作表转 Markdown 表格；.txt 自动识别 UTF-8/UTF-16/GBK；MOBI/AZW3 自动经 Calibre 转 EPUB）。旧版 .doc/.ppt 与 MOBI/AZW3 一律在后台任务中转换；正在导入中的同名文档自动跳过。**导入前自动查重**：同库重合跳过、跨库重合默认跳过并报告；同库同标准号不同年份/阶段（多版本）默认暂停并提示，加 `allowSameNumber: true` 确认后仍可入库（见下文）；标准/书籍正文/封面优先，其他资料只用文件名；扫描页 OCR 前默认做水印净化（`watermark=auto/off/strong`）；`path` 是 kbpack 包（.zip）时自动路由到 `kb_import_package` |
+| `kb_import` | 导入文件或目录（.docx / .doc 自动转换 / .pptx / .xlsx / .xlsm / .pdf / .ofd / .md / .txt / .epub / .mobi / .azw3，扫描版 PDF 与图片型 OFD 自动逐页 OCR 中文，自动识别文字层损坏页并只对问题页 OCR，文字层只剩水印/无文字层的图片页也会自动补 OCR，文字层双栏页自动重排；Word OMML 公式转 LaTeX；Excel 按工作表转 Markdown 表格；.txt 自动识别 UTF-8/UTF-16/GBK；MOBI/AZW3 自动经 Calibre 转 EPUB）。旧版 .doc/.ppt 与 MOBI/AZW3 一律在后台任务中转换；正在导入中的同名文档自动跳过。**导入前自动查重**：同库重合跳过、跨库重合默认跳过并报告；同库同标准号不同年份/阶段（多版本）默认暂停并提示，加 `allowSameNumber: true` 确认后仍可入库（见下文）；标准/书籍正文/封面优先，其他资料只用文件名；扫描页 OCR 前默认做水印净化（`watermark=auto/off/strong`）；`path` 是 kbpack 包（.zip）时自动路由到 `kb_import_package` |
 | `kb_import_package` | 导入 kbpack 知识库包（`kb_export format=zip` 产出的 `.zip`，带 `manifest.json`）：安全校验（坏包/路径穿越/符号链接/版本过高拒绝）、同 id 相同内容幂等跳过、同 id 不同内容另存新 id、同标准号不同 id 走导入查重；同名库**不静默写入**，返回 `merge` / `rename` / `replace` 三选一（replace 需 `confirm:"replace"`），`dryRun=true` 只预演；包内 `*Source=manual` 字段不覆盖目标库人工值 |
 | `kb_reparse` | 从库内 `sources/` 重新解析文档（无需重新上传），用于 OCR/解析器升级后刷新旧管线产物；`doc` 单个、`all=true` 批量，支持 `forceOcr`、`forceOcrPages`/`skipOcrPages`、后台任务 |
 | `kb_list` | 列出知识库 / 知识库内文档与状态（旧管线/已修订/文字层损坏/OCR 低置信会标注），每条带一行摘要与标签；省略 `kb` 时只列本会话范围内的库；默认最多 50 条，支持 `limit/offset/query/status/kind` 分页过滤（`kind=note` 只看笔记、`kind=source` 只看资料）；本库有维护规范时会提示 |
 | `kb_query` | 全文检索（纯文本优先 FTS5/BM25 条款索引，正则/索引不可用时回退 ripgrep；中文短语直接搜；标准号自动兼容 GBT=GB/T=GB_T=GB∕T 与年份分隔符变体）；按标题/标题行/命中密度/更新时间排序，每文档默认 5 条；`kb="*"` 跨库检索；限定模式下省略 `kb` 检索范围内全部库；命中项带 part、页码、条款与笔记类型；返回结构化 `sources`（含深链）供界面引用 |
 | `kb_read` | 按分块精读、读大纲、读整篇；大纲条目带页码/部分，读取时返回页码范围与结构化 `sources`；支持虚拟页 `doc="schema"`（维护规范）、`doc="index"`（内容索引）、`doc="log"`（操作日志），按 part 分页读取 |
-| `kb_view` | 查看原始页面图片（PDF 按页渲染；Word/PPT/EPUB/MOBI 提取内嵌图）——公式、原理图、电路图专用 |
+| `kb_view` | 查看原始页面图片（PDF 按页渲染；Word/PPT/EPUB/MOBI/OFD 提取内嵌图；OFD 无版式渲染引擎，只能看内嵌图片）——公式、原理图、电路图专用 |
 | `kb_edit` | 精确替换修订（持续修改完善）；`doc="schema"` 可修订该库维护规范（index/log 自动维护，不能编辑） |
 | `kb_describe` | 给文档写一行摘要与标签（编目）：摘要会显示在 `kb_list` 与 `index.md`，并作为摘要行进入 FTS 索引（只在摘要里的词也能被 `kb_query` 命中），重解析/重导入不会覆盖模型写的摘要；存量文档可 `all=true` + `auto=true` 批量回填缺失摘要（抽取式，不递增版本号，`limit` 分批） |
 | `kb_retitle` | 修正标题：单篇传 `doc`（默认按 `cleanTitle` 去掉站点域名、`GB_T`、序号、span 残留等噪声），批量传 `all=true`（默认 `dryRun=true` 只预览，确认后 `dryRun=false` 应用）；加 `standardPrefix=true` 把有标准号的资料统一成「标准号 + 名称」；会重建合并版首行标题、保留历史、版本+1 |
@@ -339,6 +339,30 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
   避免测试读到本机保存的目录。
 - 测试 **1362**（1358 通过、4 跳过）；`npm run typecheck` 通过；E2E 16 passed / 1 skipped
   （新增「数据目录」用例）。
+
+## 0.39.0 OFD 版式文档支持（2026-11-02）
+
+新增 `.ofd` 导入（GB/T 33190-2016 版式文档，党政机关与国网公文常见）：
+
+- **文字层直读**：解析 `TextCode` 明文，按 `Boundary` + `X/Y`（经 `CTM` 变换到页面坐标）
+  还原每个片段的位置，按基线聚成行、行内按 x 排序，得到阅读顺序；页码按页保留，
+  `kb_read`/引用照常给「第 N 页」。
+- **行聚类按实测字宽**，不直接信 `Size` 属性：部分转换器把 `Size` 写成膨胀值
+  （政办通报样本 `Size=29.26`、`CTM=0.3528`，实测字宽仅 5.4mm），按 `Size` 当字号会把
+  相邻两行并成一行、行内前后交错。
+- **空格规则**：汉字之间要拉开 >2.5 字宽才补空格（公文分散对齐的字距不算空格），
+  中文标点旁不补，英文/数字相邻才按常规间隙补；实测「设备变电〔2022〕69号」
+  「（以下简称“油色谱装置”）」都能原样还原。
+- **图片页**：整页没有 `TextCode`、只有 `ImageObject` 时，从 `Res/` 取内嵌图（PNG/JPEG，
+  其它格式经 mupdf 解码）直接 OCR；类型标记 `ofd-scanned` / `ofd-mixed`。没有文字也没有
+  可用图片的页会在导入报告里告警。
+- **已知限制**：OFD 没有可用的开源版式渲染引擎，`kb_view` 只能取内嵌图片，纯文字页请用
+  `kb_read`（PDF 的按页渲染能力不适用于 OFD）；电子发票等使用定制字形编码的页面可能
+  出现乱码。CEB/CEBX（方正阿帕比私有格式）不支持，需先用外部工具转 PDF 再导入。
+- 实测三份真实公文（国网浙江/浙江政办通报）：4 页 2043 字、6 页 2695 字、12 页 6375 字，
+  页序与行序正确；扫描页 OCR 走通（置信度 98.7）。
+- 测试 1377（1373 通过 / 4 跳过），新增 8 条 OFD 单测（坐标重排/同基线合并/膨胀字号回归/
+  空格规则/图片页告警/多页页码/非法容器/完整导入）；`npm run typecheck` 通过。
 
 ## 0.38.1 图片页自动补 OCR（2026-11-02）
 
@@ -1768,6 +1792,9 @@ npm run test:e2e      # 自托管临时 DSH web 宿主并跑完整流程
   转换全部异步执行（不阻塞宿主事件循环），旧格式导入强制走后台任务。
 - MOBI/AZW3 电子书经 Calibre `ebook-convert` 转 EPUB 后复用 EPUB 解析管线（未安装 Calibre
   时给出明确提示）；转换同样只在后台 worker 中执行。
+- OFD（GB/T 33190-2016）用 JSZip + fast-xml-parser 直接解析：`TextCode` 是 Unicode 明文，
+  按 `Boundary`/`CTM` 还原坐标后重排行序，不引入任何新依赖；纯图片页从 `Res/` 取内嵌图
+  走同一套 OCR。CEB/CEBX（方正阿帕比）是私有二进制，插件不做解析，需先转成 PDF。
 - OCR 并发数与 DPI 按本机 CPU 核数/内存自适应（见配置表），无需手工按机器调参；
   rapidocr/tesserocr 后端为常驻进程帧协议，模型只加载一次。
 - 后台导入 = 子进程 worker + harness 原生 jobs 服务（`ctx.jobs`），可取消（显示为
@@ -1776,7 +1803,8 @@ npm run test:e2e      # 自托管临时 DSH web 宿主并跑完整流程
 - 所有写入经暂存目录原子提交；清单更新带目录锁，支持并发安全；同一文档 30 分钟内的
   重复导入自动跳过；插件加载时会自动清扫崩溃遗留的 `import-tmp` 暂存目录。
 - 导出（md/jsonl）流式写入、zip 用 Node 流直接进 JSZip，超大知识库不产生内存尖峰。
-- 每个文档 `type` 自动判定：`pdf-text` / `pdf-scanned` / `pdf-mixed`。
+- 每个文档 `type` 自动判定：`pdf-text` / `pdf-scanned` / `pdf-mixed`，OFD 同口径为
+  `ofd` / `ofd-scanned` / `ofd-mixed`（版式文档正文是明文 TextCode，不需要 OCR 时算文字层）。
 
 ## 接入方式
 
