@@ -1,4 +1,5 @@
 import { api, ApiError } from "./api.js";
+import { colorFor } from "./colors.js";
 import { icons } from "./icons.js";
 import { hrefForKb, hrefForOverview, hrefForSearch, hrefForTrash, parseHash } from "./router.js";
 import { renderOverview } from "./views/overview.js";
@@ -2170,13 +2171,6 @@ function focusTrashQueryInput() {
   if (!next) return;
   next.focus();
   next.setSelectionRange(next.value.length, next.value.length);
-}
-
-function colorFor(name) {
-  let hash = 0;
-  for (const char of String(name)) hash = (hash * 31 + char.codePointAt(0)) >>> 0;
-  const hue = hash % 360;
-  return `hsl(${hue} 55% 52%)`;
 }
 
 function escapeHtml(value) {

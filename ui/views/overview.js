@@ -1,3 +1,4 @@
+import { colorFor } from "../colors.js";
 import { statusBadges } from "./badges.js";
 
 export function renderOverview(state, { icons, fmtNumber }) {
@@ -145,12 +146,6 @@ function emptyState(icons) {
       <button class="btn primary" data-action="create-kb">${icons.plus}<span>新建知识库</span></button>
     </div>
   `;
-}
-
-function colorFor(name) {
-  let hash = 0;
-  for (const char of String(name)) hash = (hash * 31 + char.codePointAt(0)) >>> 0;
-  return `hsl(${hash % 360} 82% 56%)`;
 }
 
 function formatDate(value) {
