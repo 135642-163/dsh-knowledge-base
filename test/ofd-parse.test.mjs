@@ -182,6 +182,29 @@ test("OFD：汉字间的分散对齐不补空格，中文标点旁也不补", as
   });
 });
 
+test("OFD：DeltaX 只写部分字形时，数字/文号不被空格拆开（浙电批复回归）", async () => {
+  await withTempDir(async (dir) => {
+    // 真实样本特征：TextObject("21") 的 DeltaX 只写了一个 2.7092（不是两段），
+    // 早前拿它当整段宽度会算出假间隙，把「214号」拆成「21 4 号」。
+    const buffer = await makeOfd({
+      pages: [
+        {
+          textObjects: [
+            { text: "〔2023〕", boundary: [160, 82.78, 13.4, 6.35], size: 5.6268, x: 0.95, y: 4.97 },
+            { text: "21", boundary: [173.3759, 82.78, 7.8245, 6.35], size: 5.6268, x: 0.9525, y: 4.9742, deltaX: "2.7092" },
+            { text: "4", boundary: [179.6838, 82.78, 7.3025, 6.35], size: 5.6268, x: 0.9525, y: 4.9742 },
+            { text: "号", boundary: [186.9, 82.78, 5.63, 6.35], size: 5.6268, x: 0.9525, y: 4.9742 },
+          ],
+        },
+      ],
+    });
+    const file = join(dir, "文号拆分.ofd");
+    await writeFile(file, buffer);
+    const result = await convertOfd(file, { maxOcrPages: 0 });
+    assert.equal(result.sections[0].text, "〔2023〕214号");
+  });
+});
+
 test("OFD：纯图片页在关闭 OCR 时降级为「本页无文字」并给告警", async () => {
   await withTempDir(async (dir) => {
     const buffer = await makeOfd({
