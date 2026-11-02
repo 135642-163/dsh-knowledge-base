@@ -71,6 +71,8 @@ export function openPackageImportModal({ onFinished = () => {}, notify = () => {
     mode: "merge",
     duplicatePolicy: "skip",
     confirmedReplace: false,
+    path: "",
+    source: null,
     job: null,
     jobId: "",
     error: "",
@@ -117,12 +119,19 @@ export function openPackageImportModal({ onFinished = () => {}, notify = () => {
         <input type="file" id="pkg-file" accept=".zip,application/zip" ${busy ? "disabled" : ""} />
       </label>
       ${state.file ? `<p class="muted">已选择：${escapeHtml(state.file.name)}（${formatBytes(state.file.size)}）</p>` : ""}
-      ${tooLarge ? `<p class="form-error">包体超过工作台内联上传上限 ${formatBytes(PACKAGE_INLINE_MAX_BYTES)}。请把 .zip 放在本机，让 AI 执行 kb_import_package 按路径导入（不重复拷贝）；或按库/分批导出后导入。</p>` : ""}
-      ${busy ? `<div class="progress-line"><strong>上传中</strong> ${Math.round(state.progress * 100)}%</div>` : ""}
+      ${tooLarge ? `<p class="form-error">包体超过工作台内联上传上限 ${formatBytes(PACKAGE_INLINE_MAX_BYTES)}。请改用下面的「本机路径」导入（直接读这台机器上的 .zip，不经过上传）；或按库/分批导出后导入。</p>` : ""}
+      ${busy ? `<div class="progress-line"><strong>处理中</strong> ${Math.round(state.progress * 100)}%</div>` : ""}
       ${state.error ? `<p class="form-error">${escapeHtml(state.error)}</p>` : ""}
       <div class="modal-actions">
         <button type="button" class="btn primary" data-upload ${!state.file || busy || tooLarge ? "disabled" : ""}>上传并预检</button>
         <button type="button" class="btn" data-close>取消</button>
+      </div>
+      <hr class="modal-sep" />
+      <label class="field"><span>或填本机 .zip 绝对路径 <span class="muted">（大于 1 GB 的包用这里：不经过上传，直接读本地文件）</span></span>
+        <input id="pkg-path" value="${escapeAttr(state.path)}" placeholder="E:\\knowledge\\标准-2026-11-02.zip" autocomplete="off" spellcheck="false" ${busy ? "disabled" : ""} />
+      </label>
+      <div class="modal-actions">
+        <button type="button" class="btn" data-precheck-path ${busy ? "disabled" : ""}>按路径预检</button>
       </div>
     </div>`;
   }
@@ -200,6 +209,8 @@ export function openPackageImportModal({ onFinished = () => {}, notify = () => {
       render();
     });
     modal.querySelector("[data-upload]")?.addEventListener("click", () => { void upload(); });
+    modal.querySelector("#pkg-path")?.addEventListener("input", (event) => { state.path = event.target.value; });
+    modal.querySelector("[data-precheck-path]")?.addEventListener("click", () => { void precheckPath(); });
     modal.querySelectorAll("input[name='pkg-mode']").forEach((input) => input.addEventListener("change", () => {
       state.mode = input.value;
       state.confirmedReplace = false;
@@ -231,6 +242,34 @@ export function openPackageImportModal({ onFinished = () => {}, notify = () => {
         },
       });
       state.result = result;
+      state.source = { kind: "upload", uploadId: result.uploadId };
+      state.mode = "merge";
+      state.target = "";
+      state.confirmedReplace = false;
+      state.phase = "choose";
+      render();
+    } catch (error) {
+      state.phase = "select";
+      state.error = errorText(error);
+      render();
+    }
+  }
+
+  async function precheckPath() {
+    const path = String(state.path ?? "").trim();
+    if (path === "") {
+      state.error = "请填写本机 .zip 的绝对路径";
+      render();
+      return;
+    }
+    state.phase = "uploading";
+    state.progress = 0;
+    state.error = "";
+    render();
+    try {
+      const result = await api.precheckPackagePath(path);
+      state.result = result;
+      state.source = { kind: "path", path: result?.path ?? path };
       state.mode = "merge";
       state.target = "";
       state.confirmedReplace = false;
@@ -255,7 +294,9 @@ export function openPackageImportModal({ onFinished = () => {}, notify = () => {
       if (target) body.kb = target;
       if (state.mode === "replace") body.confirm = "replace";
       if (state.mode === "merge") body.duplicatePolicy = state.duplicatePolicy;
-      const started = await api.importPackage(result.uploadId, body);
+      const started = state.source?.kind === "path"
+        ? await api.importPackagePath(state.source.path, body)
+        : await api.importPackage(result.uploadId, body);
       state.jobId = started?.jobId;
       if (!state.jobId) throw new Error("导入任务没有返回 jobId");
       await poll();

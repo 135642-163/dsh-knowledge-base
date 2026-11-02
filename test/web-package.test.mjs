@@ -3,7 +3,8 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import JSZip from "jszip";
@@ -191,6 +192,84 @@ test("非 zip 内容拒绝且不残留上传文件", async () => {
     assert.equal(json.error.code, "INVALID_PACKAGE");
     const uploads = await readdir(join(kbRoot, ".package-uploads")).catch(() => []);
     assert.deepEqual(uploads, []);
+  } finally {
+    await rm(kbRoot, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 本机路径导入（>1 GB 的包不经过 HTTP 上传）
+// ---------------------------------------------------------------------------
+
+test("本机路径导入：预检读本地 zip，导入成功后不删除原文件", async () => {
+  const { kbRoot, opts } = await setup();
+  const dir = await mkdtemp(join(tmpdir(), "kb-package-path-"));
+  const file = join(dir, "本地包.zip");
+  try {
+    await writeFile(file, await makePack({ kbName: "本地包库" }));
+    const pre = await call(opts, makeReq({
+      method: "POST",
+      url: "/kb/api/packages/path",
+      body: { path: file },
+    }));
+    assert.equal(pre.res.status, 200);
+    assert.equal(pre.json.pathImport, true);
+    assert.equal(pre.json.ok, true);
+    assert.equal(pre.json.created, 1);
+    assert.equal(pre.json.filename, "本地包.zip");
+    assert.equal(pre.json.package.filename, "本地包.zip");
+
+    const started = await call(opts, makeReq({
+      method: "POST",
+      url: "/kb/api/packages/path/import",
+      body: { path: file, mode: "merge" },
+    }));
+    assert.equal(started.res.status, 202);
+    const job = await waitJob(opts.jobs, started.json.jobId);
+    assert.equal(job.status, "succeeded");
+    assert.equal(existsSync(file), true, "用户原文件不能被删");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+    await rm(kbRoot, { recursive: true, force: true });
+  }
+});
+
+test("本机路径导入：空路径/相对路径/非 zip 400，不存在 404", async () => {
+  const { kbRoot, opts } = await setup();
+  const dir = await mkdtemp(join(tmpdir(), "kb-package-path-bad-"));
+  try {
+    const empty = await call(opts, makeReq({ method: "POST", url: "/kb/api/packages/path", body: { path: "" } }));
+    assert.equal(empty.res.status, 400);
+
+    const relative = await call(opts, makeReq({ method: "POST", url: "/kb/api/packages/path", body: { path: "包.zip" } }));
+    assert.equal(relative.res.status, 400);
+
+    const notZip = join(dir, "包.rar");
+    await writeFile(notZip, "x");
+    const wrong = await call(opts, makeReq({ method: "POST", url: "/kb/api/packages/path", body: { path: notZip } }));
+    assert.equal(wrong.res.status, 400);
+
+    const missing = await call(opts, makeReq({
+      method: "POST",
+      url: "/kb/api/packages/path",
+      body: { path: join(dir, "不存在.zip") },
+    }));
+    assert.equal(missing.res.status, 404);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+    await rm(kbRoot, { recursive: true, force: true });
+  }
+});
+
+test("截断的 zip：400 + KBPACK_INVALID 原文（不再是 500 服务器内部错误）", async () => {
+  const { kbRoot, opts } = await setup();
+  try {
+    const pack = await makePack();
+    const half = pack.subarray(0, Math.floor(pack.length / 2));
+    const { res, json } = await upload(opts, half);
+    assert.equal(res.status, 400);
+    assert.equal(json.error.code, "KBPACK_INVALID");
+    assert.match(json.error.message, /无法读取 zip|无法解压/);
   } finally {
     await rm(kbRoot, { recursive: true, force: true });
   }

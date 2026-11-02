@@ -358,13 +358,24 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
   与 macOS 桌面版都不在这个位置，导致明明随包带了 pnpm 却回落去 PATH 找 npm。现在按
   `<app>/resources/runtime/primary-runtime/dependencies/pnpm/bin/pnpm.cjs`（Windows/Linux）
   与 `<app>/Contents/Resources/runtime/…`（macOS）定位，Office 引擎安装不再依赖系统 Node。
-- **大知识库包导入引导**：整库含原件的包常 > 1 GB，工作台「上传并预检」受内联上传上限
-  （1 GB）限制。现在：
-  - 选文件后前端就提示超限并禁用上传，引导用 `kb_import_package` 按本机路径导入
-    （工具端上限 8 GB，且不需要把几 GB 再拷一遍），或按库/分批（`docIds`）导出；
-  - 服务端 413 文案带上同样的处理建议；导出结果超过 1 GB 时也会提示导入端走路径导入。
-- 测试 **1387**（1383 通过、4 跳过），新增 10 条（Windows 垫片翻译 / 兜底命令行引号 /
-  自带 pnpm 布局 / `.cmd` 不再直接 spawn / EINVAL 错误码透出）；`npm run typecheck` 通过。
+- **语义组件：没有 npm 也能装**。DSH 桌面版只随包带 node + pnpm、不带 npm；之前
+  「一键准备」只认系统 npm，干净 Windows 机器上会直接失败。现在没有 npm 时用 DSH 自带
+  pnpm 把 `onnxruntime-node` / `@huggingface/tokenizers` 装到独立目录
+  `~/.dsh/tools/semantic-kit`（插件目录外，升级不会被清），运行时先按插件目录解析、
+  失败再回落该目录；探测/状态/一键准备三处口径一致。
+- **大知识库包导入：工作台可直接按本机路径导入**。整库含原件的包常 > 1 GB，超过内联上传
+  上限（1 GB）。现在导入弹窗新增「本机 .zip 绝对路径 + 按路径预检」：服务端直接读同一台
+  机器上的文件，预检/合并/另存/覆盖流程与上传完全一致，不经过 HTTP、不需要再拷一份，
+  也不删除用户原文件（上限沿用 kbpack 的 8 GB / 5 万条目）。
+  - 选文件后前端先判断超限并禁用上传，提示改用路径导入；服务端 413 与导出结果（> 1 GB）
+    也给出同样引导；
+  - 路径导入只接受绝对路径 + `.zip`，相对路径/空值/非 zip 一律 400。
+- **坏包/截断包报文**：`KbpackError` 之前没映射成 4xx，坏包会变成「500 服务器内部错误」；
+  现在按错误码返回 400/404/409/413，并把「文件大小 N 字节，若是从另一台机器拷来的，
+  请核对字节数与 SHA-256（拷贝中断/截断会让 WinRAR 报『压缩文件已损坏』）」写进报文。
+- 测试 **1393**（1389 通过、4 跳过），新增 16 条（Windows 垫片翻译 / 兜底命令行引号 /
+  自带 pnpm 布局 / `.cmd` 不再直接 spawn / EINVAL 错误码透出 / 语义组件目录解析与探测 /
+  本机路径预检与导入 / 截断 zip 报文）；`npm run typecheck` 通过。
 - 排查记录：本机导出的「标准」zip（5.34 GiB、11685 个条目）`unzip -t` 全量 CRC 通过，
   Windows 上那份只有 2.1 GB —— 是**拷贝不完整**，不是导出包损坏。
 

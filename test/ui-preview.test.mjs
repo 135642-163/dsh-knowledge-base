@@ -207,9 +207,9 @@ test("renderOfficeInstallState 失败：错误转义、勾选保留、按钮变�
   assert.doesNotMatch(html, /data-office-install disabled/);
 });
 
-test("renderOfficeInstallState canInstall=false：提示缺少 Node/npm，不渲染安装入口", () => {
+test("renderOfficeInstallState canInstall=false：提示缺少包管理器，不渲染安装入口", () => {
   const html = renderOfficeInstallState({ status: { canInstall: false, toolchain: null } });
-  assert.match(html, /缺少 Node\/npm，无法自动安装，请按 README 手动安装/);
+  assert.match(html, /缺少包管理器（pnpm\/npm），无法自动安装，请按 README 手动安装/);
   assert.doesNotMatch(html, /data-office-install/);
   assert.doesNotMatch(html, /data-office-consent/);
   assert.doesNotMatch(html, /data-office-progress/);

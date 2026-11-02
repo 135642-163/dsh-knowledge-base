@@ -355,7 +355,7 @@ export function renderOfficeInstallState({ status, installing, error } = {}) {
       </div>`;
   const manual = canInstall
     ? ""
-    : `<p class="muted preview-install-hint" data-office-manual>缺少 Node/npm，无法自动安装，请按 README 手动安装</p>`;
+    : `<p class="muted preview-install-hint" data-office-manual>缺少包管理器（pnpm/npm），无法自动安装，请按 README 手动安装</p>`;
   return `
     <div class="preview-install" data-office-state="${busy ? "installing" : failure ? "error" : "ready"}">
       <p class="muted preview-install-desc">未安装 Office 转换引擎（LibreOfficeKit）。安装后可在此直接预览 docx/pptx/xlsx；约 300 MB，转换只在本机进行。</p>

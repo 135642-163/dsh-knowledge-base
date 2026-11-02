@@ -8,15 +8,17 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   DEFAULT_MODEL_DIR,
+  DEFAULT_SEMANTIC_KIT_DIR,
   MODEL_FILES,
   QUERY_INSTRUCTION,
   RUNTIME_DEPENDENCIES,
   createSemanticRuntime,
+  resolveSemanticKitModule,
 } from "../lib/semantic-runtime.js";
 
 // ---------------------------------------------------------------------------
@@ -284,4 +286,20 @@ test("真实运行时：512 维、归一化，并与 0.30 fastembed 查询向量
   let same = 0;
   for (let index = 0; index < 512; index += 1) same += docs.vectors[0][index] * result.vector[index];
   assert.ok(same < 0.9999, "查询指令应让查询向量与同文本文档向量不同");
+});
+
+test("独立组件目录：resolveSemanticKitModule 解析出真实入口（无 npm 机器的安装位置）", async () => {
+  const kitDir = await mkdtemp(join(tmpdir(), "kb-sem-kit-"));
+  try {
+    const pkgDir = join(kitDir, "node_modules", "onnxruntime-node");
+    await writeFile(join(kitDir, "package.json"), JSON.stringify({ name: "dsh-semantic-kit", private: true }), "utf8");
+    await mkdir(pkgDir, { recursive: true });
+    await writeFile(join(pkgDir, "package.json"), JSON.stringify({ name: "onnxruntime-node", version: "0.0.0", main: "index.js" }), "utf8");
+    await writeFile(join(pkgDir, "index.js"), "module.exports = { Tensor: class {} };\n", "utf8");
+    const resolved = resolveSemanticKitModule("onnxruntime-node", { kitDir });
+    assert.equal(resolved.endsWith(join("node_modules", "onnxruntime-node", "index.js")), true);
+    assert.equal(DEFAULT_SEMANTIC_KIT_DIR.endsWith(join(".dsh", "tools", "semantic-kit")), true);
+  } finally {
+    await rm(kitDir, { recursive: true, force: true });
+  }
 });

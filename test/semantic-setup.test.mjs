@@ -4,7 +4,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -86,5 +86,22 @@ test("一键准备：下载失败时给出明确错误，不留 .part 临时文�
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("依赖探测同时认插件目录与独立组件目录（DSH 自带 pnpm 安装位置）", async () => {
+  const kitDir = await mkdtemp(join(tmpdir(), "kb-sem-kit-probe-"));
+  try {
+    for (const name of ["onnxruntime-node", "@huggingface/tokenizers"]) {
+      const dir = join(kitDir, "node_modules", name);
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, "package.json"), JSON.stringify({ name, version: "0.0.0", main: "index.js" }), "utf8");
+      await writeFile(join(dir, "index.js"), "module.exports = {};\n", "utf8");
+    }
+    const result = probeSemanticDependencies({ resolveFrom: join(kitDir, "plugin", "lib", "x.js"), kitDir });
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.missing, []);
+  } finally {
+    await rm(kitDir, { recursive: true, force: true });
   }
 });

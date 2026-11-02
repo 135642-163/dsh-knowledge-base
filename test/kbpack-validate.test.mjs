@@ -239,3 +239,26 @@ test("import 结果中的本机路径不泄漏到返回值", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("截断的 zip 报 KBPACK_INVALID，并提示核对字节数/哈希（大包走流式 reader）", async () => {
+  const root = await mkdtemp(join(tmpdir(), "kb-kbpack-trunc-"));
+  try {
+    const zip = new JSZip();
+    zip.file("manifest.json", JSON.stringify(manifestFor()));
+    zip.file("markdown/abcdef123456/abcdef123456.md", "# 资料\n\n正文。\n");
+    const buffer = await zip.generateAsync({ type: "nodebuffer" });
+    const truncated = join(root, "truncated.zip");
+    await writeFile(truncated, buffer.subarray(0, Math.floor(buffer.length / 2)));
+    await assert.rejects(
+      inspectKbpack(truncated, { forceStream: true }),
+      (error) => {
+        assert.equal(error.code, "KBPACK_INVALID");
+        assert.match(error.message, /无法读取 zip/);
+        assert.match(error.message, /SHA-256|拷贝|截断/);
+        return true;
+      },
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

@@ -248,6 +248,9 @@ export const api = {
   uploadFile,
   uploadPackage,
   importPackage: (uploadId, body) => request("POST", `/packages/${encodeURIComponent(uploadId)}/import`, body),
+  /** 本机路径导入（>1 GB 的包不经过上传）。 */
+  precheckPackagePath: (path) => request("POST", "/packages/path", { path }),
+  importPackagePath: (path, body) => request("POST", "/packages/path/import", { path, ...body }),
   mergePreview: (body) => request("POST", "/merge/preview", body),
   merge: (body) => request("POST", "/merge", body),
   mergeUndo: (body) => request("POST", "/merge/undo", body),
