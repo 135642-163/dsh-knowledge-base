@@ -8,7 +8,7 @@
 
 | 工具 | 作用 |
 | --- | --- |
-| `kb_import` | 导入文件或目录（.docx / .doc 自动转换 / .pptx / .xlsx / .xlsm / .pdf / .md / .txt / .epub / .mobi / .azw3，扫描版 PDF 自动逐页 OCR 中文，自动识别文字层损坏页并只对问题页 OCR，文字层双栏页自动重排；Word OMML 公式转 LaTeX；Excel 按工作表转 Markdown 表格；.txt 自动识别 UTF-8/UTF-16/GBK；MOBI/AZW3 自动经 Calibre 转 EPUB）。旧版 .doc/.ppt 与 MOBI/AZW3 一律在后台任务中转换；正在导入中的同名文档自动跳过。**导入前自动查重**：同库重合跳过、跨库重合默认跳过并报告；同库同标准号不同年份/阶段（多版本）默认暂停并提示，加 `allowSameNumber: true` 确认后仍可入库（见下文）；标准/书籍正文/封面优先，其他资料只用文件名；扫描页 OCR 前默认做水印净化（`watermark=auto/off/strong`）；`path` 是 kbpack 包（.zip）时自动路由到 `kb_import_package` |
+| `kb_import` | 导入文件或目录（.docx / .doc 自动转换 / .pptx / .xlsx / .xlsm / .pdf / .md / .txt / .epub / .mobi / .azw3，扫描版 PDF 自动逐页 OCR 中文，自动识别文字层损坏页并只对问题页 OCR，文字层只剩水印/无文字层的图片页也会自动补 OCR，文字层双栏页自动重排；Word OMML 公式转 LaTeX；Excel 按工作表转 Markdown 表格；.txt 自动识别 UTF-8/UTF-16/GBK；MOBI/AZW3 自动经 Calibre 转 EPUB）。旧版 .doc/.ppt 与 MOBI/AZW3 一律在后台任务中转换；正在导入中的同名文档自动跳过。**导入前自动查重**：同库重合跳过、跨库重合默认跳过并报告；同库同标准号不同年份/阶段（多版本）默认暂停并提示，加 `allowSameNumber: true` 确认后仍可入库（见下文）；标准/书籍正文/封面优先，其他资料只用文件名；扫描页 OCR 前默认做水印净化（`watermark=auto/off/strong`）；`path` 是 kbpack 包（.zip）时自动路由到 `kb_import_package` |
 | `kb_import_package` | 导入 kbpack 知识库包（`kb_export format=zip` 产出的 `.zip`，带 `manifest.json`）：安全校验（坏包/路径穿越/符号链接/版本过高拒绝）、同 id 相同内容幂等跳过、同 id 不同内容另存新 id、同标准号不同 id 走导入查重；同名库**不静默写入**，返回 `merge` / `rename` / `replace` 三选一（replace 需 `confirm:"replace"`），`dryRun=true` 只预演；包内 `*Source=manual` 字段不覆盖目标库人工值 |
 | `kb_reparse` | 从库内 `sources/` 重新解析文档（无需重新上传），用于 OCR/解析器升级后刷新旧管线产物；`doc` 单个、`all=true` 批量，支持 `forceOcr`、`forceOcrPages`/`skipOcrPages`、后台任务 |
 | `kb_list` | 列出知识库 / 知识库内文档与状态（旧管线/已修订/文字层损坏/OCR 低置信会标注），每条带一行摘要与标签；省略 `kb` 时只列本会话范围内的库；默认最多 50 条，支持 `limit/offset/query/status/kind` 分页过滤（`kind=note` 只看笔记、`kind=source` 只看资料）；本库有维护规范时会提示 |
@@ -339,6 +339,24 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
   避免测试读到本机保存的目录。
 - 测试 **1362**（1358 通过、4 跳过）；`npm run typecheck` 通过；E2E 16 passed / 1 skipped
   （新增「数据目录」用例）。
+
+## 0.38.1 图片页自动补 OCR（2026-11-02）
+
+修掉一类“看着有文字层、实际全是扫描图”的 PDF：整本只提出几百到几千字，检索等于废掉。
+
+- **触发场景**：① 文字层只剩一段水印/页眉（如「免费标准网 …」每页 55 字，高于 50 字阈值）；
+  ② 扫描内容包在 Form XObject 里，`walk` 看不到图像块，`chars` 与 `images` 都是 0，
+  被当成空白页跳过。
+- **判据**：`templateTextPages()` 找出“整页文字=同一段短串且出现在 ≥30% 页”的模板页；
+  对模板页与 `chars/images` 都为 0 的页，用约 36 DPI 灰度渲染统计非白像素占比
+  （`INK_RATIO_THRESHOLD = 0.006`）做墨迹复核，确认有画面才 OCR——真空白页仍跳过。
+- **结果**：GB/T 3859.3-1993 自动从 560 字补到 6173 字（8 页全 OCR）；
+  T/CSEE 0012-2016 从 825 字补到 13543 字（15 页图片页补齐）；正常扫描件行为不变。
+- `pages.json` 每页新增 `imageOnly` 标记；导入结果新增告警
+  「文字层缺失已按页 OCR：第 x、y 页」；体检的「正文可能不完整」建议动作改为
+  先试 `kb_reparse(forceOcr=true)`。
+- 复核页数上限 300（超限告警），避免超长文档渲染开销；`skipOcrPages` 仍然优先。
+- 测试 **1369**（1365 通过、4 跳过），新增 3 条启发式单测；`npm run typecheck` 通过。
 
 ## 0.37.0 数据质量工作台 + 检索/体检修复（2026-11-02）
 

@@ -33,6 +33,7 @@ const state = {
   error: "",
   server: { kbRoot: "", version: "" },
   filter: "all",
+  kbFilter: "",
   query: "",
   appliedQuery: "",
   detail: null,
@@ -80,6 +81,10 @@ const searchGate = createRequestGate();
 // 每次 render 重新挂载的工具栏控件；bind() 负责先 detach 上一份。
 let docsControls = null;
 let searchControls = null;
+// 左栏/顶栏共用的「设置」菜单：同一时间只开一个，固定定位避免被侧栏裁切。
+let settingsMenuNode = null;
+let settingsMenuAnchor = null;
+let settingsMenuCleanup = null;
 
 function fmtNumber(value) {
   return new Intl.NumberFormat("zh-CN").format(Number(value) || 0);
@@ -1305,14 +1310,169 @@ function purgeAllDeletedDocs() {
   });
 }
 
+function filteredSideKbs() {
+  const q = String(state.kbFilter || "").trim().toLowerCase();
+  if (!q) return state.kbs;
+  return state.kbs.filter((kb) => String(kb.name ?? "").toLowerCase().includes(q));
+}
+
+/** 左栏知识库列表：搜索词过滤后渲染；无匹配时给一行提示。 */
+function sideListHtml(current) {
+  const list = filteredSideKbs();
+  if (list.length === 0) {
+    return `<div class="side-empty">${state.kbs.length === 0 ? "暂无知识库" : "没有匹配的知识库"}</div>`;
+  }
+  return list.map((kb) => `
+            <a class="side-item ${current.page === "detail" && current.name === kb.name ? "active" : ""}"
+               href="${hrefForKb(kb.name)}">
+              <span class="dot" style="--dot:${colorFor(kb.name)}"></span>
+              <span class="side-name">${escapeHtml(kb.name)}</span>
+              <span class="side-count">${fmtNumber(kb.docs.ready + kb.docs.importing + kb.docs.failed)}</span>
+            </a>`).join("");
+}
+
+/** 视图标识：只在同一视图内重渲染时才恢复滚动位置，切换页面时保持默认置顶。 */
+function viewKeyOf(current) {
+  return `${current.page}|${current.name ?? ""}|${current.tab ?? ""}`;
+}
+
+/**
+ * 关闭「设置」菜单。render() 会先调用它，避免整页重绘后菜单还挂在旧按钮旁。
+ * restoreFocus=true 时把焦点还给触发按钮（Esc、再次点击按钮）。
+ */
+function closeSettingsMenu({ restoreFocus = false } = {}) {
+  const node = settingsMenuNode;
+  const anchor = settingsMenuAnchor;
+  if (settingsMenuCleanup) {
+    settingsMenuCleanup();
+    settingsMenuCleanup = null;
+  }
+  settingsMenuNode = null;
+  settingsMenuAnchor = null;
+  node?.remove();
+  if (!anchor?.isConnected) return;
+  anchor.setAttribute("aria-expanded", "false");
+  if (restoreFocus) {
+    try {
+      anchor.focus({ preventScroll: true });
+    } catch {
+      anchor.focus();
+    }
+  }
+}
+
+/**
+ * 统一打开「设置」菜单：侧栏底部按钮向上弹，顶栏按钮向下弹。
+ * 菜单项走全局点击委托（role=menuitem + data-action），与原来的弹窗入口一致。
+ */
+function openSettingsMenu(anchor) {
+  if (!anchor || !app) return;
+  if (settingsMenuNode && settingsMenuAnchor === anchor) {
+    closeSettingsMenu({ restoreFocus: true });
+    return;
+  }
+  closeSettingsMenu();
+
+  const menu = document.createElement("div");
+  menu.className = "settings-menu";
+  menu.setAttribute("role", "menu");
+  menu.setAttribute("aria-label", "设置");
+  menu.innerHTML = `
+    <button class="settings-menu-item" type="button" role="menuitem" data-action="semantic-settings">
+      ${icons.sliders}<span>检索设置</span>
+    </button>
+    <button class="settings-menu-item" type="button" role="menuitem" data-action="kbroot-settings">
+      ${icons.folder}<span>数据目录</span>
+    </button>`;
+  // 先隐藏挂载，量出高度后再定位；避免菜单在第一帧闪到错误位置。
+  menu.style.visibility = "hidden";
+  app.appendChild(menu);
+  settingsMenuNode = menu;
+  settingsMenuAnchor = anchor;
+  anchor.setAttribute("aria-expanded", "true");
+
+  const anchorRect = anchor.getBoundingClientRect();
+  const gap = 8;
+  const margin = 8;
+  const width = Math.min(236, Math.max(208, Math.round(anchorRect.width)));
+  menu.style.width = `${width}px`;
+  // offsetHeight 不含 CSS 入场动画的 transform，定位不会偏几像素。
+  const menuHeight = menu.offsetHeight;
+  let left = anchorRect.left;
+  if (left + width > window.innerWidth - margin) left = anchorRect.right - width;
+  left = Math.max(margin, Math.min(left, window.innerWidth - width - margin));
+  // 视口下方放不下时向上翻；顶栏在页面上方，自然就是向下弹。
+  let top = anchorRect.bottom + gap;
+  if (top + menuHeight > window.innerHeight - margin) {
+    top = anchorRect.top - menuHeight - gap;
+  }
+  // 顶栏入口从栏底下方开始，避免菜单压住顶栏描边。
+  const topbar = anchor.closest(".topbar");
+  if (topbar && top >= anchorRect.bottom) {
+    top = Math.max(top, topbar.getBoundingClientRect().bottom + 4);
+  }
+  top = Math.max(margin, Math.min(top, window.innerHeight - menuHeight - margin));
+  menu.style.left = `${Math.round(left)}px`;
+  menu.style.top = `${Math.round(top)}px`;
+  menu.dataset.side = top < anchorRect.top ? "up" : "down";
+  menu.style.visibility = "";
+
+  const onPointerDown = (event) => {
+    if (menu.contains(event.target) || anchor.contains(event.target)) return;
+    closeSettingsMenu();
+  };
+  const onKeyDown = (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeSettingsMenu({ restoreFocus: true });
+      return;
+    }
+    if (event.key === "Tab") {
+      closeSettingsMenu();
+      return;
+    }
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+    const items = [...menu.querySelectorAll(".settings-menu-item")];
+    if (items.length === 0) return;
+    event.preventDefault();
+    const index = items.indexOf(document.activeElement);
+    let next = 0;
+    if (event.key === "End") next = items.length - 1;
+    else if (event.key === "ArrowDown") next = index < 0 ? 0 : (index + 1) % items.length;
+    else if (event.key === "ArrowUp") next = index < 0 ? items.length - 1 : (index - 1 + items.length) % items.length;
+    items[next]?.focus();
+  };
+  const onViewportChange = () => closeSettingsMenu();
+  document.addEventListener("pointerdown", onPointerDown, true);
+  document.addEventListener("keydown", onKeyDown, true);
+  window.addEventListener("resize", onViewportChange);
+  window.addEventListener("scroll", onViewportChange, true);
+  settingsMenuCleanup = () => {
+    document.removeEventListener("pointerdown", onPointerDown, true);
+    document.removeEventListener("keydown", onKeyDown, true);
+    window.removeEventListener("resize", onViewportChange);
+    window.removeEventListener("scroll", onViewportChange, true);
+  };
+  menu.querySelector(".settings-menu-item")?.focus({ preventScroll: true });
+}
+
 function render() {
   if (!app) return;
+  closeSettingsMenu();
   const current = route();
+  // 选中/取消选中、勾选可信度等操作会整页重渲染；先记下滚动位置与焦点，
+  // 重渲染后原样恢复，避免列表被顶回顶部。
+  const prevKey = app.dataset.viewKey || "";
+  const scrollState = {
+    main: app.querySelector(".main")?.scrollTop ?? 0,
+    side: app.querySelector(".side-list")?.scrollTop ?? 0,
+    focus: focusIdentity(document.activeElement),
+  };
   app.innerHTML = `
     <header class="topbar">
       <a class="brand" href="${hrefForOverview()}"><span>知识库工作台</span></a>
       <div class="topbar-actions">
-        ${!EMBED ? `<button class="btn" data-action="semantic-settings">设置</button>` : ""}
+        ${!EMBED ? `<button class="btn" data-action="settings-menu" data-id="topbar" aria-haspopup="menu" aria-expanded="false">${icons.settings}<span>设置</span></button>` : ""}
         ${!EMBED && window.history.length > 1 ? `<button class="btn" data-action="back">${icons.back}<span>返回</span></button>` : ""}
       </div>
     </header>
@@ -1323,22 +1483,19 @@ function render() {
           <span>知识库</span>
           <span class="muted">${state.kbs.length}</span>
         </a>
+        <div class="side-search">
+          <button class="side-icon-btn" type="button" data-action="create-kb" title="新建知识库" aria-label="新建知识库">${icons.plus}</button>
+          <input class="side-search-input" type="search" data-kb-filter placeholder="搜索知识库" aria-label="搜索知识库"
+                 autocomplete="off" spellcheck="false" value="${escapeHtml(state.kbFilter)}" />
+        </div>
         <nav class="side-list">
-          ${state.kbs.map((kb) => `
-            <a class="side-item ${current.page === "detail" && current.name === kb.name ? "active" : ""}"
-               href="${hrefForKb(kb.name)}">
-              <span class="dot" style="--dot:${colorFor(kb.name)}"></span>
-              <span class="side-name">${escapeHtml(kb.name)}</span>
-              <span class="side-count">${fmtNumber(kb.docs.ready + kb.docs.importing + kb.docs.failed)}</span>
-            </a>`).join("")}
+          ${sideListHtml(current)}
         </nav>
         <div class="side-foot">
-          <button class="side-action" data-action="create-kb">${icons.plus}<span>新建知识库</span></button>
           <a class="side-action ${current.page === "search" ? "active" : ""}" href="${hrefForSearch({})}">${icons.search}<span>全文搜索</span></a>
-          <button class="side-action" data-action="semantic-settings">${icons.search}<span>检索设置</span></button>
-          <button class="side-action" data-action="kbroot-settings">${icons.database}<span>数据目录</span></button>
           <a class="side-action" href="${hrefForTrash()}">${icons.archive}<span>回收站</span></a>
           <a class="side-action subtle" href="/kb/" target="_blank" rel="noreferrer">${icons.external}<span>在新标签打开</span></a>
+          <button class="side-action" data-action="settings-menu" data-id="sidebar" aria-haspopup="menu" aria-expanded="false">${icons.settings}<span>设置</span></button>
         </div>
       </aside>
       <main class="main">
@@ -1351,8 +1508,39 @@ function render() {
       </main>
     </div>
   `;
+  const key = viewKeyOf(current);
+  app.dataset.viewKey = key;
   bind();
+  if (prevKey === key) {
+    const main = app.querySelector(".main");
+    if (main && scrollState.main > 0) main.scrollTop = scrollState.main;
+    const side = app.querySelector(".side-list");
+    if (side && scrollState.side > 0) side.scrollTop = scrollState.side;
+    restoreFocus(scrollState.focus);
+  }
   paintSearchHighlights();
+}
+
+/** 记录可恢复的焦点：仅限带 data-action 的列表控件（勾选框、页签等）。 */
+function focusIdentity(el) {
+  if (!el || !app?.contains?.(el)) return null;
+  const action = el.getAttribute?.("data-action");
+  if (!action) return null;
+  return { action, id: el.getAttribute("data-id") ?? "", tab: el.getAttribute("data-tab") ?? "" };
+}
+
+function restoreFocus(identity) {
+  if (!identity || !app) return;
+  const sel = identity.id
+    ? `[data-action="${identity.action}"][data-id="${identity.id}"]`
+    : `[data-action="${identity.action}"]${identity.tab ? `[data-tab="${identity.tab}"]` : ""}`;
+  const el = app.querySelector(sel);
+  if (!el || typeof el.focus !== "function") return;
+  try {
+    el.focus({ preventScroll: true });
+  } catch {
+    el.focus();
+  }
 }
 
 function bind() {
@@ -1379,6 +1567,28 @@ function bind() {
       showToast(stdErrorText(error), "error");
     }
   };
+
+  // 左栏知识库搜索：只重绘列表，保留输入框焦点与光标位置。
+  const kbFilterInput = app.querySelector("[data-kb-filter]");
+  if (kbFilterInput) {
+    kbFilterInput.oninput = () => {
+      state.kbFilter = kbFilterInput.value;
+      const nav = app.querySelector(".side-list");
+      if (nav) {
+        nav.innerHTML = sideListHtml(route());
+        nav.scrollTop = 0;
+      }
+    };
+    kbFilterInput.onkeydown = (event) => {
+      if (event.key === "Escape" && kbFilterInput.value !== "") {
+        event.preventDefault();
+        kbFilterInput.value = "";
+        state.kbFilter = "";
+        const nav = app.querySelector(".side-list");
+        if (nav) nav.innerHTML = sideListHtml(route());
+      }
+    };
+  }
 
   // 质量搜索框回车：与点「搜索」等价（输入框按 Enter 不会触发 click 委托）。
   app.onkeydown = (event) => {
@@ -1415,9 +1625,13 @@ function bind() {
           });
         },
       });
+    } else if (action === "settings-menu") {
+      openSettingsMenu(target);
     } else if (action === "semantic-settings") {
+      closeSettingsMenu();
       openSemanticModal({ notify: showToast });
     } else if (action === "kbroot-settings") {
+      closeSettingsMenu();
       openKbRootModal({ notify: showToast });
     } else if (action === "export-kb") {
       const name = target.dataset.name;

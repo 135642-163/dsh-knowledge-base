@@ -304,7 +304,9 @@ test("quality-audit writes a report without touching the scanned knowledge base"
     assert.equal(counts["schema-missing"], 1, "空库没有 schema");
     assert.equal(counts["zero-content"], 1);
     assert.equal(counts["tiny-content"], 3, "s1 + 两篇 20 字残件");
-    assert.equal(counts["content-incomplete"], 2, "cover-only 的 s1 + partial 的 partial1");
+    // 0.39 口径：cover-only 不看标准号（s1 + 两篇 20 字残件）；partial 只在
+    // 「有标准号 + 非说明材料 + 至少 5 页」时计入，partial1 无页数属短文不判缺页。
+    assert.equal(counts["content-incomplete"], 3, "cover-only 的 s1/t2/t3");
     assert.equal(counts["content-fffd"], 1, "内容层 U+FFFD");
     assert.equal(counts["content-pua"], 1, "只统计私用区；E011 不算");
     assert.equal(counts.corrupted, 1, "清单标注的坏页/低置信页");

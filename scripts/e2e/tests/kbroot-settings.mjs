@@ -8,7 +8,8 @@ export const name = "数据目录：弹窗显示当前根目录";
 
 export async function run(ctx) {
   const page = await ctx.goto("/kb/#/");
-  await page.locator(".side-foot [data-action=kbroot-settings]").click();
+  await page.locator(".side-foot [data-action=settings-menu]").click();
+  await page.locator(".settings-menu [data-action=kbroot-settings]").click();
   await page.locator(".kbroot-settings h2").waitFor();
   const current = await page.locator(".kbroot-current").textContent();
   assert.match(current, /当前生效：/, "应显示当前生效目录");

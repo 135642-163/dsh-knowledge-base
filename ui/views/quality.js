@@ -233,7 +233,7 @@ function rowsForGroup({ name, group, selected, readOnly, busy, fmtNumber }) {
               ${documentLines(item)}
             </td>
             <td class="muted quality-evidence">${escapeHtml(qualityEvidence(item, group))}</td>
-            <td class="quality-actions">${rowActions({ name, group, item, readOnly, busy })}</td>
+            <td class="quality-actions"><div class="quality-actions-inner">${rowActions({ name, group, item, readOnly, busy })}</div></td>
           </tr>`;
         }).join("")}
       </tbody>

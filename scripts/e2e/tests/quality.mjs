@@ -90,6 +90,16 @@ export async function run(ctx) {
   // 分组与证据
   const corrupted = page.locator('.quality-group[data-code="corrupted"]');
   await corrupted.waitFor();
+  // 回归：动作列曾把 <td> 设成 display:flex，该列底边线比其他列高约 5px。
+  const actionCellAligned = await corrupted.evaluate((group) => {
+    const row = group.querySelector(".quality-table tbody tr");
+    if (!row) return false;
+    const bottom = row.getBoundingClientRect().bottom;
+    return [...row.children].every((cell) =>
+      getComputedStyle(cell).display === "table-cell"
+      && Math.abs(cell.getBoundingClientRect().bottom - bottom) < 0.5);
+  });
+  assert.equal(actionCellAligned, true, "质量表动作列应与整行共用同一底线");
   assert.equal(await corrupted.locator(".badge").first().textContent(), "2");
   assert.match(await corrupted.innerText(), /坏页 2,3/);
   assert.equal(await page.locator('.quality-group[data-code="same-number"]').count(), 1);
