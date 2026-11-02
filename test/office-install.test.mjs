@@ -516,3 +516,62 @@ test("resetOfficeInstallForTests clears the single-flight marker and status cach
   await officeEngineStatus({ deps });
   assert.equal(probes, 2);
 });
+
+// ---------------------------------------------------------------------------
+// Windows：.cmd 垫片不能直接 spawn（Node ≥20.12 抛 EINVAL）
+// ---------------------------------------------------------------------------
+
+test("installOfficeKit on win32 never spawns the .cmd shim directly", async () => {
+  resetOfficeInstallForTests();
+  const root = await mkdtemp(join(tmpdir(), "office-install-win-"));
+  const cli = installedCliPath(root);
+  const { spawn, calls } = makeSpawn((call) => {
+    if (call.args.includes("capabilities")) return fakeChild({ stdout: JSON.stringify(CAPABILITIES) });
+    return fakeChild({ stdout: "ok\n" });
+  });
+  await installOfficeKit({
+    deps: baseDeps(root, {
+      platform: "win32",
+      toolchain: { kind: "npm", command: "npm.cmd", argsPrefix: [] },
+      spawn,
+      exists: () => true,
+    }),
+  });
+
+  const installCall = calls.find((call) => !call.args.includes("capabilities"));
+  assert.notEqual(installCall.command, "npm.cmd");
+  assert.equal(installCall.command, process.execPath);
+  assert.match(installCall.args[0], /npm-cli\.js$/);
+  assert.deepEqual(installCall.args.slice(1, 3), ["install", "--ignore-scripts"]);
+  assert.equal(installCall.options.cwd, root);
+});
+
+test("installOfficeKit surfaces the spawn error code instead of a bare 安装失败", async () => {
+  resetOfficeInstallForTests();
+  const root = await mkdtemp(join(tmpdir(), "office-install-einval-"));
+  const { spawn } = makeSpawn(() => {
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.kill = () => true;
+    // spawn 失败在真实 Node 里是 spawn 返回后的下一个 tick 才 emit；这里同样延后一 tick，
+    // 让 waitForExit 先挂上 error 监听。
+    setTimeout(() => {
+      const error = new Error("spawn EINVAL");
+      error.code = "EINVAL";
+      child.emit("error", error);
+    }, 5);
+    return child;
+  });
+
+  await assert.rejects(
+    installOfficeKit({ deps: baseDeps(root, { spawn }) }),
+    (error) => {
+      assert.equal(error.code, "OFFICE_INSTALL_FAILED");
+      assert.equal(error.message, "Office 转换引擎安装失败（EINVAL）");
+      assert.equal(error.details.errorCode, "EINVAL");
+      return true;
+    },
+  );
+  resetOfficeInstallForTests();
+});

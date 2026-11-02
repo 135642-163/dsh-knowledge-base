@@ -340,6 +340,34 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
 - 测试 **1362**（1358 通过、4 跳过）；`npm run typecheck` 通过；E2E 16 passed / 1 skipped
   （新增「数据目录」用例）。
 
+## 0.39.1 Windows 启动与迁移修复（2026-11-03）
+
+新 Windows 机器上暴露的三类问题，根因都不是网络或文件损坏：
+
+- **`spawn EINVAL`（Office 引擎安装失败 / 语义组件一键准备失败）**：Node ≥ 20.12
+  （CVE-2024-27980 修复）在 Windows 上直接 `spawn` `.cmd`/`.bat` 会抛 `EINVAL`，
+  而 npm / pnpm 在 Windows 上恰好都是 `.cmd` 垫片。新增 `lib/pkg-manager.js`：
+  - `.cmd` 垫片翻译成「`<node>` + `<…/npm/bin/npm-cli.js>`」或「`<node>` + `pnpm.cjs`」，
+    不经过 shell（`onnxruntime-node@^1.31.1` 里的 `^` 不会被 cmd 吃掉）；
+  - 只有找不到 CLI js 时才退回 `cmd.exe /d /s /c`，每个 token 加引号；
+  - PATH 查找在 Windows 上只认 `.exe/.cmd/.bat`（Node 安装目录里给 sh 用的无扩展名
+    `npm` 不能直接执行，之前会先命中它）。
+  - 安装失败文案会带上错误码（如「Office 转换引擎安装失败（EINVAL）」），不再只有一句
+    「安装失败」；语义一键准备也补上了 `error` 监听（之前会变成未捕获异常）。
+- **DSH 自带 pnpm 定位修复**：之前只找 `<execPath>/../../pnpm/bin/pnpm.mjs`，Windows
+  与 macOS 桌面版都不在这个位置，导致明明随包带了 pnpm 却回落去 PATH 找 npm。现在按
+  `<app>/resources/runtime/primary-runtime/dependencies/pnpm/bin/pnpm.cjs`（Windows/Linux）
+  与 `<app>/Contents/Resources/runtime/…`（macOS）定位，Office 引擎安装不再依赖系统 Node。
+- **大知识库包导入引导**：整库含原件的包常 > 1 GB，工作台「上传并预检」受内联上传上限
+  （1 GB）限制。现在：
+  - 选文件后前端就提示超限并禁用上传，引导用 `kb_import_package` 按本机路径导入
+    （工具端上限 8 GB，且不需要把几 GB 再拷一遍），或按库/分批（`docIds`）导出；
+  - 服务端 413 文案带上同样的处理建议；导出结果超过 1 GB 时也会提示导入端走路径导入。
+- 测试 **1387**（1383 通过、4 跳过），新增 10 条（Windows 垫片翻译 / 兜底命令行引号 /
+  自带 pnpm 布局 / `.cmd` 不再直接 spawn / EINVAL 错误码透出）；`npm run typecheck` 通过。
+- 排查记录：本机导出的「标准」zip（5.34 GiB、11685 个条目）`unzip -t` 全量 CRC 通过，
+  Windows 上那份只有 2.1 GB —— 是**拷贝不完整**，不是导出包损坏。
+
 ## 0.39.0 OFD 版式文档支持（2026-11-02）
 
 新增 `.ofd` 导入（GB/T 33190-2016 版式文档，党政机关与国网公文常见）：

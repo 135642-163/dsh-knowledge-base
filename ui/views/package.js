@@ -33,6 +33,9 @@ function errorText(error) {
 
 const MODE_LABELS = { merge: "合并到同名知识库", rename: "另存为新知识库", replace: "覆盖同 id 文档" };
 
+/** 与服务端 lib/web/api.js 的 PACKAGE_UPLOAD_MAX_BYTES 保持一致。 */
+const PACKAGE_INLINE_MAX_BYTES = 1 * 1024 ** 3;
+
 /** 预检结果摘要（纯函数，单测可直接校验转义/字段）。 */
 export function packageSummaryHtml(result = {}) {
   const pkg = result.package ?? {};
@@ -104,6 +107,9 @@ export function openPackageImportModal({ onFinished = () => {}, notify = () => {
 
   function selectHtml() {
     const busy = state.phase === "uploading";
+    // 与服务端 PACKAGE_UPLOAD_MAX_BYTES 对齐：整库含原件的包常超过 1 GB，
+    // 与其上传 1 GB 后被拒，不如在选文件后直接引导到「本机路径导入」。
+    const tooLarge = Boolean(state.file) && Number(state.file.size) > PACKAGE_INLINE_MAX_BYTES;
     return `<div class="modal-form">
       <h2>导入知识库包</h2>
       <p class="muted">选择 kbpack 包（kb_export format=zip 产出的 .zip）。上传后先预检；同名库会请你选择合并/另存/覆盖，确认前不写入。</p>
@@ -111,10 +117,11 @@ export function openPackageImportModal({ onFinished = () => {}, notify = () => {
         <input type="file" id="pkg-file" accept=".zip,application/zip" ${busy ? "disabled" : ""} />
       </label>
       ${state.file ? `<p class="muted">已选择：${escapeHtml(state.file.name)}（${formatBytes(state.file.size)}）</p>` : ""}
+      ${tooLarge ? `<p class="form-error">包体超过工作台内联上传上限 ${formatBytes(PACKAGE_INLINE_MAX_BYTES)}。请把 .zip 放在本机，让 AI 执行 kb_import_package 按路径导入（不重复拷贝）；或按库/分批导出后导入。</p>` : ""}
       ${busy ? `<div class="progress-line"><strong>上传中</strong> ${Math.round(state.progress * 100)}%</div>` : ""}
       ${state.error ? `<p class="form-error">${escapeHtml(state.error)}</p>` : ""}
       <div class="modal-actions">
-        <button type="button" class="btn primary" data-upload ${!state.file || busy ? "disabled" : ""}>上传并预检</button>
+        <button type="button" class="btn primary" data-upload ${!state.file || busy || tooLarge ? "disabled" : ""}>上传并预检</button>
         <button type="button" class="btn" data-close>取消</button>
       </div>
     </div>`;
