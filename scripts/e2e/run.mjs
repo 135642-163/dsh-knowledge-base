@@ -29,6 +29,7 @@ import * as move from "./tests/move.mjs";
 import * as retry from "./tests/retry.mjs";
 import * as preview from "./tests/preview.mjs";
 import * as previewOffice from "./tests/preview-office.mjs";
+import * as resize from "./tests/resize.mjs";
 import * as capsule from "./tests/capsule.mjs";
 import * as metadata from "./tests/metadata.mjs";
 import * as deepLink from "./tests/deep-link.mjs";
@@ -47,7 +48,7 @@ const root = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const runStartedAt = new Date();
 const stamp = runStartedAt.toISOString().replace(/[:.]/g, "-").slice(0, 19);
 const artifactsDir = join(root, "test", "e2e", ".artifacts", stamp);
-const allTests = [trashSearchSort, trash, move, retry, preview, previewOffice, metadata, upload, deepLink, search, sources, capsule, semanticSettings, kbrootSettings, sidebarSettings, quality, readonly, merge];
+const allTests = [trashSearchSort, trash, move, retry, preview, previewOffice, resize, metadata, upload, deepLink, search, sources, capsule, semanticSettings, kbrootSettings, sidebarSettings, quality, readonly, merge];
 const only = String(process.env.DSH_E2E_ONLY ?? "").trim();
 const tests = only ? allTests.filter((test) => String(test.name ?? "").includes(only)) : allTests;
 

@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import type { ComponentType } from "react";
 import { chipLabel, selectionPayload } from "../../lib/scope-view.js";
 import { mergeSourcesByDoc, sourceHref, sourceLabel } from "../../ui/sources-view.js";
+import { mountResize } from "../../ui/resizable.js";
 import type { KbSource } from "../../ui/sources-view.js";
 
 export const inject = ["slots"];
@@ -115,6 +116,12 @@ const CSS = `
 .dsh-kb-preview-nav button:disabled { opacity: .4; cursor: default; }
 .dsh-kb-sources-turn { border: 1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.28)); border-radius: 10px; padding: 8px 10px; margin: 8px 0; background: var(--dsw-alias-bg-layer-1, #fff); color: var(--dsw-alias-label-primary, #111); font-size: 12px; }
 .dsh-kb-sources-turn h4 { margin: 0 0 6px; font-size: 12px; font-weight: 600; }
+.kb-resize-handle { position: absolute; z-index: 5; background: transparent; touch-action: none; }
+.kb-resize-handle[data-dir="n"], .kb-resize-handle[data-dir="s"] { cursor: ns-resize; }
+.kb-resize-handle[data-dir="e"], .kb-resize-handle[data-dir="w"] { cursor: ew-resize; }
+.kb-resize-handle[data-dir="ne"], .kb-resize-handle[data-dir="sw"] { cursor: nesw-resize; }
+.kb-resize-handle[data-dir="nw"], .kb-resize-handle[data-dir="se"] { cursor: nwse-resize; }
+.kb-resizing, .kb-resizing * { user-select: none !important; }
 `;
 
 function ensureCss() {
@@ -166,6 +173,8 @@ function docsBadge(kb: KbSummary): string {
 
 function WorkbenchModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const onCloseRef = useRef(onClose);
+  const backdropRef = useRef<HTMLDivElement | null>(null);
+  const dialogRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
@@ -182,15 +191,25 @@ function WorkbenchModal({ open, onClose }: { open: boolean; onClose: () => void 
       document.removeEventListener("keydown", onKeyDown);
     };
   }, [open]);
+  useEffect(() => {
+    if (!open) return undefined;
+    const handle = mountResize(dialogRef.current, backdropRef.current, {
+      storageKey: "workbench",
+      minWidth: 640,
+      minHeight: 420,
+    });
+    return () => handle.destroy();
+  }, [open]);
   if (!open || typeof document === "undefined") return null;
   return createPortal(
     <div
+      ref={backdropRef}
       className="dsh-kb-modal-backdrop"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div className="dsh-kb-modal" role="dialog" aria-modal="true" aria-label="知识库工作台">
+      <div ref={dialogRef} className="dsh-kb-modal" role="dialog" aria-modal="true" aria-label="知识库工作台">
         <div className="dsh-kb-modal-head">
           <span>知识库工作台</span>
           <button type="button" className="dsh-kb-modal-close" aria-label="关闭" onClick={onClose}>
@@ -696,6 +715,19 @@ async function sourcePreviewData(source: KbSource): Promise<{
 
 function SourceLinks({ sources, limit = 12 }: { sources: KbSource[]; limit?: number }) {
   const [preview, setPreview] = useState<{ source: KbSource; mode?: "viewer" | "frame"; url?: string; page?: number; totalPages?: number; error?: string } | null>(null);
+  const previewOpen = preview !== null;
+  const previewBackdropRef = useRef<HTMLDivElement | null>(null);
+  const previewDialogRef = useRef<HTMLDivElement | null>(null);
+  // 只在“开/关”时挂载，预览内容加载完成后的重渲染（setPreview 换内容）不重建把手。
+  useEffect(() => {
+    if (!previewOpen) return undefined;
+    const handle = mountResize(previewDialogRef.current, previewBackdropRef.current, {
+      storageKey: "preview",
+      minWidth: 480,
+      minHeight: 360,
+    });
+    return () => handle.destroy();
+  }, [previewOpen]);
   const open = async (event: any, source: KbSource) => {
     event?.preventDefault?.();
     setPreview({ source });
@@ -732,10 +764,11 @@ function SourceLinks({ sources, limit = 12 }: { sources: KbSource[]; limit?: num
       {preview && typeof document !== "undefined"
         ? createPortal(
             <div
+              ref={previewBackdropRef}
               className="dsh-kb-preview-backdrop"
               onMouseDown={(event) => { if (event.target === event.currentTarget) setPreview(null); }}
             >
-              <div className="dsh-kb-preview" role="dialog" aria-modal="true" aria-label="原件预览">
+              <div ref={previewDialogRef} className="dsh-kb-preview" role="dialog" aria-modal="true" aria-label="原件预览">
                 <div className="dsh-kb-preview-head">
                   <span className="dsh-kb-preview-title">{preview.source.title ?? preview.source.docId}</span>
                   {preview.mode === "viewer" ? <span className="dsh-kb-preview-page">关键词高亮</span> : null}

@@ -2,6 +2,7 @@ import { api, ApiError } from "../api.js";
 import { formatBytes } from "../upload-core.js";
 import { DOC_TRUST_LEVELS, docMetaUnchanged, parseDocTagsInput, summarySourceLabel, trustLevelLabel } from "./doc-meta.js";
 import { clampPage, withPageFragment } from "../deep-link.js";
+import { mountResize } from "../resizable.js";
 import { renderQualityPreviewBody } from "./quality.js";
 
 // 弹窗关闭统一走 closeOverlay：同时摘掉 Esc 监听并从栈里移除。
@@ -25,6 +26,7 @@ function overlay(html, { className = "" } = {}) {
     const index = overlayStack.indexOf(node);
     if (index >= 0) overlayStack.splice(index, 1);
     document.removeEventListener("keydown", onKeydown);
+    node.__kbResizeDestroy?.();
     node.remove();
   };
 
@@ -43,6 +45,7 @@ function closeOverlay(node) {
     close();
     return;
   }
+  node?.__kbResizeDestroy?.();
   node?.remove?.();
 }
 
@@ -495,6 +498,9 @@ export function openPreviewModal({ name, doc, icons, initialPage = null, terms =
       </div>
     </div>
   `, { className: "preview-modal" });
+  // 拖边框调大小；尺寸记在 localStorage，下次打开按记忆尺寸居中恢复。
+  const resizer = mountResize(node.querySelector(".modal"), node, { storageKey: "preview", minWidth: 480, minHeight: 360 });
+  node.__kbResizeDestroy = () => resizer.destroy();
   const body = node.querySelector(".preview-body");
   const paint = (html) => {
     if (!node.isConnected || !body) return;

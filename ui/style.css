@@ -254,6 +254,13 @@ button { font: inherit; color: inherit; }
 .danger-zone { border-color: color-mix(in srgb, var(--danger) 30%, var(--line)); }
 .overlay { position: fixed; inset: 0; z-index: 100; background: rgba(0, 0, 0, .45); display: grid; place-items: center; padding: 20px; }
 .modal { width: min(560px, 100%); max-height: 86vh; overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px; box-shadow: 0 20px 60px rgba(0, 0, 0, .25); }
+/* 拖边框调大小：把手挂在遮罩上、贴在弹窗外侧，不挡 iframe 滚动条与正文边缘 */
+.kb-resize-handle { position: absolute; z-index: 5; background: transparent; touch-action: none; }
+.kb-resize-handle[data-dir="n"], .kb-resize-handle[data-dir="s"] { cursor: ns-resize; }
+.kb-resize-handle[data-dir="e"], .kb-resize-handle[data-dir="w"] { cursor: ew-resize; }
+.kb-resize-handle[data-dir="ne"], .kb-resize-handle[data-dir="sw"] { cursor: nesw-resize; }
+.kb-resize-handle[data-dir="nw"], .kb-resize-handle[data-dir="se"] { cursor: nwse-resize; }
+.kb-resizing, .kb-resizing * { user-select: none !important; }
 .modal-form { display: flex; flex-direction: column; gap: 10px; }
 .modal-form hr.modal-sep { width: 100%; border: 0; border-top: 1px solid var(--line); margin: 6px 0 2px; }
 .modal-form h2 { margin: 0 0 6px; font-size: 20px; }
@@ -356,6 +363,10 @@ body.embed .side-foot a[target="_blank"] { display: none; }
 
 /* 原件预览弹窗 */
 .modal.preview-modal { width: min(1080px, 92vw); max-height: 92vh; }
+/* 调过大小后正文跟着弹窗高度伸缩；没调过仍保持原来的 70vh */
+.modal.preview-modal.kb-sized { display: flex; flex-direction: column; overflow: hidden; }
+.modal.preview-modal.kb-sized .preview-form { flex: 1 1 auto; min-height: 0; }
+.modal.preview-modal.kb-sized .preview-body { flex: 1 1 auto; height: auto; max-height: none; min-height: 0; }
 .preview-form { min-height: 0; }
 .preview-form h2 { overflow-wrap: anywhere; }
 .preview-body {
