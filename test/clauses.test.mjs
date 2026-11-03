@@ -63,3 +63,16 @@ test("单独一行 Q / GDW 页眉也不产生条款 Q", () => {
   assert.ok(!clauses.some((c) => c.clause === "Q"));
   assert.ok(clauses.some((c) => c.clause === "5.3"));
 });
+
+test("条款号后没有空格（新版 OCR「3.1电力技术监督」）也能切分", () => {
+  const md = [
+    "### 第 1 页",
+    "3.1电力技术监督应分级管理，建立技术监督组织机构。",
+    "3.2电力技术监督应以安全和质量为中心。",
+    "4.1.1电能质量监督",
+    "4.1.2绝缘监督",
+  ].join("\n");
+  const clauses = splitClauses(md, { docId: "d5" });
+  assert.deepEqual(clauses.map((c) => c.clause), ["3.1", "3.2", "4.1.1", "4.1.2"]);
+  assert.equal(clauses[0].heading, "电力技术监督应分级管理，建立技术监督组织机构。");
+});
