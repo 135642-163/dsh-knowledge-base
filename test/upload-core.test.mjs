@@ -4,8 +4,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  classifyFiles, createQueue, extOf, fileStageLabel, formatBytes, nextPhase, relPathFor, statusLabel,
-  summarizeResults, uploadPhaseTitle,
+  classifyFiles, createQueue, emptyStateMessage, extOf, fileStageLabel, formatBytes, isDuplicateSkip,
+  nextPhase, relPathFor, skipBreakdown, statusLabel, summarizeResults, uploadPhaseTitle,
 } from "../ui/upload-core.js";
 
 const LIMITS = { maxBytes: 10, maxFiles: 2, extensions: [".md", ".pdf"] };
@@ -113,6 +113,8 @@ test("阶段文案区分上传/解析/全重复/失败", () => {
   assert.equal(fileStageLabel({ status: "uploaded" }, "starting"), "已上传，待解析");
   assert.equal(fileStageLabel({ status: "ok", stage: "parsing" }, "importing"), "解析中");
   assert.equal(fileStageLabel({ status: "skipped", reason: "duplicate" }, "done"), "重复跳过");
+  assert.equal(fileStageLabel({ status: "skipped", reason: "existing-full" }, "done"), "重复跳过");
+  assert.equal(fileStageLabel({ status: "skipped", reason: "importing" }, "done"), "导入中跳过");
   assert.equal(fileStageLabel({ status: "failed", stage: "failed" }, "importing"), "解析失败");
   assert.equal(fileStageLabel({ status: "failed" }, "uploading"), "上传失败");
   assert.equal(uploadPhaseTitle({ phase: "uploading" }), "上传中（文件尚未解析）");
@@ -121,6 +123,26 @@ test("阶段文案区分上传/解析/全重复/失败", () => {
   assert.equal(uploadPhaseTitle({ phase: "done", kb: "标准" }), "解析完成 · 标准");
   assert.equal(uploadPhaseTitle({ phase: "error", files: [{ status: "failed" }] }), "上传失败");
   assert.equal(uploadPhaseTitle({ phase: "error", files: [{ status: "uploaded" }] }), "上传完成，解析未完成");
+});
+
+test("全部跳过时区分「重复」与「正在导入中」", () => {
+  const importing = { files: [{ status: "skipped", reason: "importing" }, { status: "skipped", reason: "importing" }] };
+  const duplicate = { files: [{ status: "skipped", reason: "duplicate" }] };
+  const mixed = { files: [{ status: "skipped", reason: "importing" }, { status: "skipped", reason: "duplicate" }] };
+  assert.deepEqual(skipBreakdown(importing), { total: 2, importing: 2, duplicate: 0, other: 0 });
+  assert.equal(isDuplicateSkip({ reason: "both-incomplete" }), true);
+  assert.equal(isDuplicateSkip({ reason: "importing" }), false);
+  assert.match(emptyStateMessage(importing), /对应的文档正在导入中/);
+  assert.match(emptyStateMessage(duplicate), /全部与库内\/其它知识库重合/);
+  assert.match(emptyStateMessage(mixed), /1 个文档正在导入中、1 个与库内/);
+  assert.equal(
+    uploadPhaseTitle({ phase: "empty", job: { result: importing } }),
+    "没有新资料（文件正在导入中）"
+  );
+  assert.equal(
+    uploadPhaseTitle({ phase: "empty", job: { result: mixed } }),
+    "没有新资料（部分文件正在导入中）"
+  );
 });
 
 test("nextPhase 覆盖上传/导入状态机", () => {

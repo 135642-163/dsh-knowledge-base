@@ -8,7 +8,7 @@
  * localStorage，下次打开该库的上传弹窗时恢复进度）。
  */
 import { api, ApiError } from "../api.js";
-import { classifyFiles, createQueue, fileStageLabel, formatBytes, nextPhase, statusLabel, summarizeResults, uploadPhaseTitle } from "../upload-core.js";
+import { classifyFiles, createQueue, emptyStateMessage, fileStageLabel, formatBytes, isDuplicateSkip, nextPhase, statusLabel, summarizeResults, uploadPhaseTitle } from "../upload-core.js";
 
 const DIRECTORY_HINT = "暂不支持拖拽文件夹，请用「选择目录」";
 
@@ -229,12 +229,12 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
           <p class="muted">可关闭窗口，导入会在后台继续；重新打开会自动恢复进度。</p>` : ""}
         ${state.phase === "importing" && !done ? `<p class="muted">正在读取进度…</p>` : ""}
         ${(state.phase === "done" || state.phase === "empty" || state.phase === "error") ? `
-          ${state.phase === "empty" ? `<p class="muted">没有新资料：全部与库内/其它知识库重合，未启动解析。</p>` : ""}
+          ${state.phase === "empty" ? `<p class="muted">${escapeHtml(emptyStateMessage(state.job?.result))}</p>` : ""}
           ${summary.files.length > 0 ? `
             <div class="progress-line"><strong>成功 ${summary.ok} · 失败 ${summary.failed} · 跳过 ${summary.skipped}</strong></div>
             <div class="uplist">${summary.files.map((item) => `
               <div class="uprow"><span class="upname" title="${escapeAttr(item.path ?? item.title ?? "")}">${escapeHtml(item.title || item.path || "")}</span>
-                <span class="muted">${escapeHtml(fileStageLabel(item, state.phase))}${item.reason === "duplicate" ? "（与库内资料重复）" : item.status === "skipped" ? "（文档正在导入中）" : ""}${item.error ? `：${escapeHtml(item.error)}` : ""}</span></div>`).join("")}</div>` : ""}
+                <span class="muted">${escapeHtml(fileStageLabel(item, state.phase))}${skipSuffix(item)}${item.error ? `：${escapeHtml(item.error)}` : ""}</span></div>`).join("")}</div>` : ""}
           ${summary.skipped > 0 ? `<p class="muted">${summary.skipped} 个文件被跳过${state.job?.result?.duplicates?.length ? `（重合 ${state.job.result.duplicates.length} 个）` : "，可稍后重试"}。</p>` : ""}
           ${failedUploads.length > 0 ? `
             <p class="form-error">${failedUploads.length} 个文件上传失败，可用「${retryLabel}」重新上传。</p>
@@ -257,6 +257,14 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
         .map((item) => String(item.path ?? "")),
     );
     return state.files.filter((item) => item.status === "failed" || rerun.has(item.path));
+  }
+
+  /** 跳过原因后缀：只有 importing 才是“正在导入”，其余判重原因统一说重复。 */
+  function skipSuffix(item) {
+    if (!item || (item.status !== "skipped" && item.stage !== "skipped")) return "";
+    if (String(item.reason ?? "") === "importing") return "（文档正在导入中）";
+    if (isDuplicateSkip(item)) return "（与库内资料重复）";
+    return "";
   }
 
   function matchLabel(item) {

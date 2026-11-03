@@ -115,26 +115,55 @@ const STATUS_LABELS = {
   skipped: "跳过",
 };
 
+/** 解析后判重的跳过原因：同库/跨库重合，或旧版不完整。 */
+const DUPLICATE_SKIP_REASONS = new Set(["duplicate", "existing-full", "both-incomplete"]);
+
+export function isDuplicateSkip(item) {
+  const reason = String(item?.reason ?? "");
+  return DUPLICATE_SKIP_REASONS.has(reason) || /duplicate|重复/.test(reason);
+}
+
 /** 逐文件状态文案：上传阶段与解析阶段分开，不能把“已上传”说成“已完成”。 */
 export function fileStageLabel(item, phase = "") {
   const stage = String(item?.stage ?? "");
   if (stage === "parsing") return "解析中";
   if (stage === "parsed") return "已解析";
-  if (stage === "skipped") {
-    return item?.reason === "duplicate" || /duplicate|重复/.test(String(item?.reason ?? ""))
-      ? "重复跳过"
-      : "导入中跳过";
-  }
+  if (stage === "skipped") return isDuplicateSkip(item) ? "重复跳过" : "导入中跳过";
   if (stage === "failed") return "解析失败";
   const status = String(item?.status ?? "");
-  if (status === "skipped") {
-    return item?.reason === "duplicate" || /duplicate|重复/.test(String(item?.reason ?? ""))
-      ? "重复跳过"
-      : "导入中跳过";
-  }
+  if (status === "skipped") return isDuplicateSkip(item) ? "重复跳过" : "导入中跳过";
   if (status === "failed" && phase === "uploading") return "上传失败";
   if (status === "failed") return "解析失败";
   return statusLabel(status);
+}
+
+/**
+ * 本次结果里的跳过原因分布。job.result.files 是 worker 逐文件结果，
+ * 其中 reason=importing 表示同一 docId 另一次导入仍在进行，不能当成重复。
+ */
+export function skipBreakdown(result) {
+  const files = Array.isArray(result?.files) ? result.files : [];
+  const skipped = files.filter((item) => item && (item.status === "skipped" || item.stage === "skipped"));
+  const importing = skipped.filter((item) => String(item.reason ?? "") === "importing").length;
+  const duplicate = skipped.filter(isDuplicateSkip).length;
+  return {
+    total: skipped.length,
+    importing,
+    duplicate,
+    other: Math.max(0, skipped.length - importing - duplicate),
+  };
+}
+
+/** 「没有新资料」的原因文案：区分「全部重复」与「对应文档正在导入中」。 */
+export function emptyStateMessage(result) {
+  const breakdown = skipBreakdown(result);
+  if (breakdown.importing > 0 && breakdown.duplicate === 0) {
+    return "没有新资料：对应的文档正在导入中，未启动新的解析。请等当前导入完成后再试。";
+  }
+  if (breakdown.importing > 0) {
+    return `没有新资料：${breakdown.importing} 个文档正在导入中、${breakdown.duplicate} 个与库内/其它知识库重合，未启动新的解析。`;
+  }
+  return "没有新资料：全部与库内/其它知识库重合，未启动解析。";
 }
 
 /** 顶部阶段标题：明确“上传”与“解析”的边界。 */
@@ -145,7 +174,12 @@ export function uploadPhaseTitle(state = {}) {
   if (phase === "starting") return "文件已上传，正在启动解析…";
   if (phase === "importing") return `解析中${kb}`;
   if (phase === "done") return `解析完成${kb}`;
-  if (phase === "empty") return "没有新资料（全部重复）";
+  if (phase === "empty") {
+    const breakdown = skipBreakdown(state.job?.result);
+    if (breakdown.importing > 0 && breakdown.duplicate === 0) return "没有新资料（文件正在导入中）";
+    if (breakdown.importing > 0) return "没有新资料（部分文件正在导入中）";
+    return "没有新资料（全部重复）";
+  }
   if (phase === "error") {
     const files = Array.isArray(state.files) ? state.files : [];
     const uploadFailed = files.some((item) => item.status === "failed" && !item.stage);
