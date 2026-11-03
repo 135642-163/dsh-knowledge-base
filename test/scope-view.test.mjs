@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { chipLabel, DISABLED_PROMPT_TEXT, isAllSelection, scopePromptText, selectionPayload } from "../lib/scope-view.js";
 
 const DISABLED_LINE =
-  "[知识库范围] 本会话未启用知识库：不要调用 kb_* 工具，也不要检索知识库；用户需要时提示其在输入框旁的知识库选择器中选择库或「全部」。";
+  "[知识库范围] 本会话未启用知识库：不要检索或调用知识库相关工具（kb_read_file 只读本机文件，不受此限制）；用户需要知识库时提示其在输入框旁的知识库选择器中选择库或「全部」。";
 
 test("chipLabel covers all/selected/none/loading/failed", () => {
   assert.equal(chipLabel({ mode: "all", kbs: [] }), "知识库：全部");

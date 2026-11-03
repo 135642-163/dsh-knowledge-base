@@ -6,6 +6,7 @@ export function renderOverview(state, { icons, fmtNumber }) {
   const totalDocs = state.kbs.reduce((sum, kb) => sum + kb.docs.ready + kb.docs.importing + kb.docs.failed, 0);
   const totalNotes = state.kbs.reduce((sum, kb) => sum + kb.docs.notes, 0);
   const totalPages = state.kbs.reduce((sum, kb) => sum + (kb.pages ?? 0), 0);
+  const totalPagesText = totalPages > 0 ? compact(totalPages) : "—";
   const totalChars = state.kbs.reduce((sum, kb) => sum + (kb.chars ?? 0), 0);
   const empty = state.kbs.filter((kb) => kb.docs.total === 0 || (kb.docs.ready + kb.docs.importing + kb.docs.failed) === 0).length;
   return `
@@ -13,7 +14,7 @@ export function renderOverview(state, { icons, fmtNumber }) {
       <div class="overview-head">
         <div>
           <h1>知识库</h1>
-          <p class="muted">${fmtNumber(state.kbs.length)} 个库 · ${fmtNumber(totalDocs)} 篇有效文档 · ${fmtNumber(totalNotes)} 篇笔记 · ${compact(totalPages)} 页 · ${compact(totalChars)} 字</p>
+          <p class="muted">${fmtNumber(state.kbs.length)} 个库 · ${fmtNumber(totalDocs)} 篇有效文档 · ${fmtNumber(totalNotes)} 篇笔记 · ${totalPagesText} 页 · ${compact(totalChars)} 字</p>
           ${rootLine(state)}
         </div>
         <div class="head-actions">
@@ -84,7 +85,7 @@ function card(kb, { icons, fmtNumber }) {
       ${tagRow(kb.tags)}
       <div class="stats">
         <span><strong>${fmtNumber(live)}</strong> 篇</span>
-        <span><strong>${compact(kb.pages)}</strong> 页</span>
+        <span><strong>${Number(kb.pages) > 0 ? compact(kb.pages) : "—"}</strong> 页</span>
         <span><strong>${compact(kb.chars)}</strong> 字</span>
         <span><strong>${fmtNumber(kb.docs.notes)}</strong> 笔记</span>
       </div>

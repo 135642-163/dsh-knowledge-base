@@ -188,3 +188,21 @@ test("turnTail panel aggregates sources for the current turn", () => {
   assert.match(text, /GB\/T 1-2020/);
   assert.doesNotMatch(text, /GB\/T 2-2020/);
 });
+
+test("turnTail panel merges the same document hit at multiple pages", () => {
+  const { registrations } = createRuntime();
+  const panel = registrations.find((item) => item.declaration.name === "conversation.chat.turnTail");
+  const nodes = new Map([
+    ["a", { kind: "tool-call", location: { turn: { turn: 1 } }, data: { root: { meta: { sources: [
+      { kb: "标准", docId: "d1", title: "GB/T 1-2020", page: 2, deepLink: "/kb/?doc=d1&page=2" },
+      { kb: "标准", docId: "d1", title: "GB/T 1-2020", page: 5, deepLink: "/kb/?doc=d1&page=5" },
+    ] } } } }],
+    ["b", { kind: "tool-call", location: { turn: { turn: 1 } }, data: { root: { meta: { sources: [
+      { kb: "标准", docId: "d1", title: "GB/T 1-2020", page: 9, deepLink: "/kb/?doc=d1&page=9" },
+    ] } } } }],
+  ]);
+  const tree = panel.component({ turn: { turn: 1 }, useChat: (selector) => selector({ nodes }) });
+  const text = textOf(tree);
+  assert.match(text, /本轮来源（\s*1\s*）/);
+  assert.match(text, /第 2、5、9 页/);
+});

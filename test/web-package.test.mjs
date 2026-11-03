@@ -274,3 +274,54 @@ test("截断的 zip：400 + KBPACK_INVALID 原文（不再是 500 服务器内�
     await rm(kbRoot, { recursive: true, force: true });
   }
 });
+
+test("原生文件选择器路由：返回本机 .zip 路径与体积", async () => {
+  const { kbRoot, opts } = await setup();
+  try {
+    const pack = await makePack();
+    const packPath = join(kbRoot, "..", "选择包.zip");
+    await writeFile(packPath, pack);
+    const { res, json } = await call(
+      { ...opts, pickPackageFile: async () => ({ canceled: false, path: packPath }) },
+      makeReq({ method: "POST", url: "/kb/api/packages/pick-file" })
+    );
+    assert.equal(res.status, 200);
+    assert.equal(json.canceled, false);
+    assert.equal(json.path, packPath);
+    assert.equal(json.name, "选择包.zip");
+    assert.equal(json.size, pack.length);
+  } finally {
+    await rm(join(kbRoot, ".."), { recursive: true, force: true });
+  }
+});
+
+test("原生文件选择器路由：取消 / 非 zip / 选择器不可用", async () => {
+  const { kbRoot, opts } = await setup();
+  const root = join(kbRoot, "..");
+  try {
+    const canceled = await call(
+      { ...opts, pickPackageFile: async () => ({ canceled: true }) },
+      makeReq({ method: "POST", url: "/kb/api/packages/pick-file" })
+    );
+    assert.equal(canceled.res.status, 200);
+    assert.equal(canceled.json.canceled, true);
+
+    const txtPath = join(root, "不是包.txt");
+    await writeFile(txtPath, "x", "utf8");
+    const bad = await call(
+      { ...opts, pickPackageFile: async () => ({ canceled: false, path: txtPath }) },
+      makeReq({ method: "POST", url: "/kb/api/packages/pick-file" })
+    );
+    assert.equal(bad.res.status, 400);
+    assert.match(bad.json.error.message, /只支持 \.zip/);
+
+    const unavailable = await call(
+      { ...opts, pickPackageFile: async () => { throw new Error("no zenity"); } },
+      makeReq({ method: "POST", url: "/kb/api/packages/pick-file" })
+    );
+    assert.equal(unavailable.res.status, 501);
+    assert.match(unavailable.json.error.message, /无法打开本机文件选择器/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

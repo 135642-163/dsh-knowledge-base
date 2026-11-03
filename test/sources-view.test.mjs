@@ -3,7 +3,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { dedupeSources, sourceHref, sourceLabel } from "../ui/sources-view.js";
+import { dedupeSources, mergeSourcesByDoc, sourceHref, sourceLabel } from "../ui/sources-view.js";
 
 test("sourceHref 使用 deepLink 或按字段重建", () => {
   assert.equal(sourceHref({ deepLink: "/kb/?doc=d1", docId: "d1" }), "/kb/?doc=d1");
@@ -34,4 +34,19 @@ test("dedupeSources 按 kb/doc/page/clause 去重并截断", () => {
   assert.equal(list.length, 2);
   assert.equal(list[0].docId, "d1");
   assert.equal(list[1].page, 2);
+});
+
+test("mergeSourcesByDoc 同一资料只保留一张卡片并合并页/条款", () => {
+  const list = mergeSourcesByDoc([
+    { kb: "标准", docId: "d1", title: "GB/T 1-2020", page: 12, clause: "5.2.2", snippet: "电压偏差", keywords: ["电压"] },
+    { kb: "标准", docId: "d1", title: "GB/T 1-2020", page: 3, clause: "4.1", keywords: ["偏差"] },
+    { kb: "标准", docId: "d1", title: "GB/T 1-2020", page: 12, clause: "5.2.2" },
+    { kb: "标准", docId: "d2", title: "GB/T 2-2020", page: 8 },
+  ], 20);
+  assert.equal(list.length, 2);
+  assert.equal(list[0].docId, "d1");
+  assert.deepEqual(list[0].pages, [3, 12]);
+  assert.deepEqual(list[0].clauses.slice(0, 2), ["5.2.2", "4.1"]);
+  assert.deepEqual(list[0].keywords, ["电压", "偏差"]);
+  assert.equal(list[1].docId, "d2");
 });

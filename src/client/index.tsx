@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ComponentType } from "react";
 import { chipLabel, selectionPayload } from "../../lib/scope-view.js";
-import { dedupeSources, sourceHref, sourceLabel } from "../../ui/sources-view.js";
+import { mergeSourcesByDoc, sourceHref, sourceLabel } from "../../ui/sources-view.js";
 import type { KbSource } from "../../ui/sources-view.js";
 
 export const inject = ["slots"];
@@ -609,7 +609,8 @@ type TurnTailProps = {
 function sourcesOfBlock(block: ToolSourceRowProps["block"]): KbSource[] {
   const raw = block?.meta?.sources;
   if (!Array.isArray(raw)) return [];
-  return dedupeSources(raw as KbSource[], 20);
+  // 同一条工具调用里可能命中同一篇资料的多个页/条款；引用卡片按文档只出一次。
+  return mergeSourcesByDoc(raw as KbSource[], 20);
 }
 
 function sourcePreviewBase(source: KbSource) {
@@ -617,8 +618,26 @@ function sourcePreviewBase(source: KbSource) {
 }
 
 function sourcePageLabel(source: KbSource): string {
+  const pages = Array.isArray(source.pages) ? source.pages.filter((page) => Number.isInteger(page) && page > 0) : [];
+  if (pages.length > 1) return `第 ${pages.slice(0, 5).join("、")}${pages.length > 5 ? "…" : ""} 页`;
   const page = source.page;
-  return typeof page === "number" && Number.isInteger(page) && page > 0 ? `第 ${page} 页` : "";
+  if (typeof page !== "number" || !Number.isInteger(page) || page <= 0) return "";
+  if (typeof source.pageEnd === "number" && source.pageEnd > page) return `第 ${page}–${source.pageEnd} 页`;
+  return `第 ${page} 页`;
+}
+
+/** 引用卡片的定位信息：多页/多条款合并成一段，避免同一资料重复出卡。 */
+function sourceLocationParts(source: KbSource): string[] {
+  const parts: string[] = [];
+  const clauses = Array.isArray(source.clauses) && source.clauses.length > 0
+    ? source.clauses.filter(Boolean)
+    : (source.clause ? [source.clause] : []);
+  if (clauses.length === 1) parts.push(`第 ${clauses[0]} 条`);
+  else if (clauses.length > 1) parts.push(`第 ${clauses.slice(0, 5).join("、")}${clauses.length > 5 ? "…" : ""} 条`);
+  const pageLabel = sourcePageLabel(source);
+  if (pageLabel !== "") parts.push(pageLabel);
+  if (source.kb) parts.push(`来自 ${source.kb}`);
+  return parts;
 }
 
 async function sourcePreviewData(source: KbSource): Promise<{
@@ -690,11 +709,10 @@ function SourceLinks({ sources, limit = 12 }: { sources: KbSource[]; limit?: num
   return (
     <div className="dsh-kb-sources-list">
       {sources.slice(0, limit).map((source) => {
-        const page = source.page;
-        const parts = [source.clause ? `第 ${source.clause} 条` : "", typeof page === "number" && Number.isInteger(page) && page > 0 ? `第 ${page} 页` : "", source.kb ? `来自 ${source.kb}` : ""].filter(Boolean);
+        const parts = sourceLocationParts(source);
         return (
           <a
-            key={`${source.kb ?? ""}-${source.docId}-${source.page ?? ""}-${source.clause ?? ""}`}
+            key={`${source.kb ?? ""}-${source.docId}`}
             className="dsh-kb-source-link dsh-kb-source-card"
             href={sourceHref(source)}
             target="_blank"
@@ -832,7 +850,7 @@ function KbSourcesTurnPanel({ turn, matched, useChat }: TurnTailProps) {
       collectNodeSources(node.data?.root, collected);
     }
   }
-  const sources = dedupeSources(collected, 20);
+  const sources = mergeSourcesByDoc(collected, 20);
   if (sources.length === 0) return null;
   return (
     <section className="dsh-kb-sources-turn" aria-label="本轮来源">

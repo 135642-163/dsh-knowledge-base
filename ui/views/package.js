@@ -60,10 +60,15 @@ export function openPackageImportModal({ onFinished = () => {}, notify = () => {
   node.className = "overlay";
   node.innerHTML = `<div class="modal modal-wide" role="dialog" aria-modal="true"></div>`;
   document.body.appendChild(node);
+  // 与其它弹窗一致：点击遮罩空白处关闭；点击弹窗内部不关闭。
+  node.addEventListener("mousedown", (event) => {
+    if (event.target === node) close();
+  });
   const modal = node.querySelector(".modal");
 
   const state = {
     phase: "select",
+    picking: false,
     file: null,
     progress: 0,
     result: null,
@@ -118,6 +123,7 @@ export function openPackageImportModal({ onFinished = () => {}, notify = () => {
       <label class="field"><span>知识库包（.zip）</span>
         <input type="file" id="pkg-file" accept=".zip,application/zip" ${busy ? "disabled" : ""} />
       </label>
+      <input type="file" id="pkg-local-file" accept=".zip,application/zip" hidden />
       ${state.file ? `<p class="muted">已选择：${escapeHtml(state.file.name)}（${formatBytes(state.file.size)}）</p>` : ""}
       ${tooLarge ? `<p class="form-error">包体超过工作台内联上传上限 ${formatBytes(PACKAGE_INLINE_MAX_BYTES)}。请改用下面的「本机路径」导入（直接读这台机器上的 .zip，不经过上传）；或按库/分批导出后导入。</p>` : ""}
       ${busy ? `<div class="progress-line"><strong>处理中</strong> ${Math.round(state.progress * 100)}%</div>` : ""}
@@ -127,11 +133,16 @@ export function openPackageImportModal({ onFinished = () => {}, notify = () => {
         <button type="button" class="btn" data-close>取消</button>
       </div>
       <hr class="modal-sep" />
-      <label class="field"><span>或填本机 .zip 绝对路径 <span class="muted">（大于 1 GB 的包用这里：不经过上传，直接读本地文件）</span></span>
-        <input id="pkg-path" value="${escapeAttr(state.path)}" placeholder="E:\\knowledge\\标准-2026-11-02.zip" autocomplete="off" spellcheck="false" ${busy ? "disabled" : ""} />
+      <label class="field"><span>或选择本机 .zip <span class="muted">（大于 1 GB 的包用这里：不经过上传，直接读本地文件）</span></span>
+        <div class="path-picker-row">
+          <input id="pkg-path" value="${escapeAttr(state.path)}" placeholder="点「选择本机文件…」或直接填绝对路径" autocomplete="off" spellcheck="false" ${busy ? "disabled" : ""} />
+          <button type="button" class="btn" data-pick-path ${busy || state.picking ? "disabled" : ""}>${state.picking ? "等待选择…" : "选择本机 .zip…"}</button>
+        </div>
       </label>
+      ${state.picking ? `<p class="muted">已打开系统文件选择器，请在弹出的窗口中选择 .zip 知识库包。</p>` : ""}
       <div class="modal-actions">
-        <button type="button" class="btn" data-precheck-path ${busy ? "disabled" : ""}>按路径预检</button>
+        <button type="button" class="btn primary" data-precheck-path ${busy || state.picking ? "disabled" : ""}>按路径预检</button>
+        <button type="button" class="btn" data-close>取消</button>
       </div>
     </div>`;
   }
@@ -210,6 +221,22 @@ export function openPackageImportModal({ onFinished = () => {}, notify = () => {
     });
     modal.querySelector("[data-upload]")?.addEventListener("click", () => { void upload(); });
     modal.querySelector("#pkg-path")?.addEventListener("input", (event) => { state.path = event.target.value; });
+    modal.querySelector("#pkg-local-file")?.addEventListener("change", (event) => {
+      const file = event.target.files?.[0];
+      event.target.value = "";
+      if (!file) return;
+      const path = hostPathFor(file);
+      if (path !== "") {
+        state.path = path;
+        state.error = "";
+        render();
+        void precheckPath();
+        return;
+      }
+      // 桥存在但没拿到路径（少见的 Electron 配置）：回退到宿主原生选择器。
+      void pickLocalPackageOnHost();
+    });
+    modal.querySelector("[data-pick-path]")?.addEventListener("click", () => { void pickLocalPackage(); });
     modal.querySelector("[data-precheck-path]")?.addEventListener("click", () => { void precheckPath(); });
     modal.querySelectorAll("input[name='pkg-mode']").forEach((input) => input.addEventListener("change", () => {
       state.mode = input.value;
@@ -251,6 +278,54 @@ export function openPackageImportModal({ onFinished = () => {}, notify = () => {
     } catch (error) {
       state.phase = "select";
       state.error = errorText(error);
+      render();
+    }
+  }
+
+  /** 桌面壳的 pathFor(File) 能直接拿到本机绝对路径；普通浏览器没有这个桥。 */
+  function hostPathFor(file) {
+    try {
+      const path = window?.__DSH_HOST_PATHS__?.pathFor?.(file);
+      return typeof path === "string" ? path.trim() : "";
+    } catch {
+      return "";
+    }
+  }
+
+  async function pickLocalPackage() {
+    if (state.picking || state.phase === "uploading") return;
+    // Desktop：先用浏览器文件输入 + Electron 的 pathFor，拿到原生文件对话框与真实路径。
+    const localInput = modal.querySelector("#pkg-local-file");
+    if (localInput && typeof window !== "undefined" && typeof window.__DSH_HOST_PATHS__?.pathFor === "function") {
+      localInput.value = "";
+      localInput.click();
+      return;
+    }
+    await pickLocalPackageOnHost();
+  }
+
+  async function pickLocalPackageOnHost() {
+    if (state.picking || state.phase === "uploading") return;
+    state.picking = true;
+    state.error = "";
+    render();
+    try {
+      const result = await api.pickPackageFile();
+      if (state.closed) return;
+      if (!result || result.canceled === true) {
+        state.picking = false;
+        render();
+        return;
+      }
+      const path = String(result.path ?? "").trim();
+      if (path === "") throw new Error("没有取得文件路径");
+      state.path = path;
+      state.picking = false;
+      render();
+      await precheckPath();
+    } catch (error) {
+      state.picking = false;
+      state.error = `打开本机文件选择器失败：${errorText(error)}。也可以直接填写绝对路径。`;
       render();
     }
   }

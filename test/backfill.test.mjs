@@ -95,3 +95,32 @@ test("缺失原件时 sourceHash 计入 skipped", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("文件名没有标准号时，backfill 也按封面区取号（含 Q/HN 企业标准）", async () => {
+  const root = await mkdtemp(join(tmpdir(), "kb-backfill-cover-"));
+  const kbRoot = join(root, "kb");
+  const { dir } = await createKb(kbRoot, { name: "标准" });
+  try {
+    const body = "5.1 总则。\n".repeat(300);
+    await mkdir(join(dir, "markdown", "d2", "parts"), { recursive: true });
+    await writeFile(
+      join(dir, "markdown", "d2", "d2.md"),
+      `# 2015 - 火力发电厂电能质量技术监督标准\n\nQ/HN\n中国华能集团公司企业标准\nQ/HN-1-0000.08.021—2015\n火力发电厂电能质量监督标准\n2015-05-01 发布\n\n${body}`,
+      "utf8"
+    );
+    await writeFile(join(dir, "markdown", "d2", "parts", "0001.md"), `# 2015 - 火力发电厂电能质量技术监督标准\n\nQ/HN-1-0000.08.021—2015\n${body}`, "utf8");
+    const manifest = await readManifest(dir);
+    manifest.docs.push({
+      id: "d2", title: "2015 - 火力发电厂电能质量技术监督标准", sourceFile: "2015 - 火力发电厂电能质量技术监督标准.pdf",
+      type: "pdf-scanned", status: "ready", version: 1, chars: body.length, parts: 1, trust: "medium", summarySource: "auto",
+    });
+    await writeFile(join(dir, "kb.json"), JSON.stringify(manifest, null, 2), "utf8");
+
+    const plan = await planBackfill(dir, { std: true, content: true });
+    assert.equal(plan.changes.length, 1);
+    assert.equal(plan.changes[0].patch.standardNo, "Q/HN 1-0000.08.021-2015");
+    assert.equal(plan.changes[0].patch.standardSource, "content");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

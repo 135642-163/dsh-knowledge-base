@@ -227,6 +227,14 @@ function tabLink(name, tab, label, active) {
   return `<a class="tab ${active === tab ? "active" : ""}" href="${hrefForKb(name, tab)}">${label}</a>`;
 }
 
+/** 非 PDF/OFD 格式没有固定页码：内部 pages=0，界面显示「—」而不是误导性的 0。 */
+function pageCountText(value, fmtNumber) {
+  const pages = Number(value);
+  return Number.isFinite(pages) && pages > 0
+    ? fmtNumber(pages)
+    : `<span title="该格式没有固定页码（PDF/OFD 才按页）">—</span>`;
+}
+
 function overview(kb, detail, { fmtNumber }) {
   const live = kb.docs.ready + kb.docs.importing + kb.docs.failed;
   return `
@@ -235,7 +243,7 @@ function overview(kb, detail, { fmtNumber }) {
         <h3>概况</h3>
         <div class="kv"><span>有效文档</span><strong>${fmtNumber(live)}</strong></div>
         <div class="kv"><span>笔记</span><strong>${fmtNumber(kb.docs.notes)}</strong></div>
-        <div class="kv"><span>页数</span><strong>${fmtNumber(kb.pages)}</strong></div>
+        <div class="kv"><span>页数</span><strong>${pageCountText(kb.pages, fmtNumber)}</strong></div>
         <div class="kv"><span>字数</span><strong>${fmtNumber(kb.chars)}</strong></div>
         <div class="kv"><span>软删除</span><strong>${fmtNumber(kb.docs.deleted)}</strong></div>
         <div class="kv"><span>更新时间</span><strong>${formatDate(kb.updatedAt)}</strong></div>
@@ -353,7 +361,7 @@ function docs(kb, state, { fmtNumber, icons }) {
         <table class="table docs-table">
           <thead><tr>
             <th class="col-check"><input type="checkbox" data-action="docs-select-all" aria-label="选择本页可操作资料"${selectionAllSelected(selected, items) ? " checked" : ""}${selectableCount === 0 ? " disabled" : ""} /></th>
-            <th>标题</th><th>类型</th><th>页数</th><th>可信度</th><th>更新</th><th class="col-actions">操作</th>
+            <th>标题</th><th>类型</th><th title="PDF/OFD 才有固定页码；其他格式显示 —">页数</th><th>可信度</th><th>更新</th><th class="col-actions">操作</th>
           </tr></thead>
           <tbody>
             ${items.map((doc) => {
@@ -371,7 +379,7 @@ function docs(kb, state, { fmtNumber, icons }) {
                   ${renderDocTags(doc, tag)}
                 </td>
                 <td class="muted">${escapeHtml(doc.type ?? "")}</td>
-                <td class="muted">${fmtNumber(doc.pages)}</td>
+                <td class="muted">${pageCountText(doc.pages, fmtNumber)}</td>
                 <td class="muted">${trustSelect(doc, name)}</td>
                 <td class="muted">${formatDate(doc.updatedAt)}</td>
                 <td class="col-actions">${actions.map((action) => docActionButton(doc, action, { busy, retrying: isRetrying })).join("")}</td>

@@ -90,3 +90,16 @@ test("different stages/years/parts are not duplicates", () => {
   assert.equal(result.counts.sameNumberStageGroups, 1);
   assert.equal(result.counts.sameNumberMultiYearGroups, 1);
 });
+
+test("standard-number-missing 报告标题像标准但没有标准号的文档", () => {
+  const result = report([
+    doc({ id: "a", title: "2024 - 高压直流工程换流变压器技术规范", standardNo: "", trust: "medium" }),
+    doc({ id: "b", title: "关于召开电能质量标准会议的通知", standardNo: "" }),
+    doc({ id: "d", title: "电力系统的电压波动和闪变：第2讲 电压波动和闪变的标准", standardNo: "" }),
+    doc({ id: "c", title: "GB/T 1-2020 标准", standardNo: "GB/T 1-2020" }),
+  ]);
+  const g = group(result, "standard-number-missing");
+  assert.ok(g);
+  assert.equal(g.count, 1);
+  assert.equal(g.items[0].docId, "a");
+});

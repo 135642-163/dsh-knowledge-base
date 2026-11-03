@@ -5,6 +5,8 @@ export interface KbSource {
   page?: number;
   clause?: string;
   pageEnd?: number;
+  pages?: number[];
+  clauses?: string[];
   keywords?: string[];
   snippet?: string;
   deepLink?: string;
@@ -12,3 +14,4 @@ export interface KbSource {
 export function sourceHref(source: KbSource): string;
 export function sourceLabel(source: KbSource): string;
 export function dedupeSources(sources: KbSource[], max?: number): KbSource[];
+export function mergeSourcesByDoc(sources: KbSource[], max?: number): KbSource[];

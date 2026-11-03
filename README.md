@@ -8,18 +8,19 @@
 
 | 工具 | 作用 |
 | --- | --- |
-| `kb_import` | 导入文件或目录（.docx / .doc 自动转换 / .pptx / .xlsx / .xlsm / .pdf / .ofd / .md / .txt / .epub / .mobi / .azw3，扫描版 PDF 与图片型 OFD 自动逐页 OCR 中文，自动识别文字层损坏页并只对问题页 OCR，文字层只剩水印/无文字层的图片页也会自动补 OCR，文字层双栏页自动重排；Word OMML 公式转 LaTeX；Excel 按工作表转 Markdown 表格；.txt 自动识别 UTF-8/UTF-16/GBK；MOBI/AZW3 自动经 Calibre 转 EPUB）。旧版 .doc/.ppt 与 MOBI/AZW3 一律在后台任务中转换；正在导入中的同名文档自动跳过。**导入前自动查重**：同库重合跳过、跨库重合默认跳过并报告；同库同标准号不同年份/阶段（多版本）默认暂停并提示，加 `allowSameNumber: true` 确认后仍可入库（见下文）；标准/书籍正文/封面优先，其他资料只用文件名；扫描页 OCR 前默认做水印净化（`watermark=auto/off/strong`）；`path` 是 kbpack 包（.zip）时自动路由到 `kb_import_package` |
+| `kb_import` | **只在用户明确要求把资料收进知识库时使用**；只是读取/查看本机文件请用 `kb_read_file`（只读、不入库、不建库）。导入文件或目录（.docx / .doc 自动转换 / .pptx / .xlsx / .xlsm / .pdf / .ofd / .md / .txt / .epub / .mobi / .azw3，扫描版 PDF 与图片型 OFD 自动逐页 OCR 中文，自动识别文字层损坏页并只对问题页 OCR，文字层只剩水印/无文字层的图片页也会自动补 OCR，文字层双栏页自动重排；Word OMML 公式转 LaTeX；Excel 按工作表转 Markdown 表格；.txt 自动识别 UTF-8/UTF-16/GBK；MOBI/AZW3 自动经 Calibre 转 EPUB）。旧版 .doc/.ppt 与 MOBI/AZW3 一律在后台任务中转换；正在导入中的同名文档自动跳过。**导入前自动查重**：同库重合跳过、跨库重合默认跳过并报告；同库同标准号不同年份/阶段（多版本）默认暂停并提示，加 `allowSameNumber: true` 确认后仍可入库（见下文）；标准/书籍正文/封面优先（文件名没有标准号时按封面区取号，通知/附件不参与），其他资料只用文件名；扫描页 OCR 前默认做水印净化（`watermark=auto/off/strong`）；`path` 是 kbpack 包（.zip）时自动路由到 `kb_import_package` |
 | `kb_import_package` | 导入 kbpack 知识库包（`kb_export format=zip` 产出的 `.zip`，带 `manifest.json`）：安全校验（坏包/路径穿越/符号链接/版本过高拒绝）、同 id 相同内容幂等跳过、同 id 不同内容另存新 id、同标准号不同 id 走导入查重；同名库**不静默写入**，返回 `merge` / `rename` / `replace` 三选一（replace 需 `confirm:"replace"`），`dryRun=true` 只预演；包内 `*Source=manual` 字段不覆盖目标库人工值 |
 | `kb_reparse` | 从库内 `sources/` 重新解析文档（无需重新上传），用于 OCR/解析器升级后刷新旧管线产物；`doc` 单个、`all=true` 批量，支持 `forceOcr`、`forceOcrPages`/`skipOcrPages`、后台任务 |
 | `kb_list` | 列出知识库 / 知识库内文档与状态（旧管线/已修订/文字层损坏/OCR 低置信会标注），每条带一行摘要与标签；省略 `kb` 时只列本会话范围内的库；默认最多 50 条，支持 `limit/offset/query/status/kind` 分页过滤（`kind=note` 只看笔记、`kind=source` 只看资料）；本库有维护规范时会提示 |
-| `kb_query` | 全文检索（纯文本优先 FTS5/BM25 条款索引，正则/索引不可用时回退 ripgrep；中文短语直接搜；标准号自动兼容 GBT=GB/T=GB_T=GB∕T 与年份分隔符变体）；按标题/标题行/命中密度/更新时间排序，每文档默认 5 条；`kb="*"` 跨库检索；限定模式下省略 `kb` 检索范围内全部库；命中项带 part、页码、条款与笔记类型；返回结构化 `sources`（含深链）供界面引用 |
+| `kb_query` | 全文检索（纯文本优先 FTS5/BM25 条款索引，正则/索引不可用时回退 ripgrep；中文短语直接搜；标准号自动兼容 GBT=GB/T=GB_T=GB∕T 与年份分隔符变体）；按标题/标题行/命中密度/更新时间排序，每文档默认 5 条；`kb="*"` 跨库检索；限定模式下省略 `kb` 检索范围内全部库；命中项带 part、页码、条款与笔记类型；**中文提问会按内置中英术语表补充英文检索**（英文提问同理补中文），英文文献也能命中；返回结构化 `sources`（含深链）供界面引用 |
 | `kb_read` | 按分块精读、读大纲、读整篇；大纲条目带页码/部分，读取时返回页码范围与结构化 `sources`；支持虚拟页 `doc="schema"`（维护规范）、`doc="index"`（内容索引）、`doc="log"`（操作日志），按 part 分页读取 |
+| `kb_read_file` | **只读**读取本机文件（不导入、不建库、不写盘）：docx/doc/pptx/ppt/xlsx/pdf/ofd/epub/mobi/azw3/md/txt；PDF/OFD 扫描页按需 OCR，`pages`/`maxChars` 控制范围；返回临时文本，不是知识库文档 |
 | `kb_view` | 查看原始页面图片（PDF 按页渲染；Word/PPT/EPUB/MOBI/OFD 提取内嵌图；OFD 无版式渲染引擎，只能看内嵌图片）——公式、原理图、电路图专用 |
 | `kb_edit` | 精确替换修订（持续修改完善）；`doc="schema"` 可修订该库维护规范（index/log 自动维护，不能编辑） |
 | `kb_describe` | 给文档写一行摘要与标签（编目）：摘要会显示在 `kb_list` 与 `index.md`，并作为摘要行进入 FTS 索引（只在摘要里的词也能被 `kb_query` 命中），重解析/重导入不会覆盖模型写的摘要；存量文档可 `all=true` + `auto=true` 批量回填缺失摘要（抽取式，不递增版本号，`limit` 分批） |
 | `kb_retitle` | 修正标题：单篇传 `doc`（默认按 `cleanTitle` 去掉站点域名、`GB_T`、序号、span 残留等噪声），批量传 `all=true`（默认 `dryRun=true` 只预览，确认后 `dryRun=false` 应用）；加 `standardPrefix=true` 把有标准号的资料统一成「标准号 + 名称」；会重建合并版首行标题、保留历史、版本+1 |
 | `kb_trust` | 标注来源可信度：`high`（已发布现行标准、正式教材）/ `medium`（企业文件、培训资料、报批稿）/ `low`（草案、征求意见稿、已废止标准）/ `unknown`（清除）；支持单篇、`docs` 列表、`all=true` + `query`/`stage` 过滤（批量默认 dryRun）。检索会优先高可信、标注低可信并提醒用户 |
-| `kb_lint` | 机械体检：导入失败、旧管线、文字层损坏/OCR 低置信、内容重复、同标准号同期同阶段重复、同号多版本、正文完整性/文件名与封面不一致、未编目、笔记无来源、续/修订版提示、无入链笔记、临时/锁文件（`~$*`、`.~lock.*`、`Thumbs.db`/`desktop.ini`/`.DS_Store`）、缺 schema；输出分组问题与建议动作（`kb_reparse`/`kb_describe`/`kb_remove`/`kb_edit`）；限定模式下省略 `kb` 逐库体检 |
+| `kb_lint` | 机械体检：导入失败、旧管线、文字层损坏/OCR 低置信、内容重复、同标准号同期同阶段重复、同号多版本、正文完整性/文件名与封面不一致、标题像标准但没解析出标准号、未编目、笔记无来源、续/修订版提示、无入链笔记、临时/锁文件（`~$*`、`.~lock.*`、`Thumbs.db`/`desktop.ini`/`.DS_Store`）、缺 schema；输出分组问题与建议动作（`kb_reparse`/`kb_describe`/`kb_remove`/`kb_edit`）；限定模式下省略 `kb` 逐库体检 |
 | `kb_edit_batch` | 批量精确修订（事务语义）：一次提交 1–50 条 `{doc, old_string, new_string, replaceAll?}`，**先全部校验再写入**；任一条失败整批不改并回滚已写分块；`dryRun=true` 只校验。适合“一次改 10–15 页”的跨文档维护；同一文档一批只允许一条编辑 |
 | `kb_snapshot` | 库级快照：把 `kb.json`、`schema/index/log`、派生 `markdown/`（可选 `sources/`）打包到知识库 `snapshots/`，用于批量编辑/重解析前留档；`list=true` 列出已有快照 |
 | `kb_snapshot_restore` | 从快照恢复：`list=true` 列快照，`snapshot`/`latest` 选择；默认 `dryRun=true` 只预演新增/移除/变更篇数，`dryRun=false` 才写入；恢复前自动留 `before-restore` 快照，`prune=true` 时快照外文档的 markdown/sources 移到 `trash-restore/`；重建索引与 FTS 并写 log |
@@ -92,7 +93,9 @@ exports/                   导出产物
   「已跳过 N 个临时/锁文件」；普通 `.tmp` 文件不跳过。
 
 概览页/库详情页「导入知识库包」：选择 `.zip` 上传后先预检（同名库返回 merge/rename/replace 三选一），
-确认后后台导入；「导出知识库」支持正文包 / 完整包 / Markdown，后台生成后在弹窗内下载。
+确认后后台导入；大包可点「选择本机文件…」调用宿主原生文件对话框，直接取本机 `.zip` 绝对路径
+（不经过 HTTP 上传，也不需要手输路径；宿主无法打开原生对话框时仍可手输路径）；
+「导出知识库」支持正文包 / 完整包 / Markdown，后台生成后在弹窗内下载。
 
 「标准更新」面板（库详情 tab）：读取 `.std-check.json` 的上次检查时间、缓存有效期（TTL 7 天）
 与待下载数（有新版 / 草案转正 / 可补下载）；支持仅检查 / 检查并下载 / 补下载 / 强制全查 / 本轮上限，运行中可取消（当前正在处理的标准完成后停止，之后不再发起新的下载）；新增「按标准号补下载」：输入编号先检索并校验站点确认页（防串档）与金币，确认后再下载并导入；
@@ -325,6 +328,15 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
 
 测试 **1309**（1305 通过、4 跳过）。详见 `docs/reports/2026-11-01-0.35.0.md`。
 
+## 0.40.0 引用去重、读取/导入分离与中英跨语言检索（2026-11-03）
+
+- **引用资料按文档去重**：同一篇资料在一条回答里命中多个页/条款时，聊天末尾的「本轮来源」与工具行来源卡片只保留一张；卡片展示合并后的「第 N、M 页 / 条款」，点击跳第一条命中位置。
+- **读取 ≠ 导入**：新增只读工具 `kb_read_file`（`readOnly: true`，不建库、不写盘），用于用户只想读取/分析本机文件；`kb_import` 与系统提示明确要求仅在用户明确同意入库时使用，避免读取本地资料时自动建库。
+- **中英跨语言检索**：`kb_query` 对中文提问自动用内置中英术语表补充英文检索（英文提问同理补中文），影子检索只落在另一语言的文档上；术语表覆盖电力系统、电能质量、电磁兼容与标准文本常用词，长尾术语由 agent 翻译后补查。
+- **工作台知识库包导入**：新增「选择本机文件…」按钮，调用宿主原生文件选择器直接取得本机 `.zip` 绝对路径（macOS `osascript` / Windows PowerShell 文件对话框 / Linux `zenity`→`kdialog` 回退）；大包不经过 HTTP 上传，也不需要手输路径；宿主无法打开对话框时保留手输路径兜底。
+- **页数显示**：Word/Excel/EPUB/TXT 等没有固定页码的格式，资料列表与详情显示「—」而不是误导性的 `0`；PDF/OFD 仍显示实际页数。
+- 新增回归：`bilingual.test.mjs`、`kb-read-file.test.mjs`、`bilingual-search.test.mjs`、`file-picker.test.mjs`。
+
 ## 0.38.0 数据目录可配置（2026-11-02）
 
 - **工作台「数据目录」**：侧栏新增入口，查看当前知识库根目录（kbRoot）、填写新目录或恢复默认；
@@ -339,6 +351,46 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
   避免测试读到本机保存的目录。
 - 测试 **1362**（1358 通过、4 跳过）；`npm run typecheck` 通过；E2E 16 passed / 1 skipped
   （新增「数据目录」用例）。
+
+## 0.39.2 标准号只认文件名的缺口修复（2026-11-03）
+
+「标准」库里一批 Zotero 导入的资料标题只有名称（如「2015 - 火力发电厂电能质量技术监督标准」
+「110～750kV 架空输电线路设计技术规定」），标准号、标题前缀、可信度、摘要全都不对。根因有三层：
+
+- **正文/封面解析被文件名卡住**：`standardEligible` 只在文件名已含标准号（或 epub/mobi）时才读
+  正文，`2015 - 火力发电厂电能质量技术监督标准.pdf` 这类「年份 - 名称」文件即使封面印着
+  `Q/HN-1-0000.08.021—2015`、`Q/GDW 10179—2017` 也永远拿不到编号。现在改为
+  `shouldParseContentStandard()`：文件名有号、标题像标准（通知/纪要/附件除外）、或封面出现
+  「中华人民共和国国家标准 / 企业标准 / 团体标准」横幅时解析，并且**只认封面区**（第一处
+  前言/目次/规范性引用文件之前），避免把「规范性引用文件」表里的 GB/DL 号当成本文件的号。
+  `lib/backfill.js` 同步；`scripts/backfill-doc-meta.mjs --content` 对旧库同样生效。
+- **标题清洗漏了目录噪声**：`cleanTitle` 新增剥离 `(已作废)` 状态括注、`2015 - ` 年份前缀、
+  `08-` 序号前缀、`GBT+40600-2021` 加号写法、末尾 `（GB/Z 17624.8-2025）` 括注编号
+  （书名号标题除外）；`Q/HN` 等 `Q/XXX` 企业标准编号可解析（`Q/HN 1-0000.08.021-2015`）。
+- **体检看不出来**：`kb_lint` 新增「标题像标准，但没解析出标准号」分组；`metadata-missing`
+  只报「标题能解析出号但清单没存」，正是这批资料被漏掉的原因。
+- **空白页假低置信**：扫描件空白页经 OCR 常只剩页脚水印（如「SIC」），tesseract 给分很低，
+  会被误报「OCR 低置信」。新增 `looksLikeBlankOcrText()`：OCR 文本很短且去掉水印/页码/标点/数字后
+  不剩文字时按空白页处理（正文写「（本页无文字内容）」、不计置信度、不再进低置信告警）；
+  PDF 与 OFD 两条 OCR 质量统计同步。
+- **拉丁-1 乱码文字层**：部分 PDF 字体编码整体错位，文字层看起来「有字」实为
+  `Ð ª Ë ñ ² Í ÷ µ` 之类拉丁-1 字符，旧判据只认 U+FFFD/私用区/拉丁→CJK，会把它当正常文字、
+  不再 OCR（重解析后正文反而变乱码）。`textLayerQuality()` 新增 `latin1Mojibake` 判据：
+  页内无汉字且拉丁-1 补充区字符多于正常英文字母时判损坏并转 OCR；法语/德语正常页不会误判。
+
+配套工具：`scripts/apply-doc-identity.mjs --data <核对表.json> [--apply]` 按人工核对表一次性
+修正标题/标准号/可信度/摘要（每篇快照历史、重建 H1、版本 +1、刷新 index/log）。本次据此修复
+「标准」库 24 篇（Q/GDW 10179、Q/GDW 11669.1、GB/T 51381、GB/T 51397、GB 50255、GB 2894、
+GB/T 4208、GB/T 9704、GB/T 1094.101、GB/T 44659.1、GB/T 37010、GB/T 24808、GB/Z 17624.8、
+GB/Z 44118.1、GB/T 40600、GB/T 20137、T/CSEE 0280、T/CET 410、NB/T 11785、Q/HN 1-0000.08.021、
+GB 10229 及 3 篇征求意见稿的分档），并修正一篇把 `GB/T 51397` 误写成 `GB/T 51381` 的文件名误差。
+清理 `08-电能质量…`、`00 PWI …` 等标题噪声 2 篇。另修复重解析试点发现的两个回归：
+**拉丁-1 乱码文字层**（无汉字且拉丁-1 字符多于英文字母 → 判损坏转 OCR）与
+**正文完整性误判**（首页即正文的标准不再把前两页当封面丢弃，`GB/T 14549-1993` 恢复 full）。
+测试 **1431**（1427 通过、4 跳过；新增封面取号、通知不误判、回填、体检、标题清洗、
+空白页/拉丁-1 乱码/完整性用例）。逐篇核对表与遗留项见
+`docs/reports/2026-11-03-standard-identity-gap-fix.md`；`GB/T 42737-2023 电化学储能电站调试规程`
+第 3 页（空白页）已按新口径重解析，低置信告警清零。
 
 ## 0.39.1 Windows 启动与迁移修复（2026-11-03）
 

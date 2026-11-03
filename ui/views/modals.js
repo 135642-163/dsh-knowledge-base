@@ -603,7 +603,7 @@ export function renderDocModalBody({ name, id, doc } = {}) {
       ${importing ? `<p class="muted">文档正在导入，解析完成后才能编辑摘要/标签。</p>` : ""}
       <div class="kv"><span>ID</span><strong>${escapeHtml(doc?.id ?? id ?? "")}</strong></div>
       <div class="kv"><span>类型</span><strong>${escapeHtml(doc?.type ?? "")}</strong></div>
-      <div class="kv"><span>页数 / 字数</span><strong>${doc?.pages ?? 0} / ${doc?.chars ?? 0}</strong></div>
+      <div class="kv"><span>页数 / 字数</span><strong>${Number(doc?.pages) > 0 ? doc.pages : "—"} / ${doc?.chars ?? 0}</strong></div>
       ${editable
         ? `<div class="kv"><span>可信度</span><select name="doc-trust" aria-label="可信度">${DOC_TRUST_LEVELS.map((level) => `<option value="${level}"${(doc?.trust ?? "unknown") === level ? " selected" : ""}>${escapeHtml(trustLevelLabel(level))}</option>`).join("")}</select></div>`
         : `<div class="kv"><span>可信度</span><strong>${escapeHtml(doc?.trust ?? "unknown")}</strong></div>`}

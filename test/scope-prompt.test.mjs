@@ -80,10 +80,7 @@ test("none mode injects exactly the disabled line, not selected/all lines", asyn
     scopes: { s1: { mode: "none", kbs: [], updatedAt: new Date().toISOString() } },
   });
   const text = await textFor(section, "s1");
-  assert.equal(
-    text,
-    "[知识库范围] 本会话未启用知识库：不要调用 kb_* 工具，也不要检索知识库；用户需要时提示其在输入框旁的知识库选择器中选择库或「全部」。"
-  );
+  assert.equal(text, DISABLED_PROMPT_TEXT);
   assert.equal(text, DISABLED_PROMPT_TEXT);
   assert.doesNotMatch(text, /本会话用户选定/);
   assert.doesNotMatch(text, /全部知识库/);

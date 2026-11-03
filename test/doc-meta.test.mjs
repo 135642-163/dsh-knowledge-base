@@ -12,12 +12,14 @@ import {
   parseCoverTitle,
   parseDocMeta,
   safeRetitle,
+  shouldParseContentStandard,
   stageKeyOf,
   stageScanText,
   textFingerprint,
   titleKey,
   trustHeuristic,
 } from "../lib/doc-meta.js";
+import { cleanTitle } from "../lib/titles.js";
 
 test("parseDocMeta 解析 DL/T587—2025+ 并规范化标题", () => {
   const meta = parseDocMeta(
@@ -307,4 +309,67 @@ test("parseContentStandard 从封面补齐名称（中文/分部分）", () => {
   );
   assert.equal(dl.standardNo, "DL/Z 860.1-2018");
   assert.equal(dl.contentTitle, "电力自动化通信网络和系统 第1部分:概论");
+});
+
+test("shouldParseContentStandard 不再只看文件名：标题像标准/封面有横幅才解析", () => {
+  assert.equal(shouldParseContentStandard({ kind: "xlsx", title: "GB/T 1-2020 标准" }), false);
+  assert.equal(shouldParseContentStandard({ kind: "pdf", filenameStandardNo: "GB/T 1-2020" }), true);
+  assert.equal(
+    shouldParseContentStandard({ kind: "pdf", title: "2024 - 高压直流工程换流变压器技术规范 第1部分：通用技术要求" }),
+    true
+  );
+  assert.equal(
+    shouldParseContentStandard({ kind: "pdf", title: "关于召开电能质量标准会议的通知", rawTitle: "会议通知" }),
+    false
+  );
+  assert.equal(
+    shouldParseContentStandard({ kind: "pdf", title: "2025 - 安全色和安全标志", previewText: "ICS 01.080\n中华人民共和国国家标准\nGB 2894—2025" }),
+    true
+  );
+});
+
+test("parseContentStandard coverOnly 只认封面，且要求标准发布横幅", () => {
+  const cover = [
+    "Q/GDW 10179—2017",
+    "110～750kV 架空输电线路设计技术规定",
+    "国家电网公司企业标准",
+    "2018-02-12 发布",
+  ].join("\n");
+  const r = parseContentStandard(cover, { coverOnly: true });
+  assert.equal(r?.standardNo, "Q/GDW 10179-2017");
+
+  // 通知类正文引用 GB 号，但封面没有标准横幅 → 不能当成本文件的标准号
+  const notice = "关于执行电能质量标准的通知\n现将 GB/T 12325-2008 转发给你们，请遵照执行。";
+  assert.equal(parseContentStandard(notice, { coverOnly: true }), null);
+
+  // 封面区没有编号，正文「规范性引用文件」里的 GB 不算
+  const refOnly = [
+    "电能质量全过程技术监督精益化管理实施细则",
+    "1 规划可研阶段",
+    "1 范围",
+    "2 规范性引用文件",
+    "DL/T 1344-2014 电能质量技术监督导则",
+  ].join("\n");
+  assert.equal(parseContentStandard(refOnly, { coverOnly: true }), null);
+});
+
+test("企业标准 Q/HN 编号与年份可解析", () => {
+  const ref = parseDocMeta("Q/HN-1-0000.08.021—2015 火力发电厂电能质量监督标准", "x");
+  assert.equal(ref.standardPrefix, "Q/HN");
+  assert.equal(ref.standardYear, 2015);
+  assert.match(ref.standardNo, /^Q\/HN /);
+  assert.match(ref.canonicalTitle, /^Q\/HN .* 火力发电厂电能质量监督标准$/);
+});
+
+test("cleanTitle 剥掉年份前缀/作废标记，并去掉末尾括注标准号", () => {
+  assert.equal(cleanTitle("2015 - 火力发电厂电能质量技术监督标准"), "火力发电厂电能质量技术监督标准");
+  assert.equal(cleanTitle("(已作废)GB 10229-88 电抗器"), "GB 10229-88 电抗器");
+  assert.equal(cleanTitle("2015-2020 年供电电压提升计划"), "2015-2020 年供电电压提升计划");
+  assert.equal(
+    cleanTitle("电磁兼容 综述 第8部分：公用电网谐波电流发射与电压相角 未来预期 (GB/Z 17624.8-2025)"),
+    "电磁兼容 综述 第8部分：公用电网谐波电流发射与电压相角 未来预期"
+  );
+  // 书名号标题的括注编号是唯一的标准号来源，不能剥掉
+  assert.equal(cleanTitle("《电能质量 公用电网谐波》（GB/T 14549-1993）"), "《电能质量 公用电网谐波》（GB/T 14549-1993）");
+  assert.equal(cleanTitle("GBT+40600-2021风电场功率控制系统调度功能技术要求"), "GB/T 40600-2021风电场功率控制系统调度功能技术要求");
 });

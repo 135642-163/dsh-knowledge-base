@@ -144,7 +144,7 @@ test("表格列和行保持原样并显示条目区间", () => {
     offset: 50,
     limit: 50,
   });
-  assert.match(html, /<th>标题<\/th><th>类型<\/th><th>页数<\/th><th>可信度<\/th><th>更新<\/th>/);
+  assert.match(html, /<th>标题<\/th><th>类型<\/th><th title="PDF\/OFD 才有固定页码；其他格式显示 —">页数<\/th><th>可信度<\/th><th>更新<\/th>/);
   assert.match(html, /data-action="open-doc" data-kb="标准" data-id="d1"/);
   assert.match(html, /data-action="open-doc" data-kb="标准" data-id="d2"/);
   assert.match(html, /<td class="muted">pdf-text<\/td>/);
@@ -366,4 +366,20 @@ test("库详情页提供导入/导出入口，资料行可信度可内联修改"
   assert.match(html, /<option value="high" selected>高<\/option>/);
   const deleted = render({ items: [makeDoc("d1", { status: "deleted", deleted: true })], total: 1 });
   assert.doesNotMatch(deleted, /data-action="docs-trust"/);
+});
+
+test("非分页格式的页数显示为 —，不再显示误导性的 0", () => {
+  const html = render({
+    items: [
+      makeDoc("xlsx1", { title: "台账.xlsx", type: "xlsx", pages: 0 }),
+      makeDoc("docx1", { title: "通知.docx", type: "docx", pages: 0 }),
+      makeDoc("pdf1", { title: "标准.pdf", type: "pdf-text", pages: 8 }),
+    ],
+    total: 3,
+    offset: 0,
+    limit: 50,
+  });
+  assert.match(html, /台账\.xlsx[\s\S]*?<td class="muted"><span title="该格式没有固定页码（PDF\/OFD 才按页）">—<\/span><\/td>/);
+  assert.match(html, /通知\.docx[\s\S]*?<td class="muted"><span title="该格式没有固定页码（PDF\/OFD 才按页）">—<\/span><\/td>/);
+  assert.match(html, /标准\.pdf[\s\S]*?<td class="muted">8<\/td>/);
 });

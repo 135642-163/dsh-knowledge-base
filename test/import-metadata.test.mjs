@@ -187,3 +187,63 @@ test("full new file replaces a cover-only duplicate instead of being skipped", a
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("文件名没有标准号时，从封面取号并统一标题（Zotero「年份 - 名称」）", async () => {
+  const root = await mkdtemp(join(tmpdir(), "kb-import-cover-"));
+  try {
+    const kbDir = join(root, "kb");
+    const body = "5.1 总则。\n".repeat(200);
+    const src = join(root, "2024 - 高压直流工程换流变压器技术规范.txt");
+    await writeFile(
+      src,
+      [
+        "ICS 29.240.10",
+        "国家电网有限公司企业标准",
+        "Q/GDW 11669.1—2024",
+        "高压直流工程换流变压器技术规范",
+        "2024-12-31 发布",
+        "1 范围",
+        body,
+      ].join("\n"),
+      "utf8"
+    );
+    const first = await importFileInto(kbDir, {
+      sourcePath: src, relKey: "2024 - 高压直流工程换流变压器技术规范.txt",
+      title: "2024 - 高压直流工程换流变压器技术规范", config: CONFIG,
+    });
+    const manifest = await readManifest(kbDir);
+    const doc = manifest.docs.find((item) => item.id === first.docId);
+    assert.equal(doc.standardNo, "Q/GDW 11669.1-2024");
+    assert.equal(doc.standardSource, "content");
+    assert.equal(doc.title, "Q/GDW 11669.1-2024 高压直流工程换流变压器技术规范");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("通知类资料引用 GB 号时不会被当成本文件的标准号（封面无横幅不解析）", async () => {
+  const root = await mkdtemp(join(tmpdir(), "kb-import-notice-"));
+  try {
+    const kbDir = join(root, "kb");
+    const src = join(root, "关于召开电能质量标准会议的通知.txt");
+    await writeFile(
+      src,
+      [
+        "关于召开电能质量标准会议的通知",
+        "现将 GB/T 12325-2008 电能质量 供电电压偏差转发给你们，请遵照执行。",
+        "5.1 正文。",
+      ].join("\n") + "\n" + "5.1 正文。\n".repeat(100),
+      "utf8"
+    );
+    const first = await importFileInto(kbDir, {
+      sourcePath: src, relKey: "关于召开电能质量标准会议的通知.txt",
+      title: "关于召开电能质量标准会议的通知", config: CONFIG,
+    });
+    const manifest = await readManifest(kbDir);
+    const doc = manifest.docs.find((item) => item.id === first.docId);
+    assert.equal(doc.standardNo, "");
+    assert.equal(doc.standardSource, "none");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

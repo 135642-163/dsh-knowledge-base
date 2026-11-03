@@ -84,3 +84,10 @@ test("已删除/导入中弹窗不渲染编辑器", () => {
   assert.doesNotMatch(importing, /name="doc-summary"/);
   assert.match(importing, /解析完成后才能编辑/);
 });
+
+test("非分页格式详情页页数显示 —", () => {
+  const html = renderDocModalBody({ name: "标准", id: "d2", doc: {
+    title: "台账.xlsx", type: "xlsx", pages: 0, chars: 120, trust: "unknown",
+  }});
+  assert.match(html, /页数 \/ 字数<\/span><strong>— \/ 120<\/strong>/);
+});

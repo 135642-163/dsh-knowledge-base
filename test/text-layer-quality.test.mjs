@@ -4,7 +4,14 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { INK_RATIO_THRESHOLD, formatPageList, shouldOcrPage, templateTextPages, textLayerQuality } from "../lib/parsers.js";
+import {
+  INK_RATIO_THRESHOLD,
+  formatPageList,
+  looksLikeBlankOcrText,
+  shouldOcrPage,
+  templateTextPages,
+  textLayerQuality,
+} from "../lib/parsers.js";
 
 test("normal Chinese text is not corrupted", () => {
   const q = textLayerQuality("电能质量 供电电压偏差 第5.2.2条");
@@ -117,4 +124,31 @@ test("墨迹复核过的页（inkedPages）即使文字层够长也要 OCR", () 
     false
   );
   assert.ok(INK_RATIO_THRESHOLD > 0 && INK_RATIO_THRESHOLD < 0.05);
+});
+
+test("looksLikeBlankOcrText: 空白页只剩水印/页码时不报低置信", () => {
+  assert.equal(looksLikeBlankOcrText(""), true);
+  assert.equal(looksLikeBlankOcrText("SIC"), true);
+  assert.equal(looksLikeBlankOcrText("  5 \n"), true);
+  assert.equal(looksLikeBlankOcrText("第 3 页"), true);
+  assert.equal(looksLikeBlankOcrText("www.get17.cn"), true);
+  assert.equal(looksLikeBlankOcrText("扫描件"), true);
+  // 真正的短页/正文不能被当成空白
+  assert.equal(looksLikeBlankOcrText("3.1 总则"), false);
+  assert.equal(looksLikeBlankOcrText("本标准适用于 10kV 配电系统。"), false);
+  assert.equal(looksLikeBlankOcrText("© 2020 中国电力出版社"), false);
+});
+
+test("textLayerQuality: 拉丁-1 乱码页（Ð ª Ë ² ÷）判为损坏，法语/中文正常页不误判", () => {
+  const mojibake = "Ð ª Ë ñ ² Í À Ð µ ê ¼ ç ø ¯ ú À ³ ¨ ç ¹ û ä Ê Æ ã õ þ Í ½ ¨ ¾ ê ¼ æ ¨ Ë ç ø ¯ ú À ë ç ¦ µ ³ « ² ¬ Ó ã ç ¹ û ä Ê Ä Æ ã õ þ Í ½ ¨ ¾ ê ¼ ç ø ¯ ú À ë ç ¦ µ ³ « ² ¬ Ó ã ç ¹ û ä Ê Ä Æ ã õ þ Í ½ ¨ ¾ ê ¼".repeat(2);
+  const q = textLayerQuality(mojibake);
+  assert.equal(q.latin1Mojibake, true);
+  assert.equal(q.bad, true);
+
+  const french = "Aucune partie de cette publication ne peut être reproduite ni utilisée sous quelque forme que ce soit et par aucun procédé, électronique ou mécanique, y compris la photocopie et les microfilms, sans l'accord écrit de l'éditeur.";
+  assert.equal(textLayerQuality(french).latin1Mojibake, false);
+  assert.equal(textLayerQuality(french).bad, false);
+
+  const chinese = "本标准适用于 10kV 配电系统，电压偏差 ±7%，频率偏差 ±0.2Hz。".repeat(4);
+  assert.equal(textLayerQuality(chinese).bad, false);
 });

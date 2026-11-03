@@ -841,14 +841,14 @@ test("kb_rename: requires explicit kb and rejects out-of-scope targets", async (
   assert.equal(renamed.kb, "甲库2");
 });
 
-test("none mode disables all 23 kb_* tools with KB_DISABLED", async () => {
+test("none mode disables KB-scoped kb_* tools (local read-only tool stays)", async () => {
   const { tools, scoped, importDoc, none, root } = await setup();
   const doc = await importDoc("a.md", "# 甲\n\n继电保护技术条件正文。\n", "甲库", "甲文档");
   await importDoc("b.md", "# 乙\n\n乙库正文。\n", "乙库", "乙文档");
   const path = join(root, "locked.md");
   await writeFile(path, "# 锁定\n\n未启用时不应导入。\n", "utf8");
   await none("s1");
-  assert.equal(tools.size, 23, "expected the full kb_* tool matrix");
+  assert.equal(tools.size, 24, "expected the full kb_* tool matrix");
 
   const cases = [
     ["kb_list", {}],
@@ -875,8 +875,11 @@ test("none mode disables all 23 kb_* tools with KB_DISABLED", async () => {
     ["kb_rename", {}],
     ["kb_std_check", { action: "check" }],
   ];
-  const covered = new Set(cases.map(([name]) => name));
+  // kb_read_file 是只读本机文件工具，不依赖知识库范围，不受 KB_DISABLED 影响。
+  const covered = new Set([...cases.map(([name]) => name), "kb_read_file"]);
   assert.deepEqual([...tools.keys()].filter((name) => !covered.has(name)), [], "tool matrix case missing");
+  const localRead = await tools.get("kb_read_file").execute({ path }, scoped("s1"));
+  assert.match(localRead.text, /未启用时不应导入/);
   for (const [name, args] of cases) {
     await assert.rejects(
       () => tools.get(name).execute(args, scoped("s1")),
