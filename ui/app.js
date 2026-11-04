@@ -1,5 +1,6 @@
 import { api, ApiError } from "./api.js";
 import { colorFor } from "./colors.js";
+import { visibleKbs } from "./kb-visibility.js";
 import { icons } from "./icons.js";
 import { hrefForKb, hrefForOverview, hrefForSearch, hrefForTrash, parseHash } from "./router.js";
 import { renderOverview } from "./views/overview.js";
@@ -96,14 +97,6 @@ function route() {
 }
 
 /** 侧栏可见库：自动创建的空 default 库不展示；一旦有内容（含归档文档/笔记）就正常显示。 */
-function visibleKbs(all) {
-  return (Array.isArray(all) ? all : []).filter((kb) => {
-    if (kb.name !== "default") return true;
-    const d = kb.docs ?? {};
-    return (d.ready ?? 0) + (d.importing ?? 0) + (d.failed ?? 0) + (d.deleted ?? 0) + (d.notes ?? 0) > 0;
-  });
-}
-
 async function loadKbs() {
   state.loading = true;
   state.error = "";

@@ -95,7 +95,8 @@ exports/                   导出产物
 概览页/库详情页「导入知识库包」：选择 `.zip` 上传后先预检（同名库返回 merge/rename/replace 三选一），
 确认后后台导入；大包可点「选择本机文件…」调用宿主原生文件对话框，直接取本机 `.zip` 绝对路径
 （不经过 HTTP 上传，也不需要手输路径；宿主无法打开原生对话框时仍可手输路径）；
-「导出知识库」支持正文包 / 完整包 / Markdown，后台生成后在弹窗内下载。
+「导出知识库」支持正文包 / 完整包 / Markdown，后台生成后在弹窗内下载；下载有百分比与
+已下载/总大小进度（大文件由浏览器原生下载接管时会明确提示）。
 
 「标准更新」面板（库详情 tab）：读取 `.std-check.json` 的上次检查时间、缓存有效期（TTL 7 天）
 与待下载数（有新版 / 草案转正 / 可补下载）；支持仅检查 / 检查并下载 / 补下载 / 强制全查 / 本轮上限，运行中可取消（当前正在处理的标准完成后停止，之后不再发起新的下载）；新增「按标准号补下载」：输入编号先检索并校验站点确认页（防串档）与金币，确认后再下载并导入；
@@ -327,6 +328,51 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
 - **bzCookie 安全存储（2026-11-01）**：macOS Keychain / Linux Secret Service / Windows DPAPI；旧 profile 明文首次启动自动迁移，`scripts/set-bz-cookie.mjs` 设置/查看/清除；Web 与日志不回传 Cookie。
 
 测试 **1309**（1305 通过、4 跳过）。详见 `docs/reports/2026-11-01-0.35.0.md`。
+
+## 0.41.1 旧版 Office 预览修复与导出下载进度（2026-11-04）
+
+- **旧版 .doc/.xls/.ppt 预览修复**：网页下载的旧 Office 文件常见两类「Word 能打开、转换引擎拒绝」：
+  下载被截断（OLE 复合文档末尾少几十到几百字节，报 `invalid or truncated compound-file header`）、
+  以及把 `.docx` 直接改名成 `.doc`（内容是 zip，却按 OLE 解析）。预览前现在会自动生成一份临时副本：
+  尾部补零到扇区边界、按 zip 目录换成正确的 `.docx/.xlsx/.pptx` 扩展名，再交给 LibreOfficeKit；
+  **原件不改动**，转换结束删除副本，缓存键仍按原件的 mtime+size。本机 8 份失败文件（公文 2、标准 4、
+  电能质量 1、变电试验 1）全部恢复预览。
+- **预览失败不再是一片空白**：`preview.pdf` 在 `Accept: text/html`（iframe）下返回可读的错误页，
+  带错误码、原因提示与「下载原件」入口；API/JSON 调用方仍收到原来的 `PREVIEW_FAILED`。
+  超时单独映射 `PREVIEW_TIMEOUT`，转换引擎失败把错误码与 stderr 尾部写进宿主日志（不回传浏览器）。
+- **导出包下载进度条**：导出完成后点「下载文件」不再直接 `<a download>`：
+  - 小文件（≤384 MB）用 `fetch` + ReadableStream 边读边报进度，完成后保存；
+  - 大文件且宿主支持 File System Access（Chromium/Electron）时先选保存位置，响应流直接写盘，
+    不占内存；
+  - 大文件且不支持时退回浏览器原生下载，并明确提示「已交给浏览器下载」而不伪造进度。
+  下载中显示百分比与已下载/总大小，完成显示「下载完成」，失败可重试。
+- **取消上传/导入/导出的残留收敛**：取消包上传会中止 XHR 并删除临时包（新增
+  `DELETE /packages/:id`，导入任务运行中时拒绝）；工作台导出改为先写 `exports/.tmp-*`
+  再原子改名，导出失败/进程中断不会留下可下载的半截包，下轮导出清理超过 24h 的临时文件。
+- 新增回归：`web-preview.test.mjs` 4 个（补零 / 改扩展名 / 真实转换入参 / 错误页）、
+  `download-progress.test.mjs` 5 个（进度口径、流式读取、小文件、大文件写盘、原生下载回退）、
+  `web-package.test.mjs` 1 个（取消后删除临时包）、`web-export.test.mjs` 原子改名断言、
+  `ui-kb-visibility.test.mjs` 4 个（空 default / 范围收敛）与 `update-check.test.mjs` 5 个
+  （版本比较 / 兼容范围 / 网络失败 / 报告）。
+- 测试 **1465**（1461 通过、4 跳过）；`npm run typecheck` 与客户端 bundle 检查通过。
+- **空 default 不再出现在会话范围选择器**：工作台早已隐藏空 `default` 库，但输入框旁的选择器
+  仍从 `/kbs` 原样列出。现在两处共用 `ui/kb-visibility.js`：空 `default` 隐藏，其它空库保留，
+  `default` 一旦有资料/笔记/回收站内容就恢复显示；范围选择器的「全选/应用」也不会再带入它。
+- **新增 `scripts/update-check.mjs`**：检查本机 DSH（macOS 读 App Info.plist，其它平台回退
+  `dsh --version`，可用 `--dsh-version` 覆盖）、npm `@deepseek-ai/dsh` 的 latest/next、GitHub `main`
+  上插件的版本与 `peerDependencies` 范围；需要动作时退出码 10 并弹 macOS 通知。报告写到
+  `docs/reports/update-check-YYYYMMDD.md`，支持 `--json` / `--no-report` / `--no-notify`。
+  推荐在 DSH 自动化里每周执行：
+  `node scripts/update-check.mjs --reports-dir ~/.dsh/reports`，提示词只要求它在有动作时汇报。
+- **两个定时任务放哪里**：调度放 DSH 自动化 / 系统计划任务，插件只提供被调用的工具与脚本，
+  不要在插件里 `setInterval`（插件随宿主加载卸载、退出后不跑，多会话还可能重复）。
+  - 标准检查：DSH 自动化里定时调用 `kb_std_check`（默认已带 7 天增量缓存、限速与金币保护）；
+    需要 DSH 不开也跑时，用系统计划任务执行 `scripts/std-check-daily.mjs`
+    （macOS 模板 `scripts/com.dsh.kb-std-check.plist.example`，Windows 用「任务计划程序」）。
+  - DSH/插件升级检查：必须放在宿主之外（自动化/脚本），因为要判断的正是宿主版本；
+    插件进程无法在宿主升级后继续运行。建议每周执行一次：`dsh --version`、
+    `npm view @deepseek-ai/dsh dist-tags --json`，再对照插件 `package.json` 的
+    `version` 与 `peerDependencies` 范围；越界时先跑 `npm test` 回归再升级。
 
 ## 0.41.0 弹窗支持拖边框调大小（2026-11-03）
 
@@ -1227,7 +1273,8 @@ C1 = 关键词 OR 输入 + 旧排序。报告见 `docs/specs/2026-10-27-retrieva
   - PDF 内联 `source?inline=1`；图片（png / jpg / jpeg / webp / gif）直接内嵌；
   - txt / md 走 `/content` 读取全文（超过 2 MB 截断并提示）；
   - Office（doc / docx / odt / xls / xlsx / ods / ppt / pptx / odp）先由 **LibreOfficeKit** 转成 PDF，
-    再内联 `preview.pdf`：首次转换需要几秒（弹窗内有提示），之后命中缓存；
+    再内联 `preview.pdf`：首次转换需要几秒（弹窗内有提示），之后命中缓存；旧版 `.doc/.xls/.ppt`
+    若尾部截断或实际是改名成 `.doc` 的 `.docx`，会先复制并补零/改正扩展名再转换（原件不动）；
   - 笔记走 `/content` 的合并版 markdown，按纯文本预览；
   - 其它格式（epub、压缩包等）提示「该格式暂不支持内嵌预览」并给「下载原件」。
 - **引擎可选**：装好后自动探测（`officeKitCli` → `DSH_OFFICE_KIT_CLI` → `~/.dsh/tools/libreoffice-kit`

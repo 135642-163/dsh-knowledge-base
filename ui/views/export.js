@@ -3,24 +3,12 @@
  * 后端后台生成，前端轮询 job；完成后给下载链接。
  */
 import { api, ApiError } from "../api.js";
+import { downloadExportFile, formatBytes, progressPercent, progressText } from "../download-progress.js";
 
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
   }[char]));
-}
-
-function formatBytes(bytes) {
-  const size = Number(bytes);
-  if (!Number.isFinite(size) || size <= 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB"];
-  let value = size;
-  let index = 0;
-  while (value >= 1024 && index < units.length - 1) {
-    value /= 1024;
-    index += 1;
-  }
-  return `${value >= 10 || index === 0 ? Math.round(value) : value.toFixed(1)} ${units[index]}`;
 }
 
 function errorText(error) {
@@ -73,6 +61,7 @@ export function openExportModal({ name, docIds = null, notify = () => {}, onFini
     note: "",
     timer: null,
     closed: false,
+    download: { status: "idle", loaded: 0, total: 0, error: "" },
   };
 
   function close() {
@@ -145,15 +134,86 @@ export function openExportModal({ name, docIds = null, notify = () => {}, onFini
         <div class="modal-actions"><button type="button" class="btn" data-close>关闭</button></div>
       </div>`;
     }
-    const href = result.url ? api.exportUrl(name, result.fileName) : "#";
+    const download = state.download;
+    const busy = download.status === "downloading";
+    const percent = progressPercent(download.loaded, download.total);
+    const bar = download.status === "downloading"
+      ? `<div class="download-track" role="progressbar" aria-valuemin="0" aria-valuemax="100"${percent === null ? "" : ` aria-valuenow="${percent}"`}>
+          <div class="download-bar" data-download-bar style="width:${percent ?? 0}%"></div>
+        </div>
+        <p class="muted download-text" data-download-text>${escapeHtml(progressText(download.loaded, download.total))}</p>`
+      : "";
+    const hint = download.status === "done"
+      ? "下载完成，已保存到本机。"
+      : download.status === "delegated"
+        ? "文件较大，已交给浏览器原生下载；进度请查看浏览器下载栏（保存位置由浏览器决定）。"
+        : download.status === "error"
+          ? "可以重试下载；若持续失败，请检查网络或改用 kb_export 导出。"
+          : download.status === "downloading"
+            ? "正在下载到本机，期间请勿关闭页面。"
+            : "文件会保存到你选择的位置或浏览器下载目录。";
+    const errorLine = download.status === "error"
+      ? `<p class="form-error">${escapeHtml(download.error)}</p>`
+      : "";
+    const label = busy ? "正在下载…" : download.status === "done" ? "重新下载" : download.status === "error" ? "重试下载" : "下载文件";
     return `<div class="modal-form">
       <h2>导出完成</h2>
       <p>${escapeHtml(result.docs ?? 0)} 篇 · ${formatBytes(result.bytes)} · ${escapeHtml(result.fileName ?? "")}</p>
+      ${bar}
+      ${errorLine}
+      <p class="muted download-hint">${escapeHtml(hint)}</p>
       <div class="modal-actions">
-        <a class="btn primary" href="${escapeHtml(href)}" download>下载文件</a>
+        <button type="button" class="btn primary" data-download ${busy ? "disabled" : ""}>${escapeHtml(label)}</button>
         <button type="button" class="btn" data-close>关闭</button>
       </div>
     </div>`;
+  }
+
+  /** 只更新进度条与文案，避免每收到一个 chunk 就重绘整个弹窗。 */
+  function paintDownloadProgress() {
+    if (state.closed) return;
+    const download = state.download;
+    const percent = progressPercent(download.loaded, download.total);
+    const bar = modal.querySelector("[data-download-bar]");
+    const text = modal.querySelector("[data-download-text]");
+    if (bar) bar.style.width = `${percent ?? 0}%`;
+    if (text) text.textContent = progressText(download.loaded, download.total);
+  }
+
+  async function startDownload() {
+    if (state.closed || state.download.status === "downloading") return;
+    const result = state.job?.result ?? {};
+    if (!result.fileName) return;
+    const url = api.exportUrl(name, result.fileName);
+    state.download = {
+      status: "downloading",
+      loaded: 0,
+      total: Number(result.bytes) || 0,
+      error: "",
+    };
+    render();
+    try {
+      const outcome = await downloadExportFile({
+        url,
+        fileName: result.fileName,
+        totalBytes: state.download.total,
+        onProgress: ({ loaded, total }) => {
+          state.download.loaded = loaded;
+          if (total > 0) state.download.total = total;
+          paintDownloadProgress();
+        },
+      });
+      if (state.closed) return;
+      if (outcome.mode === "canceled") state.download = { status: "idle", loaded: 0, total: 0, error: "" };
+      else if (outcome.mode === "browser") state.download.status = "delegated";
+      else state.download.status = "done";
+      render();
+    } catch (error) {
+      if (state.closed) return;
+      state.download.status = "error";
+      state.download.error = errorText(error);
+      render();
+    }
   }
 
   function bind() {
@@ -168,6 +228,7 @@ export function openExportModal({ name, docIds = null, notify = () => {}, onFini
       state.note = event.target.value;
     });
     modal.querySelector("[data-start]")?.addEventListener("click", () => { void start(); });
+    modal.querySelector("[data-download]")?.addEventListener("click", () => { void startDownload(); });
   }
 
   async function start() {

@@ -119,6 +119,25 @@ test("上传 kbpack：预检返回计数，文件落在 .package-uploads", async
   }
 });
 
+test("取消导入：DELETE 删掉尚未导入的临时包与元数据", async () => {
+  const { kbRoot, opts } = await setup();
+  try {
+    const pack = await makePack();
+    const { json } = await upload(opts, pack);
+    const dir = join(kbRoot, ".package-uploads");
+    assert.ok((await readdir(dir)).includes(`${json.uploadId}.zip`));
+    const { res } = await call(opts, makeReq({
+      method: "DELETE",
+      url: `/kb/api/packages/${json.uploadId}`,
+    }));
+    assert.equal(res.status, 200);
+    assert.equal(existsSync(join(dir, `${json.uploadId}.zip`)), false);
+    assert.equal(existsSync(join(dir, `${json.uploadId}.json`)), false);
+  } finally {
+    await rm(kbRoot, { recursive: true, force: true });
+  }
+});
+
 test("同名库：预检返回三选一且不写入", async () => {
   const { kbRoot, opts } = await setup({ kbs: ["标准"] });
   try {

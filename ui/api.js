@@ -248,6 +248,8 @@ export const api = {
   uploadFile,
   uploadPackage,
   importPackage: (uploadId, body) => request("POST", `/packages/${encodeURIComponent(uploadId)}/import`, body),
+  /** 取消「导入知识库包」：删掉尚未导入的临时 .zip（导入已开始时后端会拒绝）。 */
+  deletePackage: (uploadId) => request("DELETE", `/packages/${encodeURIComponent(uploadId)}`),
   /** 原生文件选择器：返回本机 .zip 绝对路径（大包不经过上传）。 */
   pickPackageFile: () => request("POST", "/packages/pick-file"),
   /** 本机路径导入（>1 GB 的包不经过上传）。 */

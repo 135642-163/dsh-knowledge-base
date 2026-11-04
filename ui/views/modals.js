@@ -296,7 +296,7 @@ export function renderPreviewBody({ kind, urls = {}, content, loadingText, page 
     const src = escapeAttr(withPageFragment(urls.pdf ?? "", pageNo));
     const loading = `<p class="muted preview-loading">${escapeHtml(loadingText ?? "正在转换原件，首次可能需要几秒…")}</p>`;
     const pageNote = pageNo ? `<p class="muted preview-page">已定位到第 ${pageNo} 页</p>` : "";
-    return `${pageNote}${loading}<iframe class="preview-frame" src="${src}" title="原件预览"></iframe><p class="muted preview-hint">若这里一直空白，说明这台电脑无法转换该旧版/损坏的 Office 文件，请点「下载原件」查看。</p>`;
+    return `${pageNote}${loading}<iframe class="preview-frame" src="${src}" title="原件预览"></iframe><p class="muted preview-hint">插件会自动修复旧版 Office 常见的尾部缺失与扩展名不符；若这里显示「原件预览转换失败」，请点「下载原件」查看。</p>`;
   }
   if (kind === "image") {
     return `<img class="preview-image" src="${escapeAttr(urls.inline ?? "")}" alt="原件预览" />`;

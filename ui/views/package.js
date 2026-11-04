@@ -83,12 +83,20 @@ export function openPackageImportModal({ onFinished = () => {}, notify = () => {
     error: "",
     timer: null,
     closed: false,
+    abort: null,
   };
 
   function close() {
     if (state.closed) return;
     state.closed = true;
     if (state.timer) clearTimeout(state.timer);
+    // 上传中的 XHR 立即中止：服务端 readRawToFile 会删掉写了一半的 .part / 临时包。
+    state.abort?.abort();
+    // 包已上传完但还没点「开始导入」：删掉临时 .zip，避免在 .package-uploads 留到 24h 清扫。
+    // 已启动导入任务（jobId 存在）时不能删：后台任务仍在读这个包，成功后由服务端清理。
+    if (state.source?.kind === "upload" && !state.jobId) {
+      api.deletePackage(state.source.uploadId).catch(() => {});
+    }
     document.removeEventListener("keydown", onKeydown);
     node.remove();
     onFinished();
@@ -258,8 +266,10 @@ export function openPackageImportModal({ onFinished = () => {}, notify = () => {
     state.progress = 0;
     state.error = "";
     render();
+    state.abort = new AbortController();
     try {
       const result = await api.uploadPackage(state.file, {
+        signal: state.abort.signal,
         onProgress: (value) => {
           state.progress = value;
           if (state.phase === "uploading" && state.closed === false) {
@@ -268,6 +278,13 @@ export function openPackageImportModal({ onFinished = () => {}, notify = () => {
           }
         },
       });
+      state.abort = null;
+      // 上传完成与用户点关闭撞车：弹窗已关就没法再走「导入/取消」，
+      // 这里直接把临时包删掉，避免留到 24h 清扫。
+      if (state.closed) {
+        api.deletePackage(result.uploadId).catch(() => {});
+        return;
+      }
       state.result = result;
       state.source = { kind: "upload", uploadId: result.uploadId };
       state.mode = "merge";
@@ -276,6 +293,8 @@ export function openPackageImportModal({ onFinished = () => {}, notify = () => {
       state.phase = "choose";
       render();
     } catch (error) {
+      state.abort = null;
+      if (state.closed) return;
       state.phase = "select";
       state.error = errorText(error);
       render();

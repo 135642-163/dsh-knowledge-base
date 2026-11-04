@@ -19,6 +19,8 @@ import {
   inlineTypeFor,
   isOffice,
   officePreviewCachePath,
+  prepareOfficeInput,
+  renderPreviewErrorPage,
   resetPreviewInFlight,
   resolveOfficeCli,
 } from "../lib/web/preview.js";
@@ -443,6 +445,93 @@ test("concurrent preview requests share one in-flight conversion", async () => {
 });
 
 // ---------------------------------------------------------------------------
+// 旧版 Office 兼容：尾部截断补零、docx 改名成 .doc
+// ---------------------------------------------------------------------------
+
+function fakeCfb(size = 700) {
+  const buffer = Buffer.alloc(size);
+  Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]).copy(buffer, 0);
+  buffer.writeUInt16LE(3, 26); // version 3
+  buffer.writeUInt16LE(0xfffe, 28); // byte order
+  buffer.writeUInt16LE(9, 30); // 512-byte sectors
+  buffer.writeUInt16LE(6, 32); // mini sector 64
+  return buffer;
+}
+
+test("prepareOfficeInput zero-pads truncated legacy .doc without touching the original", async () => {
+  const root = await mkdtemp(join(tmpdir(), "kb-preview-pad-"));
+  const previewDir = join(root, ".preview");
+  await mkdir(previewDir, { recursive: true });
+  const source = join(root, "truncated.doc");
+  const bytes = fakeCfb(700);
+  await writeFile(source, bytes);
+
+  const prepared = await prepareOfficeInput({ sourcePath: source, previewDir, docId: "d1" });
+  assert.equal(prepared.repaired, "zero-padding");
+  assert.notEqual(prepared.inputPath, source);
+  const padded = await readFile(prepared.inputPath);
+  assert.equal(padded.length, 1024);
+  assert.equal(padded.subarray(0, 700).equals(bytes), true);
+  assert.equal((await stat(source)).size, 700);
+  await prepared.cleanup();
+  assert.equal(existsSync(prepared.inputPath), false);
+});
+
+test("prepareOfficeInput rewrites a .doc that is actually a .docx", async () => {
+  const { default: JSZip } = await import("jszip");
+  const root = await mkdtemp(join(tmpdir(), "kb-preview-ooxml-"));
+  const previewDir = join(root, ".preview");
+  await mkdir(previewDir, { recursive: true });
+  const source = join(root, "renamed.doc");
+  const zip = new JSZip();
+  zip.file("word/document.xml", "<w:document/>");
+  await writeFile(source, await zip.generateAsync({ type: "nodebuffer" }));
+
+  const prepared = await prepareOfficeInput({ sourcePath: source, previewDir, docId: "d2" });
+  assert.equal(prepared.repaired, "ooxml-extension");
+  assert.equal(prepared.inputPath.endsWith(".docx"), true);
+  await prepared.cleanup();
+  assert.equal(existsSync(prepared.inputPath), false);
+});
+
+test("getOrCreateOfficePreview converts the repaired copy and cleans it up", async () => {
+  resetPreviewInFlight();
+  const root = await mkdtemp(join(tmpdir(), "kb-preview-convert-pad-"));
+  const kbDir = join(root, "kb");
+  const source = join(root, "truncated.doc");
+  await writeFile(source, fakeCfb(700));
+  let seen = "";
+  const expected = officePreviewCachePath(kbDir, "d3", await stat(source));
+  const output = await getOrCreateOfficePreview({
+    kbDir,
+    docId: "d3",
+    sourcePath: source,
+    cliPath: "fake",
+    convert: async ({ input, output: target }) => {
+      seen = input;
+      await writeFile(target, "%PDF-1.7\nrepaired\n", "utf8");
+    },
+  });
+  assert.equal(output, expected);
+  assert.notEqual(seen, source);
+  assert.equal(await stat(seen).catch(() => null), null);
+  assert.deepEqual((await readdir(join(kbDir, ".preview"))).filter((name) => name.startsWith(".tmp-")), []);
+});
+
+test("renderPreviewErrorPage is an HTML fallback with a download link, not JSON", () => {
+  const html = renderPreviewErrorPage({
+    title: "某标准",
+    code: "PREVIEW_CONVERT_FAILED",
+    downloadUrl: "source",
+  });
+  assert.match(html, /^<!doctype html>/);
+  assert.match(html, /下载原件/);
+  assert.match(html, /PREVIEW_CONVERT_FAILED/);
+  assert.match(html, /href="source"/);
+  assert.doesNotMatch(html, /<script/i);
+});
+
+// ---------------------------------------------------------------------------
 // API：原件内联 / 拒绝不安全类型
 // ---------------------------------------------------------------------------
 
@@ -619,6 +708,33 @@ test("GET preview.pdf maps converter failures to a generic 500 without paths", a
 // ---------------------------------------------------------------------------
 // API：笔记 / 文本内容
 // ---------------------------------------------------------------------------
+
+test("GET preview.pdf renders an HTML error page for iframe failures", async () => {
+  resetPreviewInFlight();
+  const { kbRoot } = await setup();
+  const { res, text } = await quietly(() => call(
+    {
+      kbRoot,
+      previewEngine: {
+        cliPath: "/injected/cli.js",
+        convert: async () => {
+          throw new Error("conversion exploded");
+        },
+      },
+    },
+    makeReq({
+      url: apiUrl("/docs/docxdoc/preview.pdf"),
+      headers: { accept: "text/html,application/xhtml+xml" },
+    })
+  ));
+  // iframe 里不能再出现一片空白/JSON：200 + 可读错误页 + 下载入口。
+  assert.equal(res.status, 200);
+  assert.match(String(res.headers["content-type"]), /text\/html/);
+  assert.equal(res.headers["x-kb-preview-error"], "1");
+  assert.match(text, /原件预览转换失败/);
+  assert.match(text, /href="source"/);
+  assert.doesNotMatch(text, /conversion exploded/);
+});
 
 test("GET content returns the merged markdown for notes", async () => {
   const { kbRoot } = await setup();

@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import type { ComponentType } from "react";
 import { chipLabel, selectionPayload } from "../../lib/scope-view.js";
 import { mergeSourcesByDoc, sourceHref, sourceLabel } from "../../ui/sources-view.js";
+import { normalizeScope, visibleKbs } from "../../ui/kb-visibility.js";
 import { mountResize } from "../../ui/resizable.js";
 import type { KbSource } from "../../ui/sources-view.js";
 
@@ -284,9 +285,10 @@ export function KbScopeCapsule({ sessionId }: ScopeSlotProps) {
         getJson<{ scope: Scope }>(`/scope?session=${encodeURIComponent(sid)}`),
         getJson<{ kbs: KbSummary[] }>("/kbs"),
       ]);
+      const kbs = visibleKbs(kbsResponse.kbs ?? []).filter((kb) => kb.mergedInto == null);
       return {
-        scope: scopeResponse.scope,
-        kbs: (kbsResponse.kbs ?? []).filter((kb) => kb.mergedInto == null),
+        scope: normalizeScope(scopeResponse.scope, kbs),
+        kbs,
       };
     })();
     inflightRef.current = { sessionId: sid, promise };

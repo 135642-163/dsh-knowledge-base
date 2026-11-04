@@ -3,7 +3,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Writable } from "node:stream";
@@ -97,6 +97,11 @@ test("导出 zip：后台任务、文件落 exports，下载路由可读", async
     assert.match(job.result.url, /\/exports\//);
     const file = await readFile(join(dir, "exports", job.result.fileName));
     assert.ok(file.length > 0);
+    // 导出先写 .tmp-* 再原子改名：成功路径不应留下临时文件。
+    assert.deepEqual(
+      (await readdir(join(dir, "exports"))).filter((name) => name.startsWith(".tmp-")),
+      []
+    );
     const download = await call(opts, makeReq({ method: "GET", url: job.result.url }));
     assert.equal(download.res.status, 200);
     assert.match(download.res.headers["content-disposition"], /attachment/);
