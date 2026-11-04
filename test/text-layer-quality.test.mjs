@@ -152,3 +152,10 @@ test("textLayerQuality: 拉丁-1 乱码页（Ð ª Ë ² ÷）判为损坏，法
   const chinese = "本标准适用于 10kV 配电系统，电压偏差 ±7%，频率偏差 ±0.2Hz。".repeat(4);
   assert.equal(textLayerQuality(chinese).bad, false);
 });
+
+test("looksLikeBlankOcrText: 全大写水印/机构缩写（SAIC/SZIG/IEEE）也算空白页", () => {
+  assert.equal(looksLikeBlankOcrText("SAIC"), true);
+  assert.equal(looksLikeBlankOcrText("SZIG"), true);
+  assert.equal(looksLikeBlankOcrText("IEEE"), true);
+  assert.equal(looksLikeBlankOcrText("IEEE Std"), false);
+});
