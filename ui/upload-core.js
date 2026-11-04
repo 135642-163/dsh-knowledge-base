@@ -189,6 +189,37 @@ export function uploadPhaseTitle(state = {}) {
   return "上传资料";
 }
 
+/**
+ * 弹窗标题：阶段标题里已经带目标库时不要再拼一次
+ *（否则出现「解析完成 · 标准 · 标准」）。
+ */
+export function progressHeading(state = {}) {
+  const title = uploadPhaseTitle(state);
+  const kb = String(state.kb ?? "");
+  if (!kb || title.endsWith(`· ${kb}`)) return title;
+  return `${title} · ${kb}`;
+}
+
+/**
+ * 跳过项说明：不能一律写“可稍后重试”——与库内资料重合的跳过是确定结果，
+ * 重试不会变化，需要用户先移除库内旧文档或换一份资料。
+ */
+export function skipNotice(result) {
+  const breakdown = skipBreakdown(result);
+  if (breakdown.total === 0) return "";
+  const parts = [];
+  if (breakdown.duplicate > 0) {
+    parts.push(`${breakdown.duplicate} 个与库内/其它知识库重合（如需以本次文件替换，请先移除库内旧文档）`);
+  }
+  if (breakdown.importing > 0) {
+    parts.push(`${breakdown.importing} 个对应的文档仍在导入中，等当前导入完成后再试`);
+  }
+  if (breakdown.other > 0) {
+    parts.push(`${breakdown.other} 个可稍后重试`);
+  }
+  return `${breakdown.total} 个文件被跳过：${parts.join("；")}。`;
+}
+
 export function statusLabel(status) {
   return STATUS_LABELS[status] ?? String(status ?? "");
 }

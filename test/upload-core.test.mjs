@@ -5,7 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   classifyFiles, createQueue, emptyStateMessage, extOf, fileStageLabel, formatBytes, isDuplicateSkip,
-  nextPhase, relPathFor, skipBreakdown, statusLabel, summarizeResults, uploadPhaseTitle,
+  nextPhase, progressHeading, relPathFor, skipBreakdown, skipNotice, statusLabel, summarizeResults, uploadPhaseTitle,
 } from "../ui/upload-core.js";
 
 const LIMITS = { maxBytes: 10, maxFiles: 2, extensions: [".md", ".pdf"] };
@@ -143,6 +143,36 @@ test("全部跳过时区分「重复」与「正在导入中」", () => {
     uploadPhaseTitle({ phase: "empty", job: { result: mixed } }),
     "没有新资料（部分文件正在导入中）"
   );
+});
+
+test("跳过文案：重复跳过不能说成「导入中跳过/可稍后重试」", () => {
+  // job.result.files 里的逐文件项必须带 reason，否则重复跳过会被误显示成“导入中跳过”。
+  const duplicate = { ok: 0, fail: 0, skip: 1, files: [{ title: "GB/T 24808-2022 …", status: "skipped", reason: "duplicate" }] };
+  assert.equal(fileStageLabel(duplicate.files[0], "done"), "重复跳过");
+  assert.match(skipNotice(duplicate), /与库内\/其它知识库重合/);
+  assert.match(skipNotice(duplicate), /先移除库内旧文档/);
+  assert.doesNotMatch(skipNotice(duplicate), /稍后重试/);
+
+  const importing = { ok: 0, fail: 0, skip: 1, files: [{ status: "skipped", reason: "importing" }] };
+  assert.equal(fileStageLabel(importing.files[0], "done"), "导入中跳过");
+  assert.match(skipNotice(importing), /仍在导入中/);
+
+  const failed = { ok: 0, fail: 1, skip: 0, files: [{ status: "failed", error: "解析失败" }] };
+  assert.equal(skipNotice(failed), "");
+  assert.equal(
+    skipNotice({ ok: 0, fail: 0, skip: 2, files: [
+      { status: "skipped", reason: "duplicate" },
+      { status: "skipped", reason: "importing" },
+    ] }),
+    "2 个文件被跳过：1 个与库内/其它知识库重合（如需以本次文件替换，请先移除库内旧文档）；1 个对应的文档仍在导入中，等当前导入完成后再试。",
+  );
+});
+
+test("弹窗标题不重复拼接目标库（解析完成 · 标准 · 标准）", () => {
+  assert.equal(progressHeading({ phase: "done", kb: "标准" }), "解析完成 · 标准");
+  assert.equal(progressHeading({ phase: "importing", kb: "标准" }), "解析中 · 标准");
+  assert.equal(progressHeading({ phase: "uploading", kb: "标准" }), "上传中（文件尚未解析） · 标准");
+  assert.equal(progressHeading({ phase: "done" }), "解析完成");
 });
 
 test("nextPhase 覆盖上传/导入状态机", () => {

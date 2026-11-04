@@ -8,7 +8,7 @@
  * localStorage，下次打开该库的上传弹窗时恢复进度）。
  */
 import { api, ApiError } from "../api.js";
-import { classifyFiles, createQueue, emptyStateMessage, fileStageLabel, formatBytes, isDuplicateSkip, nextPhase, statusLabel, summarizeResults, uploadPhaseTitle } from "../upload-core.js";
+import { classifyFiles, createQueue, emptyStateMessage, fileStageLabel, formatBytes, isDuplicateSkip, nextPhase, progressHeading, skipNotice, statusLabel, summarizeResults } from "../upload-core.js";
 
 const DIRECTORY_HINT = "暂不支持拖拽文件夹，请用「选择目录」";
 
@@ -178,7 +178,6 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
     const done = state.job?.progress ?? null;
     const result = state.job?.result ?? null;
     const summary = summarizeResults(result);
-    const phaseText = uploadPhaseTitle(state);
     const failedUploads = state.files.filter((item) => item.status === "failed");
     const duplicates = Array.isArray(result?.duplicates) ? result.duplicates : [];
     const similar = Array.isArray(result?.similar) ? result.similar : [];
@@ -210,7 +209,7 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
 
     return `
       <div class="modal-form">
-        <h2>${escapeHtml(phaseText)} · ${escapeHtml(state.kb)}</h2>
+        <h2>${escapeHtml(progressHeading(state))}</h2>
         ${state.error ? `<p class="form-error">${escapeHtml(state.error)}</p>` : ""}
         ${state.warning ? `<p class="form-error">${escapeHtml(state.warning)}</p>` : ""}
         ${state.phase === "uploading" ? `<div class="uplist">${state.files.map((item) => `
@@ -235,7 +234,7 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
             <div class="uplist">${summary.files.map((item) => `
               <div class="uprow"><span class="upname" title="${escapeAttr(item.path ?? item.title ?? "")}">${escapeHtml(item.title || item.path || "")}</span>
                 <span class="muted">${escapeHtml(fileStageLabel(item, state.phase))}${skipSuffix(item)}${item.error ? `：${escapeHtml(item.error)}` : ""}</span></div>`).join("")}</div>` : ""}
-          ${summary.skipped > 0 ? `<p class="muted">${summary.skipped} 个文件被跳过${state.job?.result?.duplicates?.length ? `（重合 ${state.job.result.duplicates.length} 个）` : "，可稍后重试"}。</p>` : ""}
+          ${summary.skipped > 0 ? `<p class="muted">${escapeHtml(skipNotice(state.job?.result))}</p>` : ""}
           ${failedUploads.length > 0 ? `
             <p class="form-error">${failedUploads.length} 个文件上传失败，可用「${retryLabel}」重新上传。</p>
             <div class="uplist">${failedUploads.map((item) => `

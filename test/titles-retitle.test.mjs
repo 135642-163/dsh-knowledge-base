@@ -87,6 +87,9 @@ test("kb_retitle cleans one document, rebuilds the merged title and keeps histor
 
     const merged = await readFile(join(kbDir, "markdown", docId, `${docId}.md`), "utf8");
     assert.match(merged, /^# 电能质量资料\n/);
+    // 分块首行的 doc 注释也要跟着改名，否则 kb_read/导出仍显示旧标题
+    const part1 = await readFile(join(kbDir, "markdown", docId, "parts", "0001.md"), "utf8");
+    assert.match(part1, /^<!-- doc: 电能质量资料 \| 部分 1\/1/);
     const log = await readFile(join(kbDir, "log.md"), "utf8");
     assert.match(log, /retitle/);
 

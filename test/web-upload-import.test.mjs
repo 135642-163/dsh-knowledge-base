@@ -389,6 +389,30 @@ test("全部跳过（skip>0）：任务 succeeded 但批次保留并置 failed",
   assert.ok(existsSync(join(dir, id, "progress.json")));
 });
 
+test("逐文件跳过原因透传给前端（重复跳过 ≠ 导入中跳过）", async () => {
+  const { opts } = await setup({
+    spawn: fakeWorkerSpawn({
+      exitCode: 0,
+      report: {
+        ok: 0,
+        fail: 0,
+        skip: 2,
+        files: [
+          { title: "a", status: "skipped", reason: "duplicate", docId: "d1" },
+          { title: "b", status: "skipped", reason: "importing" },
+        ],
+      },
+    }),
+  });
+  const id = await createBatch(opts, { "a.md": "# a\n", "b.md": "# b\n" });
+  const { json } = await call(opts, makeReq({ method: "POST", url: `/kb/api/upload-batches/${id}/import`, body: "{}" }));
+  const job = await waitJob(opts, json.jobId);
+  assert.equal(job.status, "succeeded");
+  assert.equal(job.result.files[0].reason, "duplicate");
+  assert.equal(job.result.files[0].docId, "d1");
+  assert.equal(job.result.files[1].reason, "importing");
+});
+
 test("查重期间批次被改动：409 BATCH_CHANGED 且批次保持 open", async () => {
   const { opts } = await setup();
   const id = await createBatch(opts, { "a.md": "# a\n" });

@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { apply } from "../lib/index.js";
 import { withStandardPrefix } from "../lib/doc-meta.js";
+import { cleanTitle } from "../lib/titles.js";
 import { createKb } from "../lib/kbmeta.js";
 import { readManifest } from "../lib/store.js";
 
@@ -46,6 +47,35 @@ test("withStandardPrefix：补编号、去旧编号、幂等、无标准号不�
   assert.equal(withStandardPrefix("DL 860.803-202X", "DL 860.803"), "DL 860.803-202X", "只剩年份时用连字符连接");
   assert.equal(withStandardPrefix("普通资料", ""), "普通资料");
   assert.equal(withStandardPrefix("GB/T 20001.10-2014", "GB/T 20001.10-2014"), "GB/T 20001.10-2014");
+});
+
+test("withStandardPrefix：文件名带 GB:T / 重复编号时不再叠加第二个编号", () => {
+  // 下载站/文件系统把 "/" 写成 ":"（GB:T 47968-2026）：cleanTitle 先归一成 GB/T。
+  assert.equal(
+    cleanTitle("GB:T 47968-2026 构网型变流器通用技术规范"),
+    "GB/T 47968-2026 构网型变流器通用技术规范",
+  );
+  assert.equal(cleanTitle("Q:GDW 10179-2017 变电设备"), "Q/GDW 10179-2017 变电设备");
+  assert.equal(
+    withStandardPrefix("GB:T 47968-2026 构网型变流器通用技术规范", "GB/T 47968-2026"),
+    "GB/T 47968-2026 构网型变流器通用技术规范",
+  );
+  // 已落库的历史标题（编号重复两次）再次清洗也要还原成单编号。
+  assert.equal(
+    withStandardPrefix("GB/T 47968-2026 GB:T 47968-2026 构网型变流器通用技术规范", "GB/T 47968-2026"),
+    "GB/T 47968-2026 构网型变流器通用技术规范",
+  );
+  assert.equal(
+    withStandardPrefix("GB/T 47968-2026 GB/T 47968-2026 构网型变流器通用技术规范", "GB/T 47968-2026"),
+    "GB/T 47968-2026 构网型变流器通用技术规范",
+  );
+  assert.equal(
+    withStandardPrefix("GBT47968-2026 构网型变流器通用技术规范", "GB/T 47968-2026"),
+    "GB/T 47968-2026 构网型变流器通用技术规范",
+  );
+  // 幂等：清洗过的标题不会被重复裁剪。
+  const once = withStandardPrefix("GB:T 47968-2026 构网型变流器通用技术规范", "GB/T 47968-2026");
+  assert.equal(withStandardPrefix(once, "GB/T 47968-2026"), once);
 });
 
 test("kb_retitle + standardPrefix：批量预览与应用都补上标准号", async () => {
