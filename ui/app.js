@@ -317,11 +317,26 @@ function qualityGroupByCode(code) {
   return groups.find((group) => group.code === String(code ?? "")) ?? null;
 }
 
-/** 轮询后台质量任务（重解析）：约 15 分钟超时。 */
+/** 轮询后台质量任务（重解析）：约 15 分钟超时；单次网络抖动不直接判失败。 */
 async function waitQualityJob(jobId) {
+  let failures = 0;
   for (let attempt = 0; attempt < 900; attempt += 1) {
-    const job = await api.job(jobId);
-    if (job?.status && job.status !== "running") return job;
+    try {
+      const job = await api.job(jobId);
+      failures = 0;
+      if (job?.status && job.status !== "running") return job;
+    } catch (error) {
+      // DSH 重启/页面 origin 变化时会出现 Failed to fetch；任务通常仍在后台跑，
+      // 连续 5 次失败才放弃，并给出「刷新查看任务列表」的可恢复提示。
+      failures += 1;
+      if (failures >= 5) {
+        throw new Error(
+          `与后台连接中断（${errorText(error)}）。重解析可能仍在后台运行，请刷新页面后在任务列表查看结果`
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, Math.min(8000, 500 * failures)));
+      continue;
+    }
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
   throw new Error("质量任务超时，请稍后在任务列表查看");

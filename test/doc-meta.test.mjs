@@ -7,6 +7,7 @@ import {
   canonicalizeTitle,
   contentIntegrityFor,
   needsRetitle,
+  looksLikeNoisyAutoSummary,
   mergeDocMeta,
   parseContentStandard,
   parseCoverTitle,
@@ -372,4 +373,18 @@ test("cleanTitle 剥掉年份前缀/作废标记，并去掉末尾括注标准�
   // 书名号标题的括注编号是唯一的标准号来源，不能剥掉
   assert.equal(cleanTitle("《电能质量 公用电网谐波》（GB/T 14549-1993）"), "《电能质量 公用电网谐波》（GB/T 14549-1993）");
   assert.equal(cleanTitle("GBT+40600-2021风电场功率控制系统调度功能技术要求"), "GB/T 40600-2021风电场功率控制系统调度功能技术要求");
+});
+
+test("looksLikeNoisyAutoSummary 识别封面/页眉噪声摘要", () => {
+  for (const text of [
+    "ICS 33.100 L 06 18039. 4-2003/IEC 61000-2-4:1994 电磁兼容 环境",
+    "备案号：63049-2018 国家电网有限公司企业标准 Q/GDW 11669.1—2024",
+    "中华人民共和国国家标准 电能质量 公用电网谐波",
+    "代替GB/T 1094.101—2008 电力变压器 第101部分",
+    "Copyright 2014 IEC, Geneva, Switzerland",
+  ]) assert.equal(looksLikeNoisyAutoSummary(text), true, text);
+  for (const text of [
+    "本文件规定了风电场及接入系统短路电流的计算模型与计算方法；适用于通过工频交流接入 10(6)kV 及以上电压等级的风电场。",
+    "电力行业标准，规定变电站自动化系统的通信要求。",
+  ]) assert.equal(looksLikeNoisyAutoSummary(text), false, text);
 });

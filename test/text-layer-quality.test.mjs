@@ -159,3 +159,10 @@ test("looksLikeBlankOcrText: 全大写水印/机构缩写（SAIC/SZIG/IEEE）也
   assert.equal(looksLikeBlankOcrText("IEEE"), true);
   assert.equal(looksLikeBlankOcrText("IEEE Std"), false);
 });
+
+test("looksLikeBlankOcrText: 只剩罗马数字页码（Ⅰ/Ⅱ/vi/xii）也算空白页", () => {
+  assert.equal(looksLikeBlankOcrText("IⅡ"), true);
+  assert.equal(looksLikeBlankOcrText("iv"), true);
+  assert.equal(looksLikeBlankOcrText("xii"), true);
+  assert.equal(looksLikeBlankOcrText("xii 附录"), false);
+});
