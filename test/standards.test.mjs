@@ -21,7 +21,9 @@ import {
   findStdOnSite,
   runStdCheck,
   renderStdReport,
+  importDownloaded,
 } from "../lib/standards.js";
+import { readManifest } from "../lib/store.js";
 
 const BASE = "https://example.test";
 
@@ -551,4 +553,73 @@ test("runStdCheck: 继任版本是新分册（31517 → 31517.1）时判 ambiguo
   const { report } = await runStdCheck({ kbDir: dir, baseUrl: BASE, cookie: "x", rateMs: 0, action: "check", fetchImpl: fakeFetch(routes) });
   assert.equal(report.ambiguous.length, 1);
   assert.equal(report.updates.length, 0, "新分册不能当成本号的新版");
+});
+
+test("runStdCheck: 废止记录没写“被谁代替”时按标准号重搜，抓到最新现行版（DL/T 401 → 2017）", async () => {
+  const dir = await makeKb([
+    doc({ id: "a", title: "DL/T 401-2002 高压电缆选用导则", stageLabel: "发布稿", standardNo: "DL/T 401-2002", standardNumber: "401", standardYear: 2002 }),
+  ]);
+  const routes = {
+    "POST /plus/search.php?q=401-2002": pageRes(searchPage([resultBlock({ href: "/hangye/1.html", stdNo: "DL/T 401-2002", title: "DL/T 401-2002 高压电缆选用导则", status: "废止" })])),
+    "GET /hangye/1.html": pageRes(detailPage({ title: "DL/T 401-2002 高压电缆选用导则", stdNo: "DL/T 401-2002", downloadAid: 11, status: "废止", replaced: "代替DL 401-1991" })),
+    // 按号重搜：站点把 2017 现行版挂在另一条记录下
+    "POST /plus/search.php?q=401": pageRes(searchPage([resultBlock({ href: "/hangye/2.html", stdNo: "DL/T 401-2017", title: "DL/T 401-2017 高压电缆选用导则", status: "现行", pub: "2017-05-01" })])),
+    "GET /hangye/2.html": pageRes(detailPage({ title: "DL/T 401-2017 高压电缆选用导则", stdNo: "DL/T 401-2017", downloadAid: 22, status: "现行", replaced: "代替DL/T 401-2002", pub: "2017-05-01", impl: "2017-08-01" })),
+  };
+  const { report } = await runStdCheck({ kbDir: dir, baseUrl: BASE, cookie: "x", rateMs: 0, action: "check", fetchImpl: fakeFetch(routes) });
+  assert.equal(report.updates.length, 1, "应判为发现更新，而不是只报废止");
+  assert.equal(report.updates[0].siteNo, "DL/T 401-2017");
+  assert.equal(report.updates[0].replacedBy, "DL/T 401-2017");
+  assert.equal(report.updates[0].downloadAid, 22);
+});
+
+test("runStdCheck: 继任版本自己也被替代时继续多跳（2008 → 2015 → 2023）", async () => {
+  const dir = await makeKb([
+    doc({ id: "a", title: "GB/T 10228-2008 干式电力变压器技术参数和要求", stageLabel: "发布稿", standardNo: "GB/T 10228-2008", standardNumber: "10228", standardYear: 2008 }),
+  ]);
+  const routes = {
+    "POST /plus/search.php?q=10228-2008": pageRes(searchPage([resultBlock({ href: "/guojia/1.html", stdNo: "GB/T 10228-2008", title: "GB/T 10228-2008 干式电力变压器技术参数和要求", status: "废止" })])),
+    "GET /guojia/1.html": pageRes(detailPage({ title: "GB/T 10228-2008 干式电力变压器技术参数和要求", stdNo: "GB/T 10228-2008", downloadAid: 1, status: "废止", replaced: "代替GB/T 10228-2000被GB/T 10228-2015代替" })),
+    "POST /plus/search.php?q=10228-2015": pageRes(searchPage([resultBlock({ href: "/guojia/2.html", stdNo: "GB/T 10228-2015", title: "GB/T 10228-2015 干式电力变压器技术参数和要求", status: "废止" })])),
+    "GET /guojia/2.html": pageRes(detailPage({ title: "GB/T 10228-2015 干式电力变压器技术参数和要求", stdNo: "GB/T 10228-2015", downloadAid: 2, status: "废止", replaced: "代替GB/T 10228-2008被GB/T 10228-2023代替" })),
+    "POST /plus/search.php?q=10228-2023": pageRes(searchPage([resultBlock({ href: "/guojia/3.html", stdNo: "GB/T 10228-2023", title: "GB/T 10228-2023 干式电力变压器技术参数和要求", status: "现行", pub: "2023-09-07" })])),
+    "GET /guojia/3.html": pageRes(detailPage({ title: "GB/T 10228-2023 干式电力变压器技术参数和要求", stdNo: "GB/T 10228-2023", downloadAid: 3, status: "现行", replaced: "代替GB/T 10228-2015", pub: "2023-09-07", impl: "2024-04-01" })),
+  };
+  const { report } = await runStdCheck({ kbDir: dir, baseUrl: BASE, cookie: "x", rateMs: 0, action: "check", fetchImpl: fakeFetch(routes) });
+  assert.equal(report.updates.length, 1);
+  assert.equal(report.updates[0].siteNo, "GB/T 10228-2023", "两跳后应取到 2023 现行版");
+  assert.equal(report.updates[0].replacedBy, "GB/T 10228-2023");
+});
+
+test("importDownloaded: 现行版入库自动 high，被替代旧版收敛 low，人工标注不被覆盖", async () => {
+  const dir = await makeKb([
+    doc({ id: "old", title: "GB/T 10228-2008 干式电力变压器技术参数和要求", stageLabel: "发布稿", standardNo: "GB/T 10228-2008", standardNumber: "10228", standardYear: 2008 }),
+    doc({ id: "old2", title: "GB/T 10228-1999 干式电力变压器技术参数和要求", stageLabel: "发布稿", standardNo: "GB/T 10228-1999", standardNumber: "10228", standardYear: 1999 }),
+    doc({ id: "new", title: "GB/T 10228-2023 干式电力变压器技术参数和要求", stageLabel: "发布稿", standardNo: "GB/T 10228-2023", standardNumber: "10228", standardYear: 2023 }),
+  ]);
+  const manifest = await readManifest(dir);
+  const o2 = manifest.docs.find((d) => d.id === "old2");
+  o2.trust = "high";
+  o2.trustSource = "manual";
+  o2.trustReason = "用户人工核对";
+  await writeFile(join(dir, "kb.json"), JSON.stringify(manifest, null, 2), "utf8");
+
+  const cache = {
+    items: {
+      "GB:10228": {
+        key: "GB:10228", number: "10228", prefix: "GB/T",
+        docs: [{ id: "old", year: 2008 }, { id: "old2", year: 1999 }],
+        siteNo: "GB/T 10228-2023", siteYear: 2023, siteStatus: "现行", status: "update",
+        downloadedFile: "GB_T 10228-2023.pdf",
+      },
+    },
+  };
+  const out = await importDownloaded(dir, cache, async () => ({ docId: "new" }), {});
+  assert.equal(out.length, 1);
+  const after = await readManifest(dir);
+  const byId = Object.fromEntries(after.docs.map((d) => [d.id, d]));
+  assert.equal(byId.new.trust, "high", "现行发布稿入库应标 high");
+  assert.equal(byId.new.trustSource, "heuristic");
+  assert.equal(byId.old.trust, "low", "被替代的旧版应收敛 low");
+  assert.equal(byId.old2.trust, "high", "人工标注（trustSource=manual）不应被自动收敛覆盖");
 });
