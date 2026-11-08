@@ -623,3 +623,26 @@ test("importDownloaded: 现行版入库自动 high，被替代旧版收敛 low�
   assert.equal(byId.old.trust, "low", "被替代的旧版应收敛 low");
   assert.equal(byId.old2.trust, "high", "人工标注（trustSource=manual）不应被自动收敛覆盖");
 });
+
+test("importDownloaded: 正式版入库时同号草案（年份相同）也收敛 low", async () => {
+  const dir = await makeKb([
+    doc({ id: "draft", title: "DL/T 1412-2015 优质电力园区供电技术规范（征求意见稿）", stage: "draft", stageLabel: "征求意见稿", standardNo: "DL/T 1412-2015", standardNumber: "1412", standardYear: 2015 }),
+    doc({ id: "formal", title: "DL/T 1412-2015 优质电力园区供电技术规范", stage: "published", stageLabel: "发布稿", standardNo: "DL/T 1412-2015", standardNumber: "1412", standardYear: 2015 }),
+  ]);
+  const cache = {
+    items: {
+      "DL:1412": {
+        key: "DL:1412", number: "1412", prefix: "DL/T",
+        docs: [{ id: "draft", year: 2015, kind: "draft" }],
+        siteNo: "DL/T 1412-2015", siteYear: 2015, siteStatus: "现行", status: "released",
+        downloadedFile: "DL_T 1412-2015.pdf",
+      },
+    },
+  };
+  await importDownloaded(dir, cache, async () => ({ docId: "formal" }), {});
+  const after = await readManifest(dir);
+  const byId = Object.fromEntries(after.docs.map((d) => [d.id, d]));
+  assert.equal(byId.formal.trust, "high");
+  assert.equal(byId.draft.trust, "low", "同一年的草案被正式版取代也要收敛");
+  assert.match(byId.draft.trustReason, /草案/);
+});
