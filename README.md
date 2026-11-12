@@ -2071,11 +2071,17 @@ npm install          # 安装依赖（生成 node_modules/）
 对知识库（默认「标准」库）中的标准做更新检查：从文档标题自动提取标准号（GB/NB/DL/QGDW/IEC/团体标准等），
 在标准网 biaozhun.org 逐条检索比对年份；发现新版本或「草案已有正式版」时，用登录会话自动下载 PDF
 并直接导入知识库（旧版原文保留）。支持 `check`（只报告）/ `check-download`（默认，检查并下载）、
-`force`（忽略 7 天缓存全查）、`limit`（分批）、`dryRun`（模拟）。
+`force`（忽略 7 天缓存全查）、`limit`（分批）、`dryRun`（模拟）、`autoConverge`（默认开，见下）。
 
 - 更新判定：命中记录若标「废止/作废」，沿「被 X 代替」逐跳追继任版本（最多 3 跳）；
   老标准常只写「代替 DL 401-1991」而完全不提自己被谁取代，这时按标准号重搜一遍（取同号年份最高的一条），
   两种线索都没有才维持 `superseded`。多跳与按号兜底各自有回归测试。
+- 自动收敛（`autoConverge`，默认 true）：判定 `superseded` 的库内文档在检查后自动标
+  `trust=low`（`trustSource=heuristic`，理由「站点标注废止/作废（YYYY-MM-DD 检查），原为 <旧等级>」）；
+  `check`/`check-download`/`download` 都生效，`dryRun=true` 或 `autoConverge=false` 时不写任何 trust。
+  已 `low`、`kb_keep` 标记（`dedupKeep`）、理由含「已核对保留」的人工结论会跳过。
+- 废止报告去噪：组内文档已全部 `low` 的组不再逐条列出，只报组数（`supersededAllLow`），
+  避免每轮重复「建议收敛」；全 low 组仍参与缺口台账清理。
 - 自动可信度：下载并导入的「站点现行版」自动标 `high`（trustSource=heuristic）；
   被它替代的库内同号旧版收敛为 `low`；继任正文还没入库时旧版只降为 `medium`（待补）。
   已人工标注（trustSource=manual）的文档不会被自动收敛覆盖。

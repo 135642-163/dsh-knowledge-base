@@ -90,14 +90,30 @@ async function makeKb(docs) {
   return dir;
 }
 
-function doc({ id, title, stage = "published", stageLabel = "发布稿", standardNo, standardNumber, standardYear, deletedAt }) {
+function doc({ id, title, stage = "published", stageLabel = "发布稿", standardNo, standardNumber, standardYear, deletedAt, trust, trustSource, trustReason, dedupKeep }) {
   return {
     id,
     title,
     stage,
     stageLabel,
     ...(standardNo ? { standardNo, standardPrefix: standardNo.split(/\s/)[0], standardNumber, standardYear } : {}),
+    ...(trust ? { trust } : {}),
+    ...(trustSource ? { trustSource } : {}),
+    ...(trustReason ? { trustReason } : {}),
+    ...(dedupKeep ? { dedupKeep: true } : {}),
     ...(deletedAt ? { deletedAt } : {}),
+  };
+}
+
+/** 站点把 GB/T 19963-2011 标为废止：自动收敛相关用例共用的一份夹具。 */
+function supersededFixture() {
+  const title = "GB/T 19963-2011 风电场接入电力系统技术规定";
+  return {
+    title,
+    routes: {
+      "POST /plus/search.php": pageRes(searchPage([resultBlock({ href: "/guojia/28071.html", stdNo: "GB/T 19963-2011", title, status: "废止" })])),
+      "GET /guojia/28071.html": pageRes(detailPage({ title, stdNo: "GB/T 19963-2011", downloadAid: 28071, status: "废止" })),
+    },
   };
 }
 
@@ -284,6 +300,97 @@ test("runStdCheck: 站点标废止 → superseded（不是“已是最新”）"
   assert.equal(report.currents.length, 0);
   const text = renderStdReport(report);
   assert.match(text, /库内版本已被站点标注废止/);
+});
+
+test("runStdCheck: 站点标注废止默认自动收敛为 low，理由带检查日期与原等级", async () => {
+  const { title, routes } = supersededFixture();
+  const dir = await makeKb([
+    doc({ id: "a", title, stageLabel: "发布稿", trust: "high", trustSource: "heuristic" }),
+  ]);
+  const { report } = await runStdCheck({
+    kbDir: dir, baseUrl: BASE, cookie: "x", rateMs: 0, action: "check", fetchImpl: fakeFetch(routes),
+  });
+  assert.equal(report.superseded.length, 1, "本轮新判废止的组仍要列出");
+  assert.equal(report.autoConverged, 1);
+  const after = await readManifest(dir);
+  const a = after.docs.find((d) => d.id === "a");
+  assert.equal(a.trust, "low");
+  assert.equal(a.trustSource, "heuristic");
+  assert.match(a.trustReason, /站点标注废止\/作废（\d{4}-\d{2}-\d{2} 检查），原为 high/);
+  assert.match(renderStdReport(report), /已自动收敛 1 篇为 trust=low/);
+});
+
+test("runStdCheck: autoConverge=false 不写 trust，报告仍列出废止组", async () => {
+  const { title, routes } = supersededFixture();
+  const dir = await makeKb([
+    doc({ id: "a", title, stageLabel: "发布稿", trust: "high", trustSource: "heuristic" }),
+  ]);
+  const { report } = await runStdCheck({
+    kbDir: dir, baseUrl: BASE, cookie: "x", rateMs: 0, action: "check",
+    autoConverge: false, fetchImpl: fakeFetch(routes),
+  });
+  assert.equal(report.autoConverged, 0);
+  assert.equal(report.superseded.length, 1);
+  const a = (await readManifest(dir)).docs.find((d) => d.id === "a");
+  assert.equal(a.trust, "high", "autoConverge=false 时不能动 trust");
+  assert.match(renderStdReport(report), /建议收敛为 trust=low/);
+});
+
+test("runStdCheck: 废止组内文档全为 low 时不再进报告，计入 supersededAllLow", async () => {
+  const { title, routes } = supersededFixture();
+  const dir = await makeKb([
+    doc({
+      id: "a", title, stageLabel: "发布稿", trust: "low", trustSource: "heuristic",
+      trustReason: "站点标注废止/作废（2026-01-01 检查），原为 high",
+    }),
+  ]);
+  const { report } = await runStdCheck({
+    kbDir: dir, baseUrl: BASE, cookie: "x", rateMs: 0, action: "check", fetchImpl: fakeFetch(routes),
+  });
+  assert.equal(report.superseded.length, 0, "全 low 的组是常驻噪声，不能再进报告");
+  assert.equal(report.supersededAllLow, 1);
+  assert.equal(report.autoConverged, 0);
+  const text = renderStdReport(report);
+  assert.match(text, /另有 1 组站点标注废止，库内版本已全部为 low，无需处理/);
+  assert.doesNotMatch(text, /【库内版本已被站点标注废止/);
+});
+
+test("runStdCheck: kb_keep（dedupKeep）标记的文档不被自动收敛覆盖", async () => {
+  const { title, routes } = supersededFixture();
+  const dir = await makeKb([
+    doc({ id: "a", title, stageLabel: "发布稿", trust: "high", trustSource: "heuristic", dedupKeep: true }),
+  ]);
+  const { report } = await runStdCheck({
+    kbDir: dir, baseUrl: BASE, cookie: "x", rateMs: 0, action: "check", fetchImpl: fakeFetch(routes),
+  });
+  assert.equal(report.superseded.length, 1, "组内仍有非 low 文档，报告照常列出");
+  assert.equal(report.autoConverged, 0, "已核对保留的文档不能自动降级");
+  const a = (await readManifest(dir)).docs.find((d) => d.id === "a");
+  assert.equal(a.trust, "high");
+  assert.equal(a.dedupKeep, true);
+});
+
+test("importDownloaded: 共用收敛入口下被替代旧版仍收敛 low（回归）", async () => {
+  const dir = await makeKb([
+    doc({ id: "old", title: "DL/T 1412-2008 优质电力园区供电技术规范", stageLabel: "发布稿", standardNo: "DL/T 1412-2008", standardNumber: "1412", standardYear: 2008, trust: "high", trustSource: "heuristic" }),
+    doc({ id: "formal", title: "DL/T 1412-2015 优质电力园区供电技术规范", stageLabel: "发布稿", standardNo: "DL/T 1412-2015", standardNumber: "1412", standardYear: 2015 }),
+  ]);
+  const cache = {
+    items: {
+      "DL:1412": {
+        key: "DL:1412", number: "1412", prefix: "DL/T",
+        docs: [{ id: "old", year: 2008, kind: "text" }],
+        siteNo: "DL/T 1412-2015", siteYear: 2015, siteStatus: "现行", status: "update",
+        downloadedFile: "DL_T 1412-2015.pdf",
+      },
+    },
+  };
+  const out = await importDownloaded(dir, cache, async () => ({ docId: "formal" }), {});
+  assert.equal(out.length, 1);
+  const byId = Object.fromEntries((await readManifest(dir)).docs.map((d) => [d.id, d]));
+  assert.equal(byId.formal.trust, "high");
+  assert.equal(byId.old.trust, "low");
+  assert.match(byId.old.trustReason, /标准更新自动收敛/);
 });
 
 test("runStdCheck: 站外体系（Q/GDW/IEC…）不发任何请求直接判未收录", async () => {

@@ -102,8 +102,9 @@ function stdResultHtml(result, { escape }) {
   const entries = Array.isArray(result.entries) ? result.entries : [];
   return `
     <div class="progress-line">
-      <strong>检查 ${count(counts.checked)} 组 · 更新 ${count(counts.updates)} · 已废止 ${count(counts.superseded)} · 编号歧义 ${count(counts.ambiguous)} · 下载 ${count(counts.downloaded)} · 导入 ${count(counts.imported)} · 导入失败 ${count(counts.importFailed)} · 下载失败 ${count(counts.downloadFailed)}</strong>
+      <strong>检查 ${count(counts.checked)} 组 · 更新 ${count(counts.updates)} · 已废止 ${count(counts.superseded)} · 自动收敛 ${count(counts.autoConverged)} · 编号歧义 ${count(counts.ambiguous)} · 下载 ${count(counts.downloaded)} · 导入 ${count(counts.imported)} · 导入失败 ${count(counts.importFailed)} · 下载失败 ${count(counts.downloadFailed)}</strong>
     </div>
+    ${Number(counts.supersededAllLow ?? 0) > 0 ? `<p class="muted">另有 ${count(counts.supersededAllLow)} 组站点标注废止，库内版本已全部为 low，无需处理。</p>` : ""}
     ${counts.authOk === false ? `<p class="form-error">登录态失效：请更新 bzCookie 后重试。</p>` : ""}
     ${entries.length === 0 ? `<p class="muted">没有结果</p>` : `
       <table class="table">
