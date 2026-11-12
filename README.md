@@ -329,6 +329,27 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
 
 测试 **1309**（1305 通过、4 跳过）。详见 `docs/reports/2026-11-01-0.35.0.md`。
 
+## 0.41.5 废止记录自动收敛与全 low 组去噪（2026-11-13）
+
+- **自动收敛（新参数 `autoConverge`，默认 true）**：`kb_std_check` 检查结束后，把被站点标注废止/作废、
+  库内还不是 `low` 的文档直接收敛为 `trust=low`（`trustSource=heuristic`，
+  理由写「站点标注废止/作废（YYYY-MM-DD 检查），原为 <旧等级>」），省掉逐条 `kb_trust`。
+  `check` / `check-download` / `download` 三种动作都生效（`download` 用缓存里已判 `superseded` 的组补做）；
+  `dryRun=true` 或 `autoConverge=false` 时不写任何 trust。跳过已 `low`、`kb_keep` 标记（`dedupKeep`）
+  与理由含「已核对保留」的人工结论。
+- **全 low 组去噪**：`report.superseded` 只保留「组内仍有 ready 且 trust≠low 文档」的组；整组已全 `low`
+  的计入新字段 `report.supersededAllLow`（数字），报告只留一行
+  「另有 N 组站点标注废止，库内版本已全部为 low，无需处理」，不再每轮重复「建议收敛」。
+  修复生产「标准」库 19 组常驻噪声。
+- **共用写入口**：导入新版时的旧版降 `low` 与新收敛走同一个 `applyTrustPatches` / `shouldConvergeLow`
+  （一次 `withManifestLock` + 一次读清单 + 批量写），避免两套规则分叉；导入流程仍不覆盖人工标注
+  （`trustSource=manual`），`kb_trust` 语义不变。
+- **可见性**：`kb_std_check` summary 新增 `supersededAllLow`、`autoConverged`，报告与工作台标准面板同步显示
+  「自动收敛 N 篇 / 另有 N 组已全 low」；缺口台账仍按未去噪的全量 `superseded` 清理。
+
+测试 1475 → **1480**（1476 通过、4 跳过）。真实站点临时库冒烟：DL/T 5002-2005（站点废止）
+当轮自动标 `low`，理由含检查日期与原等级 `high`。
+
 ## 0.41.4 正式版入库时同号草案也收敛 low（2026-11-08）
 
 - **草案不再卡在旧可信度**：草案/征求意见稿被正式版取代时年份往往相同（DL/T 1412-2015 两版都是 2015），
