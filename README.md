@@ -329,6 +329,25 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
 
 测试 **1309**（1305 通过、4 跳过）。详见 `docs/reports/2026-11-01-0.35.0.md`。
 
+## 0.41.6 英文标准自动摘要取 Abstract 并过滤版权页噪声（2026-11-13）
+
+- **Abstract 优先**：新增 `summarizeEnglishAbstract`，识别「Abstract:」行内写法或独占一行的 `Abstract`，
+  取到 `Keywords`/`Index Terms` 或下一章标题为止；导入候选顺序改为 **英文 Abstract → 第 1 章范围 → 正文首段**。
+  IEEE/IEC 英文标准不再只能靠人工按 Abstract 写摘要（此前试点是逐篇手工 `kb_describe`）。
+- **英文「1 Scope」可摘要**：去掉「标题必须含中文才取范围」的限制，`GB/T …` 的英文版正文也能从
+  `1 Scope`/`1. Scope` 取到范围摘要；范围上限仍是 500 字。
+- **可用性门槛**：新增 `isUsableSummary`（≥20 字、含句末标点、英文 ≥8 词、纯数字行不可用）与
+  `looksLikeBrokenLine`（替换符、大量 1–2 字符碎片、超长粘连词），挡住被页码/分栏切碎的候选；
+  范围抽取改为「没有可用候选就返回空串」，不再把半句碎片写成摘要。
+- **版权页/水印过滤**：`Sponsored by …`、`3 Park Avenue …`、`© 2003 IEEE`、`Authorized licensed use …`、
+  `Downloaded on …`、`ISBN`、`GB688`、`使用方/提供机构/仅单用户授权/严禁复制` 等整行跳过；
+  正文全是噪声时**宁可不写摘要**（`summarySource` 置空），也不再让版权页文字进 `index.md`/`kb_list`。
+- **重解析保护不变**：旧 auto 摘要可用、新结果为空或噪声时仍保留旧摘要（`looksLikeNoisyAutoSummary`）。
+- `scripts/summary-candidates.mjs` 的噪声口径同步，脚本审计结果与导入管线一致。
+
+测试 1480 → **1492**（1488 通过、4 跳过）；新增 12 个用例覆盖 Abstract 抽取/停止条件/目次误命中、
+可用性门槛、英文 Scope、版权页过滤，以及 `importFileInto` 的候选顺序与「全噪声不写摘要」。
+
 ## 0.41.5 废止记录自动收敛与全 low 组去噪（2026-11-13）
 
 - **自动收敛（新参数 `autoConverge`，默认 true）**：`kb_std_check` 检查结束后，把被站点标注废止/作废、
