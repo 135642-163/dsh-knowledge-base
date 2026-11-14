@@ -33,6 +33,8 @@ function candidateHtml(item, index, { importingUrl, importResult }) {
     ? `<span class="badge ok" title="库内已有：${escapeAttr(item.inLibrary.title ?? "")}">库内已有 · ${escapeHtml(item.inLibrary.kb ?? "")}</span>`
     : "";
   const isImporting = importingUrl === item.url;
+  const justImported = importResult?.url === item.url && importResult?.ok === true;
+  const unavailable = Boolean(item.inLibrary) || justImported;
   const done = importResult && importResult.url === item.url
     ? `<p class="muted find-import-result">${escapeHtml(importResult.detail ?? "")}</p>`
     : "";
@@ -46,8 +48,8 @@ function candidateHtml(item, index, { importingUrl, importResult }) {
       ${item.summary ? `<p class="search-card-snippet">${escapeHtml(item.summary)}</p>` : ""}
       <div class="search-card-foot">
         <div class="find-actions">
-          <button type="button" class="btn primary" data-find-import="${index}" ${isImporting || item.inLibrary ? "disabled" : ""}>
-            ${isImporting ? "正在导入…" : item.inLibrary ? "已在库内" : "下载并导入"}
+          <button type="button" class="btn primary" data-find-import="${index}" ${isImporting || unavailable ? "disabled" : ""}>
+            ${isImporting ? "正在导入…" : justImported ? "已下载导入" : item.inLibrary ? "已在库内" : "下载并导入"}
           </button>
           <a class="btn" href="${escapeAttr(item.url)}" target="_blank" rel="noreferrer">打开来源</a>
         </div>
@@ -279,16 +281,18 @@ export function mountFind({ app, state, api, render, showToast }) {
       });
       if (!jobId) throw new Error("后端没有返回任务 id");
       const job = await waitJob(jobId);
-      const detail = job?.detail || (job?.status === "succeeded" ? "已导入" : "导入失败");
+      const ok = job?.status === "succeeded";
+      const detail = job?.detail || (ok ? "已下载并导入" : "导入失败");
+      if (ok) item.inLibrary = { kb, title: item.title };
       Object.assign(currentFind(), {
         importingUrl: "",
-        importResult: { url: item.url, detail },
+        importResult: { url: item.url, ok, detail },
       });
-      showToast?.(detail, job?.status === "succeeded" ? "info" : "error");
+      showToast?.(detail, ok ? "info" : "error");
     } catch (error) {
       Object.assign(currentFind(), {
         importingUrl: "",
-        importResult: { url: item.url, detail: error?.message ?? String(error) },
+        importResult: { url: item.url, ok: false, detail: error?.message ?? String(error) },
       });
       showToast?.(error?.message ?? String(error), "error");
     }

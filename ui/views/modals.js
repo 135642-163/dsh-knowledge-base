@@ -721,7 +721,7 @@ export function renderDocModalBody({ name, id, doc } = {}) {
         ? `<div class="kv"><span>可信度</span><select name="doc-trust" aria-label="可信度">${DOC_TRUST_LEVELS.map((level) => `<option value="${level}"${(doc?.trust ?? "unknown") === level ? " selected" : ""}>${escapeHtml(trustLevelLabel(level))}</option>`).join("")}</select></div>`
         : `<div class="kv"><span>可信度</span><strong>${escapeHtml(doc?.trust ?? "unknown")}</strong></div>`}
       <div class="kv"><span>来源文件</span><strong>${escapeHtml(doc?.sourceFile || "—")}</strong></div>
-      ${doc?.sourceUrl ? `<div class="kv"><span>来源链接</span><strong><a href="${escapeAttr(doc.sourceUrl)}" target="_blank" rel="noreferrer">${escapeHtml(doc.sourceUrl)}</a></strong></div>` : ""}
+      ${doc?.sourceUrl ? `<div class="kv kv-source"><span>来源链接</span><strong><a href="${escapeAttr(doc.sourceUrl)}" target="_blank" rel="noreferrer">${escapeHtml(doc.sourceUrl)}</a></strong></div>` : ""}
       ${Number(doc?.ocrPages) > 0
         ? `<div class="kv"><span>OCR</span><strong>${doc.ocrCloud === true
             ? `云端（${Number(doc.ocrCloudPages) || 0} 页已上传 DeepSeek）`
