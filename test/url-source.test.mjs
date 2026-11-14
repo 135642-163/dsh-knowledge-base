@@ -112,3 +112,54 @@ test("private URLs are rejected by default", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("从网页正文中找 PDF 链接（绝对/相对）", async () => {
+  const { findPdfLink } = await import("../lib/url-source.js");
+  assert.equal(
+    findPdfLink("[下载 PDF](/files/a.pdf)", "https://example.com/page"),
+    "https://example.com/files/a.pdf"
+  );
+  assert.equal(
+    findPdfLink('<a href="/x/y.pdf?x=1">下载</a>', "https://example.com/a/b"),
+    "https://example.com/x/y.pdf?x=1"
+  );
+  assert.equal(findPdfLink("没有链接", "https://example.com"), "");
+});
+
+test("preferPdf 时优先下载网页里的 PDF 链接", async () => {
+  const root = await mkdtemp(join(tmpdir(), "kb-url-prefer-pdf-"));
+  try {
+    const fetchImpl = async (url, init) => {
+      const target = String(url);
+      if (init?.method === "HEAD") {
+        return new Response("", { status: 200, headers: { "content-type": "text/html" } });
+      }
+      if (target.endsWith("/v1/tools/fetch")) {
+        return new Response(JSON.stringify({
+          title: "关于印发《电能质量管理办法》的通知",
+          content: "[下载 PDF](/files/rule.pdf)\n\n正文摘要",
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (target.endsWith("/files/rule.pdf")) {
+        return new Response(Buffer.from("%PDF-1.7\n"), {
+          status: 200,
+          headers: { "content-type": "application/pdf" },
+        });
+      }
+      throw new Error(`unexpected ${target}`);
+    };
+    const acquired = await acquireRemoteSource("https://example.com/notice", {
+      kbRoot: root,
+      apiKey: "sk-test",
+      fetchImpl,
+      lookup: PUBLIC_LOOKUP,
+      preferPdf: true,
+    });
+    assert.equal(acquired.kind, "file");
+    assert.match(acquired.path, /\.pdf$/);
+    assert.equal(acquired.contentType, "application/pdf");
+    await acquired.cleanup();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

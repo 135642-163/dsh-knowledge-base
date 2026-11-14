@@ -128,3 +128,31 @@ test("网页结果按标准号/标题过滤，不同体系同号不混入", asyn
   assert.equal(candidates.length, 1);
   assert.match(candidates[0].url, /qgdw/);
 });
+
+test("整页图片没有标准号时用关键词查询，而不是第一行正文", () => {
+  const page = `用户的共同责任。建立健全政府监督管理、行业自律和企业履责的机制，强化和落实发电企业、电网企业、电力用户的主体责任，共同维护电力系统电能质量水平。第二章 组织与职责 第六条 国家能源局负责全国电能质量管理和监督工作，建立健全电能质量管理制度和行业标准；地方各级电力管理部门负责本行政区域内电能质量管理工作。`;
+  const result = queryFromOcrText(page);
+  assert.equal(result.kind, "general");
+  assert.match(result.query, /电能质量/);
+  assert.match(result.query, /电网企业|发电企业|监督管理/);
+  assert.ok(result.query.length <= 128);
+});
+
+test("通用资料的网页搜索不按 OCR 首行标题过滤", async () => {
+  const candidates = await searchWeb({
+    query: "电能质量 国家能源局 电网企业",
+    title: "第二章 组织与职责",
+    apiKey: "k",
+    fetchImpl: async () =>
+      new Response(JSON.stringify({
+        results: [{
+          title: "电能质量管理办法（暂行）",
+          url: "https://example.com/gov",
+          summary: "国家能源局负责全国电能质量监督管理。",
+          authority: 4,
+        }],
+      }), { status: 200 }),
+  });
+  assert.equal(candidates.length, 1);
+  assert.match(candidates[0].url, /gov/);
+});

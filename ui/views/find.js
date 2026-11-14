@@ -221,6 +221,12 @@ export function mountFind({ app, state, api, render, showToast }) {
     try {
       const dataUrl = await readImageAsPng(file);
       const find = currentFind();
+      // 选图会触发重渲染：先把输入框里“已删除关键词”后的真实值同步回 state，
+      // 否则 render() 会用旧 query 把输入框填回去，搜索也继续用旧关键词。
+      find.query = String(queryInput?.value ?? "").trim();
+      find.type = String(typeSelect?.value ?? find.type ?? "auto");
+      find.count = Number(countSelect?.value) || find.count || 8;
+      find.kb = String(kbSelect?.value ?? find.kb ?? "");
       find.imageData = dataUrl;
       find.imageName = file.name || "图片";
       find.error = "";
@@ -264,7 +270,13 @@ export function mountFind({ app, state, api, render, showToast }) {
     find.error = "";
     render();
     try {
-      const { jobId } = await api.findImport({ url: item.url, kb });
+      const { jobId } = await api.findImport({
+        url: item.url,
+        kb,
+        stdNo: item.stdNo || "",
+        source: item.source || "",
+        title: item.title || "",
+      });
       if (!jobId) throw new Error("后端没有返回任务 id");
       const job = await waitJob(jobId);
       const detail = job?.detail || (job?.status === "succeeded" ? "已导入" : "导入失败");
