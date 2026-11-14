@@ -101,3 +101,24 @@ curl -s "http://127.0.0.1:55929/dsh-market/api/v1/updates?name=dsh-knowledge-wik
 # 3) 本地包内容（不含 35MB tessdata / test / node_modules）
 npm pack --dry-run
 ```
+
+## 为什么 dsh-market 没有“更新”按钮
+
+dsh-market 的更新判断按**安装来源**区分（见 `dshmarket` 的 `lib/updates.js`）：
+
+- `github:owner/repo`：比较已安装 commit 与远端 HEAD，有新提交就提供更新；
+- npm：比较 `latest` 版本；
+- `file:` / `link:`（本地目录、软链、目录联接）：视为本地开发源，`updateAvailable` 恒为 false，**不会出现更新按钮**。
+
+用 `install-to-machine.sh/.ps1` 复制目录并在 `cordis.patch.yml` 里注册的方式属于第三种；
+dsh-market 页面上的“有新提交未发布版”只是 changelog/提交信息，不是可执行的更新目标。
+
+如果希望市场能一键更新，请改成 GitHub 安装（知识库数据不动）：
+
+1. 备份知识库根目录（默认 `~/.dsh/knowledge`）；
+2. 从 `~/.dsh/profiles/web/cordis.patch.yml` 删除 `id: knowledge-wiki` 的 `insert` 段，
+   并删除 `~/.dsh/profiles/node_modules/dsh-knowledge-wiki` 软链/目录联接（如果存在）；
+3. 执行 `dsh plugin --profile web add github:135642-163/dsh-knowledge-base`；
+4. 重启 `dsh web`，市场里应显示为 GitHub 安装，之后有新提交时可更新。
+
+仍想离线/本机开发，就继续用本地目录安装；更新时重新复制插件目录并重启，市场不会代为更新。

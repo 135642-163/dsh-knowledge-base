@@ -1891,6 +1891,10 @@ curl -s http://127.0.0.1:<dsh 端口>/kb/api/status            # 返回里有 kb
 | `scopeLintMaxKbs` | `20` | `kb_lint` 在限定模式下最多检查多少个库 |
 | `trashRetentionDays` | `0` | 回收站自动清理：已删除资料超过 N 天自动彻底删除；0 = 关闭，允许 0–3650；跨库移动墓碑始终保留 |
 
+> 安装方式提示：`dsh-market` 只对 `github:`/npm 安装提供“更新”按钮；用安装脚本复制目录并在
+> `cordis.patch.yml` 注册属于本地 `file:`/`link:` 安装，市场会显示本地源但不代为更新。
+> 需要一键更新请按 `docs/distribution.md` 改成 `dsh plugin add github:...`。
+
 > 0.22.0 新增可选的 `officeKitCli`（Office 原件预览转 PDF）；0.23.0 起配 `officeKitCli` 之外还可用
 > 环境变量 `DSH_OFFICE_KIT_CLI`（显式 CLI）或 `DSH_OFFICE_KIT_HOME`（安装/探测目录，一键安装也会装到
 > 这里）。`scopeTtlDays` 仍控制 `selected` 会话范围条目的过期天数（`none`/`all` 不做 TTL 清理），
