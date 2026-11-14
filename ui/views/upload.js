@@ -71,6 +71,7 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
     showOcrInstall: false,
     ocrInstalling: false,
     ocrInstallText: "",
+    ocrPercent: 0,
     watermark: "auto",
     forceOcr: false,
   };
@@ -157,6 +158,7 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
             <span>当前用内置 WASM OCR（较慢）。可一键安装本地 RapidOCR（约 100–200 MB，装在本机）。</span>
             <button type="button" class="btn" data-install-ocr ${state.ocrInstalling ? "disabled" : ""}>${state.ocrInstalling ? "正在安装…" : "安装本地 OCR"}</button>
             <span class="muted" data-ocr-install-text>${escapeHtml(state.ocrInstallText)}</span>
+            ${state.ocrInstalling ? `<div class="ocr-progress"><div class="ocr-progress-bar"><i style="width:${Math.max(0, Math.min(100, Number(state.ocrPercent) || 0))}%"></i></div><span class="muted">${Number(state.ocrPercent) || 0}%</span></div>` : ""}
           </div>` : ""}
         <div class="form-row">
           <label class="check"><input type="checkbox" id="upload-dup" ${state.allowCrossDuplicates ? "checked" : ""} /> 允许跨库重复</label>
@@ -361,6 +363,7 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
     if (state.ocrInstalling) return;
     state.ocrInstalling = true;
     state.ocrInstallText = "正在启动安装…";
+    state.ocrPercent = 2;
     render();
     try {
       const { jobId } = await api.installOcr();
@@ -374,10 +377,12 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
           break;
         }
         state.ocrInstallText = job.progress?.text || "正在安装本地 OCR…";
+        if (Number.isFinite(Number(job.progress?.percent))) state.ocrPercent = Number(job.progress.percent);
         render();
         await new Promise((resolve) => setTimeout(resolve, 1000));
       }
       state.showOcrInstall = false;
+      state.ocrPercent = 100;
       state.ocrInstallText = "已安装，后续导入会优先使用本地 RapidOCR。";
     } catch (error) {
       state.ocrInstallText = error?.message ?? String(error);

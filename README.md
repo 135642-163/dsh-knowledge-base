@@ -347,7 +347,7 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
 - OCR 新增可选云端引擎（`ocrEngine=deepseek`，`/v1/tools/ocr`）：默认仍是本地 rapidocr/tesseract，只有每次导入/重解析显式选择才上传页面图；失败逐页回退本地；文档元数据与导入报告记录 `ocrCloud`、`ocrCloudPages`，工作台资料弹窗显示“云端（N 页已上传）”。云端输出会带表格 HTML 与 `$...$` 公式，插件原样保留。
 - 密钥复用宿主 `DEEPSEEK_API_KEY`（credentials 服务），后台 worker 通过子进程 `env` 继承，不写进参数文件/日志。
 - 新增 `scripts/eval-ocr.mjs`：本地 vs 云端逐页对比，输出耗时、CER（含“去表格/公式标记”）与截断标记，用于上线前样张评估。
-- 新增 `scripts/ocr-setup.mjs`（`npm run ocr:install`）：新机器一键安装本地 RapidOCR（自动下载 micromamba、建 `~/.dsh/tools/rapidocr-env`、pip 安装 rapidocr_onnxruntime），不需要管理员权限；`--check` 只检查。未安装时插件仍用内置 WASM 引擎。工作台「设置 → 本地 OCR」提供常驻入口；上传弹窗只在检测到没有 RapidOCR 时显示安装提示。
+- 新增 `scripts/ocr-setup.mjs`（`npm run ocr:install`）：新机器一键安装本地 RapidOCR（自动下载 micromamba、建 `~/.dsh/tools/rapidocr-env`、pip 安装 rapidocr_onnxruntime），不需要管理员权限；`--check` 只检查。未安装时插件仍用内置 WASM 引擎。工作台「设置 → 本地 OCR」提供常驻入口；上传弹窗只在检测到没有 RapidOCR 时显示安装提示。Windows 下安装子进程隐藏控制台窗口，设置/上传弹窗显示阶段进度条与百分比。
 - 表格重建在真实扫描件上的评估见 `docs/reports/2026-11-14-table-eval.md`：多级表头/合并单元格/旋转表会失真，因此 `ocrLayout=table` 保持默认关闭。
 - 已知限制：云端 OCR 单请求 1000 页/100 MiB/180 秒，超大书仍需按页上传（当前实现是逐页图片）；独立 Search 暂不支持图片搜索；云端结果不可复现，公式/表格视觉内容仍应 `kb_view` 核对。
 - 本地 OCR 的表格：已提供实验开关 `ocrLayout=table`（`kb_import`/`kb_reparse` 参数或配置），用 rapidocr 行框重建规则表格为 HTML；合并单元格、无线表、跨页表仍可能失真，默认关闭。公式 LaTeX 本地引擎做不到（rapidocr/tesseract 没有数学识别模型），需要额外的数学 OCR（如 RapidLaTeXOCR/pix2tex）或走云端 OCR；插件暂未内置。

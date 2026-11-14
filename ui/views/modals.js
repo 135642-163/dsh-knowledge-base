@@ -49,7 +49,10 @@ export function openOcrModal({ notify = () => {} } = {}) {
       <p class="muted">扫描件在本机识别，不上传云端。内置 WASM 引擎零安装但较慢；RapidOCR 对中文印刷页更快、更准，组件只装在本机（约 100–200 MB）。</p>
       <div class="ocr-status muted" data-ocr-status>读取状态中…</div>
       <p class="form-error" data-ocr-error hidden></p>
-      <p class="muted" data-ocr-progress hidden></p>
+      <div class="ocr-progress" data-ocr-progress hidden>
+        <div class="ocr-progress-bar"><i data-ocr-bar></i></div>
+        <span class="muted" data-ocr-progress-text></span>
+      </div>
       <div class="modal-actions">
         <button type="button" class="btn" data-close>关闭</button>
         <button type="button" class="btn primary" data-ocr-install hidden>安装本地 OCR</button>
@@ -59,6 +62,8 @@ export function openOcrModal({ notify = () => {} } = {}) {
   const statusBox = node.querySelector("[data-ocr-status]");
   const errorBox = node.querySelector("[data-ocr-error]");
   const progressBox = node.querySelector("[data-ocr-progress]");
+  const progressBar = node.querySelector("[data-ocr-bar]");
+  const progressText = node.querySelector("[data-ocr-progress-text]");
   const installButton = node.querySelector("[data-ocr-install]");
   let timer = null;
 
@@ -72,6 +77,13 @@ export function openOcrModal({ notify = () => {} } = {}) {
   function setError(message) {
     errorBox.textContent = message || "";
     errorBox.hidden = !message;
+  }
+  function setProgress(percent, text) {
+    const hasPercent = percent !== null && percent !== undefined && Number.isFinite(Number(percent));
+    const value = hasPercent ? Math.max(0, Math.min(100, Number(percent))) : 0;
+    progressBox.hidden = false;
+    progressBar.style.width = `${value}%`;
+    progressText.textContent = `${text || "正在安装本地 OCR…"}${hasPercent ? `（${value}%）` : ""}`;
   }
 
   async function refreshStatus() {
@@ -88,10 +100,7 @@ export function openOcrModal({ notify = () => {} } = {}) {
         <div>内置 WASM：可用（无需安装）</div>
         <div>当前自动选择：${escapeHtml(current)}</div>`;
       installButton.hidden = status.rapidocr?.available === true || status.installing === true;
-      if (status.installing) {
-        progressBox.hidden = false;
-        progressBox.textContent = "正在安装本地 OCR…";
-      }
+      if (status.installing) setProgress(0, "正在安装本地 OCR…");
     } catch (error) {
       statusBox.textContent = "读取状态失败";
       setError(error instanceof ApiError ? error.message : String(error?.message ?? error));
@@ -104,9 +113,7 @@ export function openOcrModal({ notify = () => {} } = {}) {
       const job = await api.job(jobId).catch(() => null);
       if (!job) throw new Error("安装任务状态不可用");
       if (job.status !== "running") return job;
-      const text = job.progress?.text || "正在安装本地 OCR…";
-      progressBox.hidden = false;
-      progressBox.textContent = text;
+      setProgress(job.progress?.percent, job.progress?.text || "正在安装本地 OCR…");
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
   }
@@ -114,14 +121,13 @@ export function openOcrModal({ notify = () => {} } = {}) {
   installButton?.addEventListener("click", async () => {
     installButton.disabled = true;
     setError("");
-    progressBox.hidden = false;
-    progressBox.textContent = "正在启动安装…";
+    setProgress(2, "正在启动安装…");
     try {
       const { jobId } = await api.installOcr();
       if (!jobId) throw new Error("没有返回安装任务 id");
       const job = await waitJob(jobId);
       if (job?.status === "succeeded") {
-        progressBox.textContent = "安装完成，后续 OCR 会优先使用 RapidOCR。";
+        setProgress(100, "安装完成，后续 OCR 会优先使用 RapidOCR。");
         notify("本地 OCR 已安装");
       } else {
         throw new Error(job?.detail || "安装失败");

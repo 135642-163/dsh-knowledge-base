@@ -35,6 +35,11 @@ function log(message) {
   console.log(`[ocr-setup] ${message}`);
 }
 
+/** 机器可读进度：工作台设置/上传弹窗据此画进度条。 */
+function progress(percent, text) {
+  console.log(`[ocr-setup] PROGRESS ${Math.max(0, Math.min(100, Math.round(percent)))} ${text}`);
+}
+
 function fail(message) {
   console.error(`[ocr-setup] 失败：${message}`);
   process.exit(1);
@@ -158,9 +163,15 @@ async function install() {
   mkdirSync(MAMBA_ROOT, { recursive: true });
 
   let micromamba = resolveMicromamba();
-  if (!micromamba) micromamba = await downloadMicromamba();
+  if (!micromamba) {
+    progress(12, "正在下载 micromamba…");
+    micromamba = await downloadMicromamba();
+  } else {
+    progress(20, "已找到 micromamba，准备创建环境…");
+  }
   const env = { ...process.env, MAMBA_ROOT_PREFIX: MAMBA_ROOT };
 
+  progress(28, "正在创建 Python 环境…");
   log("创建 Python 3.11 环境（首次约 1–3 分钟）…");
   const create = run(micromamba, [
     "create", "-y", "-p", ENV_DIR, "-c", "conda-forge", "python=3.11", "pip",
@@ -170,23 +181,29 @@ async function install() {
   let python = findPython();
   if (!python) fail(`环境已创建但找不到 python（${ENV_DIR}）`);
   log(`Python：${python}`);
+  progress(42, "Python 环境已就绪，准备安装 RapidOCR…");
 
   log("安装 rapidocr_onnxruntime（含 ONNX Runtime 与中文模型，约 100–200 MB）…");
+  progress(48, "正在安装 RapidOCR（约 100–200 MB）…");
   const pip = run(python, ["-m", "pip", "install", "--upgrade", "pip"], { env, quiet: true });
   if (!pip.ok) log(`pip 升级失败，继续尝试安装：${pip.stderr.slice(0, 300)}`);
   const install = run(python, ["-m", "pip", "install", "rapidocr_onnxruntime", "pillow"], { env });
   if (!install.ok) fail("pip 安装失败；请检查网络/代理后重试");
 
+  progress(90, "正在校验 RapidOCR…");
   python = findPython();
   if (!isReady(python)) fail("安装完成但导入校验失败；请查看上面的 pip 输出");
+  progress(100, "安装完成");
   log("安装完成，RapidOCR 已可用。");
   log("插件默认 ocrEngine=auto 会自动优先使用它；无需重启 DSH（下一次 OCR 即生效）。");
 }
 
 async function main() {
   log(`目标环境：${ENV_DIR}`);
+  progress(5, "正在检查本机 OCR 环境…");
   const existing = findPython();
   if (isReady(existing)) {
+    progress(100, "本地 OCR 已就绪");
     log("本地 OCR 已就绪（RapidOCR 可导入），无需安装。");
     return;
   }
