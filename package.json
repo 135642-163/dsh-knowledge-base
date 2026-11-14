@@ -1,6 +1,6 @@
 {
   "name": "dsh-knowledge-wiki",
-  "version": "0.41.6",
+  "version": "0.42.0",
   "description": "DeepSeek Harness 插件：把 Word/PPT/PDF（文字版与扫描版）/OFD 版式文档整理为适合大模型阅读的知识库，支持检索、精读、修订、导出",
   "type": "module",
   "main": "lib/index.js",
@@ -39,7 +39,9 @@
     "semantic:setup": "node scripts/semantic-setup.mjs",
     "eval:retrieval": "node scripts/eval-retrieval-80.mjs",
     "prune:storage": "node scripts/prune-kb-storage.mjs",
-    "update:check": "node scripts/update-check.mjs"
+    "update:check": "node scripts/update-check.mjs",
+    "ocr:install": "node scripts/ocr-setup.mjs",
+    "ocr:check": "node scripts/ocr-setup.mjs --check"
   },
   "files": [
     "lib",
@@ -52,6 +54,7 @@
     "install-to-machine.sh",
     "install-to-machine.ps1",
     "README.md",
+    "scripts/ocr-setup.mjs",
     "LICENSE",
     "vendor"
   ],

@@ -8,6 +8,7 @@ export function parseHash(hash = "") {
   const query = Object.fromEntries(new URLSearchParams(queryString));
   if (segments.length === 0) return { page: "overview", query };
   if (segments[0] === "search") return { page: "search", query };
+  if (segments[0] === "find") return { page: "find", query };
   if (segments[0] === "trash") return { page: "trash", query };
   if (segments[0] === "kb" && segments[1]) {
     return { page: "detail", name: segments[1], tab: segments[2] || "overview", query };
@@ -17,6 +18,10 @@ export function parseHash(hash = "") {
 
 export function hrefForKb(name, tab = "overview") {
   return `#/kb/${encodeURIComponent(name)}/${tab}`;
+}
+
+export function hrefForFind() {
+  return "#/find";
 }
 
 export function hrefForTrash() {

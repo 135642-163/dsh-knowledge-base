@@ -2,7 +2,7 @@ import { api, ApiError } from "./api.js";
 import { colorFor } from "./colors.js";
 import { visibleKbs } from "./kb-visibility.js";
 import { icons } from "./icons.js";
-import { hrefForKb, hrefForOverview, hrefForSearch, hrefForTrash, parseHash } from "./router.js";
+import { hrefForFind, hrefForKb, hrefForOverview, hrefForSearch, hrefForTrash, parseHash } from "./router.js";
 import { renderOverview } from "./views/overview.js";
 import { docsPageSize, docsStatus, renderDetail, selectionIds, selectionToggle, selectionToggleOne } from "./views/detail.js";
 import {
@@ -13,13 +13,14 @@ import { parsePreviewDeepLink } from "./deep-link.js";
 import { applyHighlights, mergeResults, searchParamsOf, searchStateFromQuery } from "./search-core.js";
 import { attachSearchControls } from "./search-controls.js";
 import { renderSearch } from "./views/search.js";
+import { mountFind, renderFind } from "./views/find.js";
 import {
   purgeDocsConfirmBody, renderTrash, renderTrashPurgeBody, trashDocKey, trashPurgePhrase,
   trashPurgeTarget, trashRestoreTargets, trashSelectionToggleAll, trashSelectionToggleOne,
 } from "./views/trash.js";
 import {
   deleteConfirmBody, openBulkTrustModal, openConfirmModal, openCreateModal, openDocModal, openKbPickerModal, openMergeModal, openMoveModal,
-  openKbRootModal, openPreviewModal, openQualityActionModal, openRenameModal, openRestoreModal, openSemanticModal, retryFailedDoc,
+  openKbRootModal, openOcrModal, openPreviewModal, openQualityActionModal, openRenameModal, openRestoreModal, openSemanticModal, retryFailedDoc,
 } from "./views/modals.js";
 import { openUploadModal } from "./views/upload.js";
 import { openPackageImportModal } from "./views/package.js";
@@ -64,6 +65,10 @@ const state = {
   std: {
     kb: "", loading: false, error: "", warning: "", starting: false, fetching: false, cancelling: false,
     status: null, job: null, timer: null, pollRetry: 0, inFlight: null,
+  },
+  find: {
+    query: "", type: "auto", count: 8, kb: "", imageData: "", imageName: "", ocrEngine: "auto",
+    loading: false, error: "", result: null, importingUrl: "", importResult: null,
   },
   search: {
     q: "", appliedQ: "", kb: "", tag: "", type: "", trust: "",
@@ -1392,6 +1397,9 @@ function openSettingsMenu(anchor) {
     </button>
     <button class="settings-menu-item" type="button" role="menuitem" data-action="kbroot-settings">
       ${icons.folder}<span>数据目录</span>
+    </button>
+    <button class="settings-menu-item" type="button" role="menuitem" data-action="ocr-settings">
+      ${icons.search}<span>本地 OCR</span>
     </button>`;
   // 先隐藏挂载，量出高度后再定位；避免菜单在第一帧闪到错误位置。
   menu.style.visibility = "hidden";
@@ -1501,6 +1509,7 @@ function render() {
           ${sideListHtml(current)}
         </nav>
         <div class="side-foot">
+          <a class="side-action ${current.page === "find" ? "active" : ""}" href="${hrefForFind()}">${icons.globe ?? icons.search}<span>找资料</span></a>
           <a class="side-action ${current.page === "search" ? "active" : ""}" href="${hrefForSearch({})}">${icons.search}<span>全文搜索</span></a>
           <a class="side-action" href="${hrefForTrash()}">${icons.archive}<span>回收站</span></a>
           <a class="side-action subtle" href="/kb/" target="_blank" rel="noreferrer">${icons.external}<span>在新标签打开</span></a>
@@ -1512,11 +1521,13 @@ function render() {
         ${state.error ? `<div class="state error">${escapeHtml(state.error)}<button class="btn" data-action="reload">重试</button></div>` : ""}
         ${!state.loading && !state.error && current.page === "overview" ? renderOverview(state, { icons, fmtNumber }) : ""}
         ${!state.loading && !state.error && current.page === "detail" ? renderDetail(state, current, { icons, fmtNumber }) : ""}
+        ${!state.loading && !state.error && current.page === "find" ? renderFind(state, { kbs: state.kbs }) : ""}
         ${!state.loading && !state.error && current.page === "search" ? renderSearch(state, { icons, fmtNumber }) : ""}
         ${!state.loading && !state.error && current.page === "trash" ? renderTrash(state, current, { icons, fmtNumber }) : ""}
       </main>
     </div>
   `;
+  if (current.page === "find") mountFind({ app, state, api, render, showToast });
   const key = viewKeyOf(current);
   app.dataset.viewKey = key;
   bind();
@@ -1642,6 +1653,9 @@ function bind() {
     } else if (action === "kbroot-settings") {
       closeSettingsMenu();
       openKbRootModal({ notify: showToast });
+    } else if (action === "ocr-settings") {
+      closeSettingsMenu();
+      openOcrModal({ notify: showToast });
     } else if (action === "export-kb") {
       const name = target.dataset.name;
       if (name) {

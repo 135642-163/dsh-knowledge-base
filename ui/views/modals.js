@@ -38,7 +38,108 @@ function overlay(html, { className = "" } = {}) {
   return node;
 }
 
-/** 关闭 overlay 创建的弹窗；对已被外部移除的节点是安全的空操作。 */
+/**
+ * 本地 OCR 引擎设置：查看 RapidOCR/tesseract/WASM 状态，一键安装 RapidOCR。
+ * 安装走后台任务，弹窗内轮询进度；装好后下一次导入自动优先使用。
+ */
+export function openOcrModal({ notify = () => {} } = {}) {
+  const node = overlay(`
+    <div class="modal-form ocr-settings">
+      <h2>本地 OCR</h2>
+      <p class="muted">扫描件在本机识别，不上传云端。内置 WASM 引擎零安装但较慢；RapidOCR 对中文印刷页更快、更准，组件只装在本机（约 100–200 MB）。</p>
+      <div class="ocr-status muted" data-ocr-status>读取状态中…</div>
+      <p class="form-error" data-ocr-error hidden></p>
+      <p class="muted" data-ocr-progress hidden></p>
+      <div class="modal-actions">
+        <button type="button" class="btn" data-close>关闭</button>
+        <button type="button" class="btn primary" data-ocr-install hidden>安装本地 OCR</button>
+      </div>
+    </div>
+  `);
+  const statusBox = node.querySelector("[data-ocr-status]");
+  const errorBox = node.querySelector("[data-ocr-error]");
+  const progressBox = node.querySelector("[data-ocr-progress]");
+  const installButton = node.querySelector("[data-ocr-install]");
+  let timer = null;
+
+  function closed() {
+    return !document.body.contains(node);
+  }
+  function stopPolling() {
+    if (timer) clearTimeout(timer);
+    timer = null;
+  }
+  function setError(message) {
+    errorBox.textContent = message || "";
+    errorBox.hidden = !message;
+  }
+
+  async function refreshStatus() {
+    try {
+      const status = await api.ocrStatus();
+      const current = status.recommended === "rapidocr"
+        ? "RapidOCR（最快）"
+        : status.recommended === "tesseract"
+          ? "原生 tesseract"
+          : "内置 WASM（较慢）";
+      statusBox.innerHTML = `
+        <div>本地 RapidOCR：${status.rapidocr?.available ? "已安装" : "未安装"}</div>
+        <div>原生 tesseract：${status.tesseract?.available ? "已安装" : "未安装（可选，需系统/conda 安装）"}</div>
+        <div>内置 WASM：可用（无需安装）</div>
+        <div>当前自动选择：${escapeHtml(current)}</div>`;
+      installButton.hidden = status.rapidocr?.available === true || status.installing === true;
+      if (status.installing) {
+        progressBox.hidden = false;
+        progressBox.textContent = "正在安装本地 OCR…";
+      }
+    } catch (error) {
+      statusBox.textContent = "读取状态失败";
+      setError(error instanceof ApiError ? error.message : String(error?.message ?? error));
+    }
+  }
+
+  async function waitJob(jobId) {
+    for (;;) {
+      if (closed()) return null;
+      const job = await api.job(jobId).catch(() => null);
+      if (!job) throw new Error("安装任务状态不可用");
+      if (job.status !== "running") return job;
+      const text = job.progress?.text || "正在安装本地 OCR…";
+      progressBox.hidden = false;
+      progressBox.textContent = text;
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  }
+
+  installButton?.addEventListener("click", async () => {
+    installButton.disabled = true;
+    setError("");
+    progressBox.hidden = false;
+    progressBox.textContent = "正在启动安装…";
+    try {
+      const { jobId } = await api.installOcr();
+      if (!jobId) throw new Error("没有返回安装任务 id");
+      const job = await waitJob(jobId);
+      if (job?.status === "succeeded") {
+        progressBox.textContent = "安装完成，后续 OCR 会优先使用 RapidOCR。";
+        notify("本地 OCR 已安装");
+      } else {
+        throw new Error(job?.detail || "安装失败");
+      }
+    } catch (error) {
+      setError(error instanceof ApiError ? error.message : String(error?.message ?? error));
+      installButton.disabled = false;
+    } finally {
+      stopPolling();
+      await refreshStatus();
+    }
+  });
+
+  void refreshStatus();
+  return node;
+}
+
+/** 关闭 overlay 创建的弹窗；对已被外部移除的节点是安全的空操作。 *//** 关闭 overlay 创建的弹窗；对已被外部移除的节点是安全的空操作。 */
 function closeOverlay(node) {
   const close = overlayClosers.get(node);
   if (close) {
@@ -614,6 +715,12 @@ export function renderDocModalBody({ name, id, doc } = {}) {
         ? `<div class="kv"><span>可信度</span><select name="doc-trust" aria-label="可信度">${DOC_TRUST_LEVELS.map((level) => `<option value="${level}"${(doc?.trust ?? "unknown") === level ? " selected" : ""}>${escapeHtml(trustLevelLabel(level))}</option>`).join("")}</select></div>`
         : `<div class="kv"><span>可信度</span><strong>${escapeHtml(doc?.trust ?? "unknown")}</strong></div>`}
       <div class="kv"><span>来源文件</span><strong>${escapeHtml(doc?.sourceFile || "—")}</strong></div>
+      ${doc?.sourceUrl ? `<div class="kv"><span>来源链接</span><strong><a href="${escapeAttr(doc.sourceUrl)}" target="_blank" rel="noreferrer">${escapeHtml(doc.sourceUrl)}</a></strong></div>` : ""}
+      ${Number(doc?.ocrPages) > 0
+        ? `<div class="kv"><span>OCR</span><strong>${doc.ocrCloud === true
+            ? `云端（${Number(doc.ocrCloudPages) || 0} 页已上传 DeepSeek）`
+            : `本地（${Number(doc.ocrPages)} 页）`}</strong></div>`
+        : ""}
       ${!editable && doc?.standardNo ? `<div class="kv"><span>标准号</span><strong>${escapeHtml(doc.standardNo)}${doc.stageLabel ? `（${escapeHtml(doc.stageLabel)}）` : ""}</strong></div>` : ""}
       ${editable ? `
         <div class="doc-meta-editor">

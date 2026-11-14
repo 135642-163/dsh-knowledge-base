@@ -848,11 +848,12 @@ test("none mode disables KB-scoped kb_* tools (local read-only tool stays)", asy
   const path = join(root, "locked.md");
   await writeFile(path, "# 锁定\n\n未启用时不应导入。\n", "utf8");
   await none("s1");
-  assert.equal(tools.size, 24, "expected the full kb_* tool matrix");
+  assert.equal(tools.size, 25, "expected the full kb_* tool matrix");
 
   const cases = [
     ["kb_list", {}],
     ["kb_import", { path }],
+    ["kb_find_sources", { query: "GB/T 19963.2" }],
     ["kb_reparse", { all: true }],
     ["kb_query", { pattern: "正文" }],
     ["kb_read", { doc: doc.docId }],

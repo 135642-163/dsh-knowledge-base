@@ -66,6 +66,11 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
     pollRetry: 0,
     allowCrossDuplicates: false,
     ocrModel: "best",
+    ocrEngine: "auto",
+    ocrLayout: "off",
+    showOcrInstall: false,
+    ocrInstalling: false,
+    ocrInstallText: "",
     watermark: "auto",
     forceOcr: false,
   };
@@ -147,12 +152,24 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
           ${state.rejected.map((item) => `<div class="uprow rejected"><span class="upname" title="${escapeAttr(item.path)}">${escapeHtml(item.path)}</span><span class="badge warn">${escapeHtml(item.reason)}</span></div>`).join("")}
         </div>
         ${state.tempSkipped > 0 ? `<p class="muted">已跳过 ${state.tempSkipped} 个临时/锁文件</p>` : ""}
+        ${state.showOcrInstall ? `
+          <div class="ocr-install-hint">
+            <span>当前用内置 WASM OCR（较慢）。可一键安装本地 RapidOCR（约 100–200 MB，装在本机）。</span>
+            <button type="button" class="btn" data-install-ocr ${state.ocrInstalling ? "disabled" : ""}>${state.ocrInstalling ? "正在安装…" : "安装本地 OCR"}</button>
+            <span class="muted" data-ocr-install-text>${escapeHtml(state.ocrInstallText)}</span>
+          </div>` : ""}
         <div class="form-row">
           <label class="check"><input type="checkbox" id="upload-dup" ${state.allowCrossDuplicates ? "checked" : ""} /> 允许跨库重复</label>
           <label class="check ocr-field">OCR
             <select id="upload-ocr">
               <option value="best" ${state.ocrModel === "best" ? "selected" : ""}>best（更准，默认）</option>
               <option value="fast" ${state.ocrModel === "fast" ? "selected" : ""}>fast（更快）</option>
+            </select>
+          </label>
+          <label class="check ocr-field">识别引擎
+            <select id="upload-ocr-engine">
+              <option value="auto" ${state.ocrEngine === "auto" ? "selected" : ""}>本地（默认）</option>
+              <option value="deepseek" ${state.ocrEngine === "deepseek" ? "selected" : ""}>DeepSeek 云端（上传页面图）</option>
             </select>
           </label>
           <label class="check ocr-field">水印净化
@@ -163,7 +180,8 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
             </select>
           </label>
           <label class="check"><input type="checkbox" id="upload-force-ocr" ${state.forceOcr ? "checked" : ""} /> 强制 OCR</label>
-          <span class="muted">仅扫描版 PDF / 图片需要；文字层损坏时勾选「强制 OCR」；best 模型与去水印均无需额外安装</span>
+          <label class="check"><input type="checkbox" id="upload-table-layout" ${state.ocrLayout === "table" ? "checked" : ""} /> 表格重建（实验）</label>
+          <span class="muted">仅扫描版 PDF / 图片需要；文字层损坏时勾选「强制 OCR」；云端引擎会上传页面图并按页计费，涉密/内部资料请用本地</span>
         </div>
         ${state.resumeChecked ? "" : `<p class="muted">正在检查目标库的上次导入任务…</p>`}
         <p class="form-error" ${state.error ? "" : "hidden"}>${escapeHtml(state.error)}</p>
@@ -306,6 +324,12 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
         state.ocrModel = event.target.value === "fast" ? "fast" : "best";
       });
     }
+    const engineSelect = modal.querySelector("#upload-ocr-engine");
+    if (engineSelect) {
+      engineSelect.addEventListener("change", (event) => {
+        state.ocrEngine = event.target.value === "deepseek" ? "deepseek" : "auto";
+      });
+    }
     const watermarkSelect = modal.querySelector("#upload-watermark");
     if (watermarkSelect) {
       watermarkSelect.addEventListener("change", (event) => {
@@ -315,6 +339,52 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
     modal.querySelector("#upload-force-ocr")?.addEventListener("change", (event) => {
       state.forceOcr = event.target.checked === true;
     });
+    modal.querySelector("#upload-table-layout")?.addEventListener("change", (event) => {
+      state.ocrLayout = event.target.checked === true ? "table" : "off";
+    });
+  }
+
+  async function checkOcrStatus() {
+    try {
+      const status = await api.ocrStatus();
+      if (state.closed) return;
+      if (status?.rapidocr?.available !== true) {
+        state.showOcrInstall = true;
+        render();
+      }
+    } catch {
+      /* 状态读不到时不打扰上传流程 */
+    }
+  }
+
+  async function installLocalOcr() {
+    if (state.ocrInstalling) return;
+    state.ocrInstalling = true;
+    state.ocrInstallText = "正在启动安装…";
+    render();
+    try {
+      const { jobId } = await api.installOcr();
+      if (!jobId) throw new Error("没有返回安装任务 id");
+      for (;;) {
+        if (state.closed) return;
+        const job = await api.job(jobId).catch(() => null);
+        if (!job) throw new Error("安装任务状态不可用");
+        if (job.status !== "running") {
+          if (job.status !== "succeeded") throw new Error(job.detail || "安装失败");
+          break;
+        }
+        state.ocrInstallText = job.progress?.text || "正在安装本地 OCR…";
+        render();
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+      state.showOcrInstall = false;
+      state.ocrInstallText = "已安装，后续导入会优先使用本地 RapidOCR。";
+    } catch (error) {
+      state.ocrInstallText = error?.message ?? String(error);
+    } finally {
+      state.ocrInstalling = false;
+      render();
+    }
   }
 
   function pick({ directory }) {
@@ -451,6 +521,8 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
     const imported = await api.importBatch(state.batchId, {
       allowCrossDuplicates: state.allowCrossDuplicates,
       ocrModel: state.ocrModel,
+      ocrEngine: state.ocrEngine,
+      ocrLayout: state.ocrLayout,
       watermark: state.watermark,
       forceOcr: state.forceOcr,
     });
@@ -696,4 +768,5 @@ export function openUploadModal({ kbs = [], kb = "", onFinished } = {}) {
   // 恢复当前库上次未结算的导入任务；换库时重新检查。
   void checkResume(state.kb);
   render();
+  void checkOcrStatus();
 }

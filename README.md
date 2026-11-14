@@ -8,7 +8,8 @@
 
 | 工具 | 作用 |
 | --- | --- |
-| `kb_import` | **只在用户明确要求把资料收进知识库时使用**；只是读取/查看本机文件请用 `kb_read_file`（只读、不入库、不建库）。导入文件或目录（.docx / .doc 自动转换 / .pptx / .xlsx / .xlsm / .pdf / .ofd / .md / .txt / .epub / .mobi / .azw3，扫描版 PDF 与图片型 OFD 自动逐页 OCR 中文，自动识别文字层损坏页并只对问题页 OCR，文字层只剩水印/无文字层的图片页也会自动补 OCR，文字层双栏页自动重排；Word OMML 公式转 LaTeX；Excel 按工作表转 Markdown 表格；.txt 自动识别 UTF-8/UTF-16/GBK；MOBI/AZW3 自动经 Calibre 转 EPUB）。旧版 .doc/.ppt 与 MOBI/AZW3 一律在后台任务中转换；正在导入中的同名文档自动跳过。**导入前自动查重**：同库重合跳过、跨库重合默认跳过并报告；同库同标准号不同年份/阶段（多版本）默认暂停并提示，加 `allowSameNumber: true` 确认后仍可入库（见下文）；标准/书籍正文/封面优先（文件名没有标准号时按封面区取号，通知/附件不参与），其他资料只用文件名；扫描页 OCR 前默认做水印净化（`watermark=auto/off/strong`）；`path` 是 kbpack 包（.zip）时自动路由到 `kb_import_package` |
+| `kb_import` | **只在用户明确要求把资料收进知识库时使用**；只是读取/查看本机文件请用 `kb_read_file`（只读、不入库、不建库）。导入文件或目录（.docx / .doc 自动转换 / .pptx / .xlsx / .xlsm / .pdf / .ofd / .md / .txt / .epub / .mobi / .azw3，扫描版 PDF 与图片型 OFD 自动逐页 OCR 中文，自动识别文字层损坏页并只对问题页 OCR，文字层只剩水印/无文字层的图片页也会自动补 OCR，文字层双栏页自动重排；Word OMML 公式转 LaTeX；Excel 按工作表转 Markdown 表格；.txt 自动识别 UTF-8/UTF-16/GBK；MOBI/AZW3 自动经 Calibre 转 EPUB）。旧版 .doc/.ppt 与 MOBI/AZW3 一律在后台任务中转换；正在导入中的同名文档自动跳过。**导入前自动查重**：同库重合跳过、跨库重合默认跳过并报告；同库同标准号不同年份/阶段（多版本）默认暂停并提示，加 `allowSameNumber: true` 确认后仍可入库（见下文）；标准/书籍正文/封面优先（文件名没有标准号时按封面区取号，通知/附件不参与），其他资料只用文件名；扫描页 OCR 前默认做水印净化（`watermark=auto/off/strong`）；`path` 也可以是 http(s) 链接（网页经 DeepSeek Fetch 转 Markdown，PDF/Office 直链下载后按原管线导入，需宿主配置 `DEEPSEEK_API_KEY`）；`ocrEngine=deepseek` 时扫描页走云端 OCR（会上传页面图、按页计费，元数据记录页数）；`path` 是 kbpack 包（.zip）时自动路由到 `kb_import_package` |
+| `kb_find_sources` | **找资料**（只返回候选，不自动入库）：标准号/标准名优先在标准网检索；公文、规范、文献、教材等走 DeepSeek 网页搜索；可传本机图片（封面/截图），先 OCR 出标准号或标题再搜。候选带来源、权威度、日期与“库内已有”标记；确认后用 `kb_import` 的 `path` 传链接入库。图片 OCR 默认本地，显式 `ocrEngine=deepseek` 才上传云端并计费 |
 | `kb_import_package` | 导入 kbpack 知识库包（`kb_export format=zip` 产出的 `.zip`，带 `manifest.json`）：安全校验（坏包/路径穿越/符号链接/版本过高拒绝）、同 id 相同内容幂等跳过、同 id 不同内容另存新 id、同标准号不同 id 走导入查重；同名库**不静默写入**，返回 `merge` / `rename` / `replace` 三选一（replace 需 `confirm:"replace"`），`dryRun=true` 只预演；包内 `*Source=manual` 字段不覆盖目标库人工值 |
 | `kb_reparse` | 从库内 `sources/` 重新解析文档（无需重新上传），用于 OCR/解析器升级后刷新旧管线产物；`doc` 单个、`all=true` 批量，支持 `forceOcr`、`forceOcrPages`/`skipOcrPages`、后台任务 |
 | `kb_list` | 列出知识库 / 知识库内文档与状态（旧管线/已修订/文字层损坏/OCR 低置信会标注），每条带一行摘要与标签；省略 `kb` 时只列本会话范围内的库；默认最多 50 条，支持 `limit/offset/query/status/kind` 分页过滤（`kind=note` 只看笔记、`kind=source` 只看资料）；本库有维护规范时会提示 |
@@ -328,6 +329,18 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
 - **bzCookie 安全存储（2026-11-01）**：macOS Keychain / Linux Secret Service / Windows DPAPI；旧 profile 明文首次启动自动迁移，`scripts/set-bz-cookie.mjs` 设置/查看/清除；Web 与日志不回传 Cookie。
 
 测试 **1309**（1305 通过、4 跳过）。详见 `docs/reports/2026-11-01-0.35.0.md`。
+
+## 0.42.0 链接导入、找资料与可选云端 OCR（2026-11-14）
+
+- `kb_import` 支持 http(s) 链接：网页走 DeepSeek Fetch（`/v1/tools/fetch`）转 Markdown，PDF/Word/PPT/OFD 等直链下载后按原管线导入；来源 URL 写入文档元数据（`sourceUrl`），链接作为稳定去重键，重复导入不会另建文档。只允许公网 http/https，拒绝内网/本机地址与携带凭据的 URL，下载有大小与类型限制。
+- 新增 `kb_find_sources` 与工作台「找资料」页（`#/find`）：标准优先标准网（复用 `searchStd`，保留会员 Cookie 与限速），其他资料走 DeepSeek Search（`/v1/tools/search`）；支持图片 OCR 反查（本地默认，显式云端）。只出候选，确认后可在页面里选择目标库「下载并导入」（后台任务，支持 `ocrEngine=deepseek`）。
+- OCR 新增可选云端引擎（`ocrEngine=deepseek`，`/v1/tools/ocr`）：默认仍是本地 rapidocr/tesseract，只有每次导入/重解析显式选择才上传页面图；失败逐页回退本地；文档元数据与导入报告记录 `ocrCloud`、`ocrCloudPages`，工作台资料弹窗显示“云端（N 页已上传）”。云端输出会带表格 HTML 与 `$...$` 公式，插件原样保留。
+- 密钥复用宿主 `DEEPSEEK_API_KEY`（credentials 服务），后台 worker 通过子进程 `env` 继承，不写进参数文件/日志。
+- 新增 `scripts/eval-ocr.mjs`：本地 vs 云端逐页对比，输出耗时、CER（含“去表格/公式标记”）与截断标记，用于上线前样张评估。
+- 新增 `scripts/ocr-setup.mjs`（`npm run ocr:install`）：新机器一键安装本地 RapidOCR（自动下载 micromamba、建 `~/.dsh/tools/rapidocr-env`、pip 安装 rapidocr_onnxruntime），不需要管理员权限；`--check` 只检查。未安装时插件仍用内置 WASM 引擎。工作台「设置 → 本地 OCR」提供常驻入口；上传弹窗只在检测到没有 RapidOCR 时显示安装提示。
+- 表格重建在真实扫描件上的评估见 `docs/reports/2026-11-14-table-eval.md`：多级表头/合并单元格/旋转表会失真，因此 `ocrLayout=table` 保持默认关闭。
+- 已知限制：云端 OCR 单请求 1000 页/100 MiB/180 秒，超大书仍需按页上传（当前实现是逐页图片）；独立 Search 暂不支持图片搜索；云端结果不可复现，公式/表格视觉内容仍应 `kb_view` 核对。
+- 本地 OCR 的表格：已提供实验开关 `ocrLayout=table`（`kb_import`/`kb_reparse` 参数或配置），用 rapidocr 行框重建规则表格为 HTML；合并单元格、无线表、跨页表仍可能失真，默认关闭。公式 LaTeX 本地引擎做不到（rapidocr/tesseract 没有数学识别模型），需要额外的数学 OCR（如 RapidLaTeXOCR/pix2tex）或走云端 OCR；插件暂未内置。
 
 ## 0.41.6 英文标准自动摘要取 Abstract 并过滤版权页噪声（2026-11-13）
 
@@ -1846,7 +1859,8 @@ curl -s http://127.0.0.1:<dsh 端口>/kb/api/status            # 返回里有 kb
 | `ocrLang` | `chi_sim+eng` | OCR 语言（竖排古籍可试 `chi_sim_vert`） |
 | `ocrWorkers` | `0`（自动） | OCR 并行 worker 数；0 = 按本机 CPU/内存自适应：`min(核数一半, 内存/1.5GB)`，下限 2、上限 16（24 线程/32GB 机器 ≈ 12） |
 | `ocrDpi` | `0`（自动） | 扫描页渲染分辨率；0 = 300 DPI（tesseract best 模型的设计分辨率；低清扫描源可显式调低，上限 400） |
-| `ocrEngine` | `auto` | OCR 引擎：auto（rapidocr > tesserocr > 原生 tesseract > wasm 兜底）/ rapidocr / tesseract / wasm |
+| `ocrEngine` | `auto` | OCR 引擎：auto（rapidocr > tesserocr > 原生 tesseract > wasm 兜底）/ rapidocr / tesseract / wasm / deepseek（云端，按页计费） |
+| `ocrLayout` | `off` | 本地 OCR 版面：off / table（实验：用 rapidocr 行框把规则表格重建为 HTML；合并单元格/无线表可能失真） |
 | `pdfColumnReorder` | `true` | 文字层 PDF 是否自动检测双栏并重排阅读顺序；误判时可关闭 |
 | `watermark` | `auto` | OCR 前水印净化：`auto`（默认，浅灰水印）/ `off`（关闭）/ `strong`（水印压在正文上）；只影响 OCR 用的页面图，不改原件 |
 | `autoDownloadModels` | `true` | tesseract 家族模型缺失时自动下载到 `~/.dsh/tools/tessdata`；rapidocr 自带模型不触发 |
@@ -1873,6 +1887,9 @@ curl -s http://127.0.0.1:<dsh 端口>/kb/api/status            # 返回里有 kb
 > `scopeLintMaxKbs` 仍是 `kb_lint` 逐库上限。0.25.0 新增 `trashRetentionDays`（默认 0 = 关闭）。
 
 > 引擎选择：默认只有内置 **tesseract.js（WASM）** 可用，零安装、全平台可移植。
+> 新机器想要更快的本地中文 OCR，可运行 `node scripts/ocr-setup.mjs`（或 `npm run ocr:install`）：
+> 自动下载 micromamba、在 `~/.dsh/tools/rapidocr-env` 建 Python 环境并安装 RapidOCR，
+> 不需要管理员权限、不改系统 Python；`--check` 只检查，`--force` 重装。
 > 可选加速：`~/.dsh/tools/rapidocr-env` 装 RapidOCR（Python，中文印刷页最快）或
 > `~/.dsh/tools/tesseract-env` 装原生 tesseract（Windows 用 micromamba 建环境，
 > 二进制探测支持 conda 的 `Library/bin`/`Scripts` 布局）；在 tesseract-env 中
