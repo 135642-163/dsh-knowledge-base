@@ -340,6 +340,12 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
 - 新增 3 个回归测试：总则式 OCR 拆行、下一章/目录截断、有「1 范围」时优先范围章节。
 - 生产库中 `DL/T 5033-2023`（56092ac1f69a）已用 `kb_describe` 补摘要；本修复保证以后同类标准不再留空。
 
+## 0.43.1 本地 OCR 安装器修复（2026-11-14）
+
+- 本地 OCR 安装器优先使用系统 Python 3.10–3.12 创建 venv，避免 Windows 上下载 micromamba 卡住；没有可用 Python 时才回退 micromamba。
+- 所有安装子进程设置 `windowsHide` 并使用管道捕获输出，Windows 不再弹出黑色命令行窗口。
+- micromamba 创建/pip 安装增加超时与阶段提示，避免界面停在“准备 Python 环境”。
+
 ## 0.43.0 链接导入、找资料与可选云端 OCR（2026-11-14）
 
 - `kb_import` 支持 http(s) 链接：网页走 DeepSeek Fetch（`/v1/tools/fetch`）转 Markdown，PDF/Word/PPT/OFD 等直链下载后按原管线导入；来源 URL 写入文档元数据（`sourceUrl`），链接作为稳定去重键，重复导入不会另建文档。只允许公网 http/https，拒绝内网/本机地址与携带凭据的 URL，下载有大小与类型限制。

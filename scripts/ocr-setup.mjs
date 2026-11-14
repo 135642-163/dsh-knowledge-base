@@ -30,6 +30,7 @@ const VERIFY_CODE = "from rapidocr_onnxruntime import RapidOCR; import onnxrunti
 const args = new Set(process.argv.slice(2));
 const CHECK_ONLY = args.has("--check");
 const FORCE = args.has("--force");
+const FORCE_MICROMAMBA = args.has("--micromamba");
 
 function log(message) {
   console.log(`[ocr-setup] ${message}`);
@@ -61,13 +62,19 @@ function findPython() {
   return "";
 }
 
-function run(command, argv, { env = process.env, quiet = false } = {}) {
+function run(command, argv, { env = process.env, quiet = false, timeoutMs = 30 * 60 * 1000 } = {}) {
   const result = spawnSync(command, argv, {
-    stdio: quiet ? ["ignore", "pipe", "pipe"] : "inherit",
+    // 不用 inherit：Windows 下 inherit 可能给子进程新建 console；捕获后转写，
+    // 既隐藏黑窗口，父进程（插件）也能读到阶段输出。
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
     env,
-    timeout: 30 * 60 * 1000,
+    timeout: timeoutMs,
     encoding: "utf8",
+    maxBuffer: 8 * 1024 * 1024,
   });
+  if (!quiet && result.stdout) process.stdout.write(String(result.stdout));
+  if (!quiet && result.stderr) process.stderr.write(String(result.stderr));
   return {
     ok: result.status === 0,
     status: result.status,
@@ -75,6 +82,57 @@ function run(command, argv, { env = process.env, quiet = false } = {}) {
     stderr: String(result.stderr ?? ""),
     error: result.error ?? null,
   };
+}
+
+/** 找一个可用的系统 Python（3.10–3.12）；Windows 优先 py -3.x。 */
+function findSystemPython() {
+  const candidates = process.platform === "win32"
+    ? [
+        { command: "py", args: ["-3.12"] },
+        { command: "py", args: ["-3.11"] },
+        { command: "py", args: ["-3.10"] },
+        { command: "py", args: ["-3"] },
+        { command: "python", args: [] },
+      ]
+    : [
+        { command: "python3.12", args: [] },
+        { command: "python3.11", args: [] },
+        { command: "python3", args: [] },
+        { command: "python", args: [] },
+      ];
+  for (const candidate of candidates) {
+    const probe = run(candidate.command, [...candidate.args, "-c", "import sys; print('%d.%d' % sys.version_info[:2])"], {
+      quiet: true,
+      timeoutMs: 15_000,
+    });
+    if (!probe.ok) continue;
+    const version = probe.stdout.trim();
+    if (!/^3\.(10|11|12)$/.test(version)) continue;
+    return { command: candidate.command, args: candidate.args, version };
+  }
+  return null;
+}
+
+/** 用系统 Python 建 venv + pip 安装，避免在 Windows 上下载 micromamba。 */
+async function installWithSystemPython(systemPython) {
+  progress(20, "使用本机 Python 创建虚拟环境…");
+  log(`使用系统 Python ${systemPython.version} 创建虚拟环境（不修改系统 Python）…`);
+  const venv = run(systemPython.command, [...systemPython.args, "-m", "venv", "--clear", ENV_DIR], {
+    timeoutMs: 10 * 60_000,
+  });
+  if (!venv.ok) return false;
+  const python = findPython();
+  if (!python) return false;
+  progress(42, "Python 环境已就绪，准备安装 RapidOCR…");
+  const pip = run(python, ["-m", "pip", "install", "--upgrade", "pip"], { quiet: true, timeoutMs: 5 * 60_000 });
+  if (!pip.ok) log(`pip 升级失败，继续尝试安装：${pip.stderr.slice(0, 300)}`);
+  progress(48, "正在安装 RapidOCR（约 100–200 MB）…");
+  const installed = run(python, ["-m", "pip", "install", "rapidocr_onnxruntime", "pillow"], {
+    timeoutMs: 20 * 60_000,
+  });
+  if (!installed.ok) return false;
+  progress(90, "正在校验 RapidOCR…");
+  return isReady(findPython());
 }
 
 function isReady(python) {
@@ -162,6 +220,21 @@ async function install() {
   mkdirSync(TOOLS, { recursive: true });
   mkdirSync(MAMBA_ROOT, { recursive: true });
 
+  // Windows 上没有现成 Python 时用 micromamba；有 Python 时 venv 更快，
+  // 也避免 micromamba 在中文网络/杀软下卡住并弹控制台。
+  const systemPython = FORCE_MICROMAMBA ? null : findSystemPython();
+  if (systemPython) {
+    progress(15, `使用本机 Python ${systemPython.version} 创建环境…`);
+    const ok = await installWithSystemPython(systemPython);
+    if (ok) {
+      progress(100, "安装完成");
+      log("安装完成，RapidOCR 已可用（系统 Python venv）。");
+      return;
+    }
+    log("系统 Python 方式失败，回退 micromamba。");
+    rmSync(ENV_DIR, { recursive: true, force: true });
+  }
+
   let micromamba = resolveMicromamba();
   if (!micromamba) {
     progress(12, "正在下载 micromamba…");
@@ -171,11 +244,11 @@ async function install() {
   }
   const env = { ...process.env, MAMBA_ROOT_PREFIX: MAMBA_ROOT };
 
-  progress(28, "正在创建 Python 环境…");
+  progress(28, "正在创建 Python 环境（首次可能需要几分钟，请勿关闭）…");
   log("创建 Python 3.11 环境（首次约 1–3 分钟）…");
   const create = run(micromamba, [
     "create", "-y", "-p", ENV_DIR, "-c", "conda-forge", "python=3.11", "pip",
-  ], { env });
+  ], { env, timeoutMs: 15 * 60_000 });
   if (!create.ok) fail(`创建环境失败（exit ${create.status}）。可直接看上面的 micromamba 输出`);
 
   let python = findPython();
@@ -187,7 +260,7 @@ async function install() {
   progress(48, "正在安装 RapidOCR（约 100–200 MB）…");
   const pip = run(python, ["-m", "pip", "install", "--upgrade", "pip"], { env, quiet: true });
   if (!pip.ok) log(`pip 升级失败，继续尝试安装：${pip.stderr.slice(0, 300)}`);
-  const install = run(python, ["-m", "pip", "install", "rapidocr_onnxruntime", "pillow"], { env });
+  const install = run(python, ["-m", "pip", "install", "rapidocr_onnxruntime", "pillow"], { env, timeoutMs: 20 * 60_000 });
   if (!install.ok) fail("pip 安装失败；请检查网络/代理后重试");
 
   progress(90, "正在校验 RapidOCR…");
