@@ -340,7 +340,7 @@ assistant 文本注解槽，替换 `assistant-step` 会 shadow 官方 Markdown �
 - 新增 3 个回归测试：总则式 OCR 拆行、下一章/目录截断、有「1 范围」时优先范围章节。
 - 生产库中 `DL/T 5033-2023`（56092ac1f69a）已用 `kb_describe` 补摘要；本修复保证以后同类标准不再留空。
 
-## 0.42.0 链接导入、找资料与可选云端 OCR（2026-11-14）
+## 0.43.0 链接导入、找资料与可选云端 OCR（2026-11-14）
 
 - `kb_import` 支持 http(s) 链接：网页走 DeepSeek Fetch（`/v1/tools/fetch`）转 Markdown，PDF/Word/PPT/OFD 等直链下载后按原管线导入；来源 URL 写入文档元数据（`sourceUrl`），链接作为稳定去重键，重复导入不会另建文档。只允许公网 http/https，拒绝内网/本机地址与携带凭据的 URL，下载有大小与类型限制。
 - 新增 `kb_find_sources` 与工作台「找资料」页（`#/find`）：标准优先标准网（复用 `searchStd`，保留会员 Cookie 与限速），其他资料走 DeepSeek Search（`/v1/tools/search`）；支持图片 OCR 反查（本地默认，显式云端）。只出候选，确认后可在页面里选择目标库「下载并导入」（后台任务，支持 `ocrEngine=deepseek`）。
